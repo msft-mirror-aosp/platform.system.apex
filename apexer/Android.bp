@@ -38,6 +38,10 @@ python_binary_host {
         "apexer.py",
         "apex_manifest.py"
     ],
+    // TODO(b/157625953) mke2fs.conf can't embedded directly.
+    data: [
+        ":mke2fs_conf",
+    ],
     version: {
         py2: {
             enabled: true,
