@@ -103,7 +103,6 @@ class ApexService : public BnApexService {
   BinderStatus remountPackages() override;
   BinderStatus recollectPreinstalledData(
       const std::vector<std::string>& paths) override;
-  BinderStatus recollectDataApex(const std::string& path) override;
   BinderStatus markBootCompleted() override;
   BinderStatus calculateSizeForCompressedApex(
       const CompressedApexInfoList& compressed_apex_info_list,
@@ -226,15 +225,11 @@ BinderStatus ApexService::markBootCompleted() {
 BinderStatus ApexService::calculateSizeForCompressedApex(
     const CompressedApexInfoList& compressed_apex_info_list,
     int64_t* required_size) {
-  *required_size = 0;
-  const auto& instance = ApexFileRepository::GetInstance();
+  int64_t result = 0;
   for (const auto& apex_info : compressed_apex_info_list.apexInfos) {
-    auto should_allocate_space = ShouldAllocateSpaceForDecompression(
-        apex_info.moduleName, apex_info.versionCode, instance);
-    if (!should_allocate_space.ok() || *should_allocate_space) {
-      *required_size += apex_info.decompressedSize;
-    }
+    result += apex_info.decompressedSize;
   }
+  *required_size = result;
   return BinderStatus::ok();
 }
 
@@ -599,23 +594,6 @@ BinderStatus ApexService::recollectPreinstalledData(
   }
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
   if (auto res = instance.AddPreInstalledApex(paths); !res.ok()) {
-    return BinderStatus::fromExceptionCode(
-        BinderStatus::EX_SERVICE_SPECIFIC,
-        String8(res.error().message().c_str()));
-  }
-  return BinderStatus::ok();
-}
-
-BinderStatus ApexService::recollectDataApex(const std::string& path) {
-  LOG(DEBUG) << "recollectDataApex() received by ApexService, paths " << path;
-  if (auto debug = CheckDebuggable("recollectDataApex"); !debug.isOk()) {
-    return debug;
-  }
-  if (auto root = CheckCallerIsRoot("recollectDataApex"); !root.isOk()) {
-    return root;
-  }
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  if (auto res = instance.AddDataApex(path); !res.ok()) {
     return BinderStatus::fromExceptionCode(
         BinderStatus::EX_SERVICE_SPECIFIC,
         String8(res.error().message().c_str()));
