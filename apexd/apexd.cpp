@@ -1537,10 +1537,11 @@ Result<void> ActivateApexPackages(
 
   std::vector<std::future<std::vector<Result<void>>>> futures;
   futures.reserve(worker_num);
-  for (size_t i = 0; i < worker_num; i++)
+  for (size_t i = 0; i < worker_num; i++) {
     futures.push_back(std::async(std::launch::async, ActivateApexWorker,
                                  std::ref(apex_queue),
                                  std::ref(apex_queue_mutex)));
+  }
 
   size_t activated_cnt = 0;
   size_t failed_cnt = 0;
@@ -2283,6 +2284,18 @@ void Initialize(CheckpointInterface* checkpoint_service) {
   gMountedApexes.PopulateFromMounts();
 }
 
+// Note: Pre-installed apex are initialized in Initialize(CheckpointInterface*)
+// TODO(b/172911822): Consolidate this with Initialize() when
+//  ApexFileRepository can act as cache and re-scanning is not expensive
+void InitializeDataApex() {
+  ApexFileRepository& instance = ApexFileRepository::GetInstance();
+  Result<void> status = instance.AddDataApex(kActiveApexPackagesDataDir);
+  if (!status.ok()) {
+    LOG(ERROR) << "Failed to collect data APEX files : " << status.error();
+    return;
+  }
+}
+
 /**
  * For every package X, there can be at most two APEX, pre-installed vs
  * installed on data. We usually select only one of these APEX for each package
@@ -2797,6 +2810,54 @@ Result<void> RemountPackages() {
   return {};
 }
 
+// Given a single new APEX incoming via OTA, should we allocate space for it?
+Result<bool> ShouldAllocateSpaceForDecompression(
+    const std::string& new_apex_name, const int64_t new_apex_version,
+    const ApexFileRepository& instance) {
+  // An apex at most will have two versions on device: pre-installed and data.
+
+  // Check if there is a pre-installed version for the new apex.
+  if (!instance.HasPreInstalledVersion(new_apex_name)) {
+    // We are introducing a new APEX that doesn't exist at all
+    return true;
+  }
+
+  // From here on, we can assume there is a pre-installed APEX.
+  // Check if there is a data apex
+  if (!instance.HasDataVersion(new_apex_name)) {
+    // Decompression of compressed APEX is prevented by existing data apex.
+    // Since there is none, then new_apex will definitely get decompressed.
+    return true;
+  }
+
+  // From here on, data apex exists. So we should compare directly against data
+  // apex.
+  // TODO(b/179497746): have ApexFileRepo provide reference to individual
+  // pre-installed apex by name
+  const auto data_apex_path = instance.GetDataPath(new_apex_name);
+  if (!data_apex_path.ok()) {
+    return Error() << "Failed to open data apex";
+  }
+  const auto data_apex = ApexFile::Open(*data_apex_path);
+  // Compare the data apex version with new apex
+  const int64_t data_version = data_apex->GetManifest().version();
+
+  // new_apex will compete against the data apex if data apex is from an update.
+  if (instance.IsDecompressedApex(*data_apex)) {
+    // Since data apex is decompressed, it means device is using the compressed
+    // pre-installed version. If new apex has higher version, we are upgrading
+    // the pre-install version and if new apex has lower version, we are
+    // downgrading it. So the current decompressed apex should be replaced
+    // with the new decompressed apex to reflect that.
+
+    return new_apex_version != data_version;
+  }
+
+  // If data apex is not decompressed, then we only decompress the new_apex
+  // if it has higher version than data apex.
+  return new_apex_version > data_version;
+}
+
 void CollectApexInfoList(std::ostream& os,
                          const std::vector<ApexFile>& active_apexs,
                          const std::vector<ApexFile>& inactive_apexs) {
@@ -2826,6 +2887,67 @@ void CollectApexInfoList(std::ostream& os,
   }
   com::android::apex::ApexInfoList apex_info_list(apex_infos);
   com::android::apex::write(os, apex_info_list);
+}
+
+// Reserve |size| bytes in |dest_dir| by creating a zero-filled file
+Result<void> ReserveSpaceForCompressedApex(int64_t size,
+                                           const std::string& dest_dir) {
+  LOG(INFO) << "Reserving " << size << " bytes for compressed APEX";
+
+  if (size < 0) {
+    return Error() << "Cannot reserve negative byte of space";
+  }
+  auto file_path = StringPrintf("%s/full.tmp", dest_dir.c_str());
+  if (size == 0) {
+    RemoveFileIfExists(file_path);
+    return {};
+  }
+
+  unique_fd dest_fd(
+      open(file_path.c_str(), O_WRONLY | O_CLOEXEC | O_CREAT, 0644));
+  if (dest_fd.get() == -1) {
+    return ErrnoError() << "Failed to open file for reservation "
+                        << file_path.c_str();
+  }
+
+  // Resize to required size
+  std::error_code ec;
+  std::filesystem::resize_file(file_path, size, ec);
+  if (ec) {
+    RemoveFileIfExists(file_path);
+    return ErrnoError() << "Failed to resize file " << file_path.c_str()
+                        << " : " << ec.message();
+  }
+
+  return {};
+}
+
+int OnOtaChrootBootstrap(const std::vector<std::string>& built_in_dirs) {
+  auto& instance = ApexFileRepository::GetInstance();
+  instance.AddPreInstalledApex(built_in_dirs);
+  auto status = ActivateApexPackages(instance.GetPreInstalledApexFiles());
+  if (!status.ok()) {
+    LOG(ERROR) << "Failed to activate pre-installed apexes : "
+               << status.error();
+    return 1;
+  }
+
+  std::stringstream xml;
+  CollectApexInfoList(xml, GetActivePackages(), {});
+  std::string file_name = StringPrintf("%s/%s", kApexRoot, kApexInfoList);
+  unique_fd fd(TEMP_FAILURE_RETRY(
+      open(file_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)));
+  if (fd.get() == -1) {
+    PLOG(ERROR) << "Can't open " << file_name;
+    return 1;
+  }
+
+  if (!android::base::WriteStringToFd(xml.str(), fd)) {
+    PLOG(ERROR) << "Can't write to " << file_name;
+    return 1;
+  }
+
+  return 0;
 }
 
 }  // namespace apex

@@ -72,9 +72,16 @@ class ApexFileRepository final {
   android::base::Result<const std::string> GetPreinstalledPath(
       const std::string& name) const;
 
+  // Returns path to the data version of an apex with the given |name|.
+  android::base::Result<const std::string> GetDataPath(
+      const std::string& name) const;
+
   // Checks whether there is a pre-installed version of an apex with the given
   // |name|.
   bool HasPreInstalledVersion(const std::string& name) const;
+
+  // Checks whether there is a data version of an apex with the given |name|.
+  bool HasDataVersion(const std::string& name) const;
 
   // Checks if given |apex| is pre-installed.
   bool IsPreInstalledApex(const ApexFile& apex) const;
@@ -93,6 +100,13 @@ class ApexFileRepository final {
   std::unordered_map<std::string,
                      std::vector<std::reference_wrapper<const ApexFile>>>
   AllApexFilesByName() const;
+
+  // Clears ApexFileRepostiry.
+  // Only use in tests.
+  void Reset() {
+    pre_installed_store_.clear();
+    data_store_.clear();
+  }
 
  private:
   // Non-copyable && non-moveable.
