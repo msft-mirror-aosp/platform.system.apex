@@ -126,11 +126,18 @@ class ApexdUnitTest : public ::testing::Test {
     static constexpr const int kFirstApexPartition = 2;
     auto partition_num = kFirstApexPartition + signature->apexes_size();
     auto apex_path = StringPrintf("%s/vm-payload-%d", td_.path, partition_num);
-    fs::copy(GetTestFile(apex_name), apex_path);
+    auto apex_size = *GetFileSize(GetTestFile(apex_name));
+    {
+      // Create a temp file with padding at the end
+      std::ofstream out(apex_path);
+      std::ifstream in(GetTestFile(apex_name), std::ios::binary);
+      out << in.rdbuf();
+      out << std::string(10, 0);  // ten zeros.
+    }
 
     auto apex = signature->add_apexes();
     apex->set_name("apex" + std::to_string(partition_num));
-    apex->set_size(*GetFileSize(apex_path));
+    apex->set_size(apex_size);
     if (pubkey.has_value()) {
       apex->set_publickey(*pubkey);
     }
@@ -2388,6 +2395,40 @@ TEST_F(ApexdMountTest, OnStartCapexToApex) {
                          });
 }
 
+// Test to ensure we do not mount decompressed APEX from /data/apex/active
+TEST_F(ApexdMountTest, OnStartOrphanedDecompressedApexInActiveDirectory) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  // Place a decompressed APEX in /data/apex/active. This apex should not
+  // be mounted since it's not in correct location. Instead, the
+  // pre-installed APEX should be mounted.
+  auto decompressed_apex_in_active_dir =
+      StringPrintf("%s/com.android.apex.compressed@1%s", GetDataDir().c_str(),
+                   kDecompressedApexPackageSuffix);
+  fs::copy(GetTestFile("com.android.apex.compressed.v1_original.apex"),
+           decompressed_apex_in_active_dir);
+  auto apex_path =
+      AddPreInstalledApex("com.android.apex.compressed.v1_original.apex");
+
+  ASSERT_RESULT_OK(
+      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}));
+
+  OnStart();
+
+  // Pre-installed APEX should be mounted
+  UnmountOnTearDown(apex_path);
+  auto& db = GetApexDatabaseForTesting();
+  // Check that pre-installed APEX has been activated
+  db.ForallMountedApexes("com.android.apex.compressed",
+                         [&](const MountedApexData& data, bool latest) {
+                           ASSERT_TRUE(latest);
+                           ASSERT_EQ(data.full_path, apex_path);
+                           ASSERT_THAT(data.device_name, IsEmpty());
+                         });
+}
+
 // Test scenario when decompressed version has different version than
 // pre-installed CAPEX
 TEST_F(ApexdMountTest, OnStartDecompressedApexVersionDifferentThanCapex) {
@@ -2570,12 +2611,14 @@ TEST_F(ApexdMountTest, OnStartInVmModeActivatesPreInstalled) {
   // Need to call InitializeVold before calling OnStart
   InitializeVold(&checkpoint_interface);
 
-  AddPreInstalledApex("apex.apexd_test.apex");
-  AddPreInstalledApex("apex.apexd_test_different_app.apex");
+  auto path1 = AddPreInstalledApex("apex.apexd_test.apex");
+  auto path2 = AddPreInstalledApex("apex.apexd_test_different_app.apex");
   // In VM mode, we don't scan /data/apex
   AddDataApex("apex.apexd_test_v2.apex");
 
   ASSERT_EQ(0, OnStartInVmMode());
+  UnmountOnTearDown(path1);
+  UnmountOnTearDown(path2);
 
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
@@ -2604,9 +2647,10 @@ TEST_F(ApexdMountTest, OnStartInVmModeActivatesBlockDevicesAsWell) {
   // Need to call InitializeVold before calling OnStart
   InitializeVold(&checkpoint_interface);
 
-  AddBlockApex("apex.apexd_test.apex");
+  auto path1 = AddBlockApex("apex.apexd_test.apex");
 
   ASSERT_EQ(0, OnStartInVmMode());
+  UnmountOnTearDown(path1);
 
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
@@ -2614,6 +2658,19 @@ TEST_F(ApexdMountTest, OnStartInVmModeActivatesBlockDevicesAsWell) {
                                    "/apex/com.android.apex.test_package@1",
                                    // Emits apex-info-list as well
                                    "/apex/apex-info-list.xml"));
+
+  ASSERT_EQ(access("/apex/apex-info-list.xml", F_OK), 0);
+  auto info_list =
+      com::android::apex::readApexInfoList("/apex/apex-info-list.xml");
+  ASSERT_TRUE(info_list.has_value());
+  auto apex_info_xml_1 = com::android::apex::ApexInfo(
+      /* moduleName= */ "com.android.apex.test_package",
+      /* modulePath= */ path1,
+      /* preinstalledModulePath= */ path1,
+      /* versionCode= */ 1, /* versionName= */ "1",
+      /* isFactory= */ true, /* isActive= */ true);
+  ASSERT_THAT(info_list->getApexInfo(),
+              UnorderedElementsAre(ApexInfoXmlEq(apex_info_xml_1)));
 }
 
 TEST_F(ApexdMountTest, OnStartInVmModeFailsWithDuplicateNames) {
@@ -2635,6 +2692,21 @@ TEST_F(ApexdMountTest, OnStartInVmModeFailsWithWrongPubkey) {
   AddBlockApex("apex.apexd_test.apex", "wrong pubkey");
 
   ASSERT_EQ(1, OnStartInVmMode());
+}
+
+TEST_F(ApexdMountTest, GetActivePackagesReturningBlockApexesAsWell) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  auto path1 = AddBlockApex("apex.apexd_test.apex");
+
+  ASSERT_EQ(0, OnStartInVmMode());
+  UnmountOnTearDown(path1);
+
+  auto active_apexes = GetActivePackages();
+  ASSERT_EQ(1u, active_apexes.size());
+  ASSERT_EQ(path1, active_apexes[0].GetPath());
 }
 
 }  // namespace apex
