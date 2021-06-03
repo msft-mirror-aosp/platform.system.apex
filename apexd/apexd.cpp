@@ -3359,36 +3359,96 @@ Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file) {
     return verify_package_boot_status;
   }
 
-  // TODO(b/187864524): do additional checks (e.g. apk-in-apex, linkerconfig,
-  // etc.).
-  constexpr const auto kSuccessFn = [](const std::string& /*mount_point*/) {
+  auto check_fn = [&apex_file](const std::string& mount_point) -> Result<void> {
+    auto dirs = GetSubdirs(mount_point);
+    if (!dirs.ok()) {
+      return dirs.error();
+    }
+    if (std::find(dirs->begin(), dirs->end(), mount_point + "/app") !=
+        dirs->end()) {
+      return Error() << apex_file.GetPath() << " contains app inside";
+    }
+    if (std::find(dirs->begin(), dirs->end(), mount_point + "/priv-app") !=
+        dirs->end()) {
+      return Error() << apex_file.GetPath() << " contains priv-app inside";
+    }
     return Result<void>{};
   };
-  return RunVerifyFnInsideTempMount(apex_file, kSuccessFn, true);
+  return RunVerifyFnInsideTempMount(apex_file, check_fn, true);
 }
 
-Result<void> CheckSupportsNonStagedInstall(const ApexFile& apex) {
-  if (!apex.GetManifest().supportsrebootlessupdate()) {
-    return Error() << apex.GetPath() << " does not support non-staged update";
+Result<void> CheckSupportsNonStagedInstall(const ApexFile& cur_apex,
+                                           const ApexFile& new_apex) {
+  const auto& cur_manifest = cur_apex.GetManifest();
+  const auto& new_manifest = new_apex.GetManifest();
+
+  if (!new_manifest.supportsrebootlessupdate()) {
+    return Error() << new_apex.GetPath()
+                   << " does not support non-staged update";
   }
+
+  // Check if update will impact linkerconfig.
+
+  // Updates to shared libs APEXes must be done via staged install flow.
+  if (new_manifest.providesharedapexlibs()) {
+    return Error() << new_apex.GetPath() << " is a shared libs APEX";
+  }
+
+  // This APEX provides native libs to other parts of the platform. It can only
+  // be updated via staged install flow.
+  if (new_manifest.providenativelibs_size() > 0) {
+    return Error() << new_apex.GetPath() << " provides native libs";
+  }
+
+  // This APEX requires libs provided by dynamic common library APEX, hence it
+  // can only be installed using staged install flow.
+  if (new_manifest.requiresharedapexlibs_size() > 0) {
+    return Error() << new_apex.GetPath() << " requires shared apex libs";
+  }
+
+  // We don't allow non-staged updates of APEXES that have java libs inside.
+  if (new_manifest.jnilibs_size() > 0) {
+    return Error() << new_apex.GetPath() << " requires JNI libs";
+  }
+
+  // For requireNativeLibs bit, we only allow updates that don't change list of
+  // required libs.
+
+  std::vector<std::string> cur_required_libs(
+      cur_manifest.requirenativelibs().begin(),
+      cur_manifest.requirenativelibs().end());
+  sort(cur_required_libs.begin(), cur_required_libs.end());
+
+  std::vector<std::string> new_required_libs(
+      new_manifest.requirenativelibs().begin(),
+      new_manifest.requirenativelibs().end());
+  sort(new_required_libs.begin(), new_required_libs.end());
+
+  if (cur_required_libs != new_required_libs) {
+    return Error() << "Set of native libs required by " << new_apex.GetPath()
+                   << " differs from the one required by the currently active "
+                   << cur_apex.GetPath();
+  }
+
   auto expected_public_key =
-      ApexFileRepository::GetInstance().GetPublicKey(apex.GetManifest().name());
+      ApexFileRepository::GetInstance().GetPublicKey(new_manifest.name());
   if (!expected_public_key.ok()) {
     return expected_public_key.error();
   }
-  auto verity_data = apex.VerifyApexVerity(*expected_public_key);
+  auto verity_data = new_apex.VerifyApexVerity(*expected_public_key);
   if (!verity_data.ok()) {
     return verity_data.error();
   }
   // Supporting non-staged install of APEXes without a hashtree is additional
   // hassle, it's easier not to support it.
   if (verity_data->desc->tree_size == 0) {
-    return Error() << apex.GetPath() << " does not have an embedded hash tree";
+    return Error() << new_apex.GetPath()
+                   << " does not have an embedded hash tree";
   }
   return {};
 }
 
-Result<std::string> ComputePackageId(const ApexFile& apex) {
+Result<size_t> ComputePackageIdMinor(const ApexFile& apex) {
   static constexpr size_t kMaxVerityDevicesPerApexName = 3u;
   DeviceMapper& dm = DeviceMapper::Instance();
   std::vector<DeviceMapper::DmBlockDevice> dm_devices;
@@ -3421,9 +3481,7 @@ Result<std::string> ComputePackageId(const ApexFile& apex) {
                    << ") dm block devices associated with package "
                    << apex.GetManifest().name();
   }
-  std::string id =
-      GetPackageId(apex.GetManifest()) + "_" + std::to_string(next_minor);
-  return std::move(id);
+  return next_minor;
 }
 
 Result<ApexFile> InstallPackage(const std::string& package_path) {
@@ -3434,14 +3492,6 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
   }
 
   const std::string& module_name = temp_apex->GetManifest().name();
-
-  // Do a quick check if this APEX can be installed without a reboot.
-  // Note that passing this check doesn't guarantee that APEX will be
-  // successfully installed.
-  if (auto res = CheckSupportsNonStagedInstall(*temp_apex); !res.ok()) {
-    return res.error();
-  }
-
   // Don't allow non-staged update if there are no active versions of this APEX.
   auto cur_mounted_data = gMountedApexes.GetLatestMountedApex(module_name);
   if (!cur_mounted_data.has_value()) {
@@ -3453,6 +3503,13 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
     return cur_apex.error();
   }
 
+  // Do a quick check if this APEX can be installed without a reboot.
+  // Note that passing this check doesn't guarantee that APEX will be
+  // successfully installed.
+  if (auto r = CheckSupportsNonStagedInstall(*cur_apex, *temp_apex); !r.ok()) {
+    return r.error();
+  }
+
   // 1. Verify that APEX is correct. This is a heavy check that involves
   // mounting an APEX on a temporary mount point and reading the entire
   // dm-verity block device.
@@ -3461,10 +3518,13 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
   }
 
   // 2. Compute params for mounting new apex.
-  auto new_id = ComputePackageId(*temp_apex);
-  if (!new_id.ok()) {
-    return new_id.error();
+  auto new_id_minor = ComputePackageIdMinor(*temp_apex);
+  if (!new_id_minor.ok()) {
+    return new_id_minor.error();
   }
+
+  std::string new_id = GetPackageId(temp_apex->GetManifest()) + "_" +
+                       std::to_string(*new_id_minor);
 
   // 2. Unmount currently active APEX.
   if (auto res = UnmountPackage(*cur_apex, /* allow_latest= */ true,
@@ -3473,11 +3533,24 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
     return res.error();
   }
 
-  // TODO(b/188713178): handle errors and cleanup at different stages.
-
   // 3. Hard link to final destination.
-  std::string target_file = StringPrintf(
-      "%s/%s.apex", gConfig->active_apex_data_dir, (*new_id).c_str());
+  std::string target_file =
+      StringPrintf("%s/%s.apex", gConfig->active_apex_data_dir, new_id.c_str());
+
+  auto guard = android::base::make_scope_guard([&]() {
+    if (unlink(target_file.c_str()) != 0 && errno != ENOENT) {
+      PLOG(ERROR) << "Failed to unlink " << target_file;
+    }
+    // We can't really rely on the fact that dm-verity device backing up
+    // previously active APEX is still around. We need to create a new one.
+    std::string old_new_id = GetPackageId(temp_apex->GetManifest()) + "_" +
+                             std::to_string(*new_id_minor + 1);
+    if (auto res = ActivatePackageImpl(*cur_apex, old_new_id); !res.ok()) {
+      // At this point not much we can do... :(
+      LOG(ERROR) << res.error();
+    }
+  });
+
   // At this point it should be safe to hard link |temp_apex| to
   // |params->target_file|. In case reboot happens during one of the stages
   // below, then on next boot apexd will pick up the new verified APEX.
@@ -3492,9 +3565,12 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
   }
 
   // 4. And activate new one.
-  if (auto res = ActivatePackageImpl(*new_apex, *new_id); !res.ok()) {
+  if (auto res = ActivatePackageImpl(*new_apex, new_id); !res.ok()) {
     return res.error();
   }
+
+  // Accept the install.
+  guard.Disable();
 
   // 4. Now we can unlink old APEX if it's not pre-installed.
   if (!ApexFileRepository::GetInstance().IsPreInstalledApex(*cur_apex)) {
