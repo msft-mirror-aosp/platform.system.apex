@@ -82,17 +82,28 @@ static int64_t GetMTime(const std::string& path) {
 // A very basic mock of CheckpointInterface.
 class MockCheckpointInterface : public CheckpointInterface {
  public:
-  Result<bool> SupportsFsCheckpoints() override { return {}; }
+  Result<bool> SupportsFsCheckpoints() override {
+    return supports_fs_checkpoint_;
+  }
 
-  Result<bool> NeedsCheckpoint() override { return false; }
+  Result<bool> NeedsCheckpoint() override { return needs_checkpoint_; }
 
-  Result<bool> NeedsRollback() override { return false; }
+  Result<bool> NeedsRollback() override { return needs_rollback_; }
 
   Result<void> StartCheckpoint(int32_t num_retries) override { return {}; }
 
   Result<void> AbortChanges(const std::string& msg, bool retry) override {
     return {};
   }
+
+  void SetSupportsCheckpoint(bool value) { supports_fs_checkpoint_ = value; }
+
+  void SetNeedsCheckpoint(bool value) { needs_checkpoint_ = value; }
+
+  void SetNeedsRollback(bool value) { needs_rollback_ = value; }
+
+ private:
+  bool supports_fs_checkpoint_, needs_checkpoint_, needs_rollback_;
 };
 
 static constexpr const char* kTestApexdStatusSysprop = "apexd.status.test";
@@ -3657,6 +3668,51 @@ TEST_F(ApexActivationFailureTests, ActivatePackageImplFails) {
               HasSubstr("has unexpected SHA512 hash"));
 }
 
+TEST_F(ApexActivationFailureTests,
+       StagedSessionFailsWhenNotInFsCheckpointMode) {
+  MockCheckpointInterface checkpoint_interface;
+  checkpoint_interface.SetSupportsCheckpoint(true);
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  auto pre_installed_apex = AddPreInstalledApex("apex.apexd_test.apex");
+  auto& instance = ApexFileRepository::GetInstance();
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex({GetBuiltInDir()}));
+
+  auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+
+  UnmountOnTearDown(pre_installed_apex);
+  OnStart();
+
+  apex_session = ApexSession::GetSession(123);
+  ASSERT_EQ(apex_session->GetState(), SessionState::ACTIVATION_FAILED);
+  ASSERT_THAT(
+      apex_session->GetErrorMessage(),
+      HasSubstr("Cannot install apex session if not in fs-checkpoint mode"));
+}
+
+TEST_F(ApexActivationFailureTests, StagedSessionRevertsWhenInFsRollbackMode) {
+  MockCheckpointInterface checkpoint_interface;
+  checkpoint_interface.SetSupportsCheckpoint(true);
+  checkpoint_interface.SetNeedsRollback(true);
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  auto pre_installed_apex = AddPreInstalledApex("apex.apexd_test.apex");
+  auto& instance = ApexFileRepository::GetInstance();
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex({GetBuiltInDir()}));
+
+  auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+
+  UnmountOnTearDown(pre_installed_apex);
+  OnStart();
+
+  apex_session = ApexSession::GetSession(123);
+  ASSERT_EQ(apex_session->GetState(), SessionState::REVERTED);
+}
+
 TEST_F(ApexdMountTest, OnBootstrapCreatesEmptyDmDevices) {
   AddPreInstalledApex("apex.apexd_test.apex");
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
@@ -3664,15 +3720,16 @@ TEST_F(ApexdMountTest, OnBootstrapCreatesEmptyDmDevices) {
   DeviceMapper& dm = DeviceMapper::Instance();
 
   auto cleaner = make_scope_guard([&]() {
-    dm.DeleteDevice("com.android.apex.test_package", 1s);
-    dm.DeleteDevice("com.android.apex.compressed", 1s);
+    dm.DeleteDeviceIfExists("com.android.apex.test_package", 1s);
+    dm.DeleteDeviceIfExists("com.android.apex.compressed", 1s);
   });
 
   ASSERT_EQ(0, OnBootstrap());
 
-  std::string ignored;
-  ASSERT_TRUE(dm.WaitForDevice("com.android.apex.test_package", 1s, &ignored));
-  ASSERT_TRUE(dm.WaitForDevice("com.android.apex.compressed", 1s, &ignored));
+  ASSERT_EQ(dm::DmDeviceState::SUSPENDED,
+            dm.GetState("com.android.apex.test_package"));
+  ASSERT_EQ(dm::DmDeviceState::SUSPENDED,
+            dm.GetState("com.android.apex.compressed"));
 }
 
 }  // namespace apex
