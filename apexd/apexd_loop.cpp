@@ -19,7 +19,9 @@
 
 #include "apexd_loop.h"
 
+#include <array>
 #include <mutex>
+#include <string_view>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -52,17 +54,6 @@ using android::base::StartsWith;
 using android::base::StringPrintf;
 using android::base::unique_fd;
 
-#ifndef LOOP_CONFIGURE
-// These can be removed whenever we pull in the Linux v5.8 UAPI headers
-struct loop_config {
-  __u32 fd;
-  __u32 block_size;
-  struct loop_info64 info;
-  __u64 __reserved[8];
-};
-#define LOOP_CONFIGURE 0x4C0A
-#endif
-
 namespace android {
 namespace apex {
 namespace loop {
@@ -86,6 +77,41 @@ void LoopbackDeviceUniqueFd::MaybeCloseBad() {
       PLOG(ERROR) << "Unable to clear fd for loopback device";
     }
   }
+}
+
+Result<void> ConfigureScheduler(const std::string& device_path) {
+  if (!StartsWith(device_path, "/dev/")) {
+    return Error() << "Invalid argument " << device_path;
+  }
+
+  const std::string device_name = Basename(device_path);
+
+  const std::string sysfs_path =
+      StringPrintf("/sys/block/%s/queue/scheduler", device_name.c_str());
+  unique_fd sysfs_fd(open(sysfs_path.c_str(), O_RDWR | O_CLOEXEC));
+  if (sysfs_fd.get() == -1) {
+    return ErrnoError() << "Failed to open " << sysfs_path;
+  }
+
+  // Kernels before v4.1 only support 'noop'. Kernels [v4.1, v5.0) support
+  // 'noop' and 'none'. Kernels v5.0 and later only support 'none'.
+  static constexpr const std::array<std::string_view, 2> kNoScheduler = {
+      "none", "noop"};
+
+  int ret = 0;
+
+  for (const std::string_view& scheduler : kNoScheduler) {
+    ret = write(sysfs_fd.get(), scheduler.data(), scheduler.size());
+    if (ret > 0) {
+      break;
+    }
+  }
+
+  if (ret <= 0) {
+    return ErrnoError() << "Failed to write to " << sysfs_path;
+  }
+
+  return {};
 }
 
 Result<void> ConfigureReadAhead(const std::string& device_path) {
@@ -161,7 +187,7 @@ Result<void> PreAllocateLoopDevices(size_t num) {
 }
 
 Result<void> ConfigureLoopDevice(const int device_fd, const std::string& target,
-                                 const int32_t image_offset,
+                                 const uint32_t image_offset,
                                  const size_t image_size) {
   static bool use_loop_configure;
   static std::once_flag once_flag;
@@ -280,14 +306,13 @@ Result<LoopbackDeviceUniqueFd> WaitForDevice(int num) {
   // a loop device for it. To work around this we keep polling for loop device
   // to be created until ueventd's cold boot sequence is done.
   // See comment on kLoopDeviceRetryAttempts.
-  unique_fd sysfs_fd;
   bool cold_boot_done = GetBoolProperty("ro.cold_boot_done", false);
   for (size_t i = 0; i != kLoopDeviceRetryAttempts; ++i) {
     if (!cold_boot_done) {
       cold_boot_done = GetBoolProperty("ro.cold_boot_done", false);
     }
     for (const auto& device : candidate_devices) {
-      sysfs_fd.reset(open(device.c_str(), O_RDWR | O_CLOEXEC));
+      unique_fd sysfs_fd(open(device.c_str(), O_RDWR | O_CLOEXEC));
       if (sysfs_fd.get() != -1) {
         return LoopbackDeviceUniqueFd(std::move(sysfs_fd), device);
       }
@@ -304,7 +329,7 @@ Result<LoopbackDeviceUniqueFd> WaitForDevice(int num) {
 }
 
 Result<LoopbackDeviceUniqueFd> CreateLoopDevice(const std::string& target,
-                                                const int32_t image_offset,
+                                                const uint32_t image_offset,
                                                 const size_t image_size) {
   ATRACE_NAME("CreateLoopDevice");
   unique_fd ctl_fd(open("/dev/loop-control", O_RDWR | O_CLOEXEC));
@@ -329,6 +354,12 @@ Result<LoopbackDeviceUniqueFd> CreateLoopDevice(const std::string& target,
       loop_device->device_fd.get(), target, image_offset, image_size);
   if (!configureStatus.ok()) {
     return configureStatus.error();
+  }
+
+  Result<void> sched_status = ConfigureScheduler(loop_device->name);
+  if (!sched_status.ok()) {
+    LOG(WARNING) << "Configuring I/O scheduler failed: "
+                 << sched_status.error();
   }
 
   Result<void> read_ahead_status = ConfigureReadAhead(loop_device->name);
