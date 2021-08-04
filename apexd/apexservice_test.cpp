@@ -594,66 +594,6 @@ TEST_F(ApexServiceTest, DISABLED_EnforceSelinux) {
   EXPECT_TRUE(IsSelinuxEnforced() || kIsX86);
 }
 
-TEST_F(ApexServiceTest, StageFailAccess) {
-  if (!IsSelinuxEnforced()) {
-    LOG(WARNING) << "Skipping InstallFailAccess because of selinux";
-    return;
-  }
-
-  // Use an extra copy, so that even if this test fails (incorrectly installs),
-  // we have the testdata file still around.
-  std::string orig_test_file = GetTestFile("apex.apexd_test.apex");
-  std::string test_file = orig_test_file + ".2";
-  ASSERT_EQ(0, link(orig_test_file.c_str(), test_file.c_str()))
-      << strerror(errno);
-  struct Deleter {
-    std::string to_delete;
-    explicit Deleter(std::string t) : to_delete(std::move(t)) {}
-    ~Deleter() {
-      if (unlink(to_delete.c_str()) != 0) {
-        PLOG(ERROR) << "Could not unlink " << to_delete;
-      }
-    }
-  };
-  Deleter del(test_file);
-
-  android::binder::Status st = service_->stagePackages({test_file});
-  ASSERT_FALSE(IsOk(st));
-  std::string error = st.exceptionMessage().c_str();
-  EXPECT_NE(std::string::npos, error.find("Failed to open package")) << error;
-  EXPECT_NE(std::string::npos, error.find("I/O error")) << error;
-}
-
-TEST_F(ApexServiceTest, StageFailKey) {
-  PrepareTestApexForInstall installer(
-      GetTestFile("apex.apexd_test_no_inst_key.apex"));
-  if (!installer.Prepare()) {
-    return;
-  }
-  ASSERT_EQ(std::string("com.android.apex.test_package.no_inst_key"),
-            installer.package);
-
-  android::binder::Status st = service_->stagePackages({installer.test_file});
-  ASSERT_FALSE(IsOk(st));
-
-  // May contain one of two errors.
-  std::string error = st.exceptionMessage().c_str();
-
-  ASSERT_THAT(error, HasSubstr("No preinstalled apex found for package "
-                               "com.android.apex.test_package.no_inst_key"));
-}
-
-TEST_F(ApexServiceTest, StageSuccess) {
-  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"));
-  if (!installer.Prepare()) {
-    return;
-  }
-  ASSERT_EQ(std::string("com.android.apex.test_package"), installer.package);
-
-  ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
-  EXPECT_TRUE(RegularFileExists(installer.test_installed_file));
-}
-
 TEST_F(ApexServiceTest,
        SubmitStagegSessionSuccessDoesNotLeakTempVerityDevices) {
   PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"),
@@ -713,85 +653,6 @@ TEST_F(ApexServiceTest, SubmitStagedSessionFailDoesNotLeakTempVerityDevices) {
   for (const auto& device : devices) {
     ASSERT_THAT(device.name(), Not(EndsWith(".tmp")));
   }
-}
-
-TEST_F(ApexServiceTest, StageSuccessClearsPreviouslyActivePackage) {
-  PrepareTestApexForInstall installer1(GetTestFile("apex.apexd_test_v2.apex"));
-  PrepareTestApexForInstall installer2(
-      GetTestFile("apex.apexd_test_different_app.apex"));
-  PrepareTestApexForInstall installer3(GetTestFile("apex.apexd_test.apex"));
-  auto install_fn = [&](PrepareTestApexForInstall& installer) {
-    if (!installer.Prepare()) {
-      return;
-    }
-    ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
-    EXPECT_TRUE(RegularFileExists(installer.test_installed_file));
-  };
-  install_fn(installer1);
-  install_fn(installer2);
-  // Simulating a revert. After this call test_v2_apex_path should be removed.
-  install_fn(installer3);
-
-  EXPECT_FALSE(RegularFileExists(installer1.test_installed_file));
-  EXPECT_TRUE(RegularFileExists(installer2.test_installed_file));
-  EXPECT_TRUE(RegularFileExists(installer3.test_installed_file));
-}
-
-TEST_F(ApexServiceTest, StageAlreadyStagedPackageSuccess) {
-  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"));
-  if (!installer.Prepare()) {
-    return;
-  }
-  ASSERT_EQ(std::string("com.android.apex.test_package"), installer.package);
-
-  ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
-  ASSERT_TRUE(RegularFileExists(installer.test_installed_file));
-
-  ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
-  ASSERT_TRUE(RegularFileExists(installer.test_installed_file));
-}
-
-TEST_F(ApexServiceTest, StageAlreadyStagedPackageSuccessNewWins) {
-  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"));
-  PrepareTestApexForInstall installer2(
-      GetTestFile("apex.apexd_test_nocode.apex"));
-  if (!installer.Prepare() || !installer2.Prepare()) {
-    return;
-  }
-  ASSERT_EQ(std::string("com.android.apex.test_package"), installer.package);
-  ASSERT_EQ(installer.test_installed_file, installer2.test_installed_file);
-
-  ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
-  const auto& apex = ApexFile::Open(installer.test_installed_file);
-  ASSERT_TRUE(IsOk(apex));
-  ASSERT_FALSE(apex->GetManifest().nocode());
-
-  ASSERT_TRUE(IsOk(service_->stagePackages({installer2.test_file})));
-  const auto& new_apex = ApexFile::Open(installer.test_installed_file);
-  ASSERT_TRUE(IsOk(new_apex));
-  ASSERT_TRUE(new_apex->GetManifest().nocode());
-}
-
-TEST_F(ApexServiceTest, MultiStageSuccess) {
-  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"));
-  if (!installer.Prepare()) {
-    return;
-  }
-  ASSERT_EQ(std::string("com.android.apex.test_package"), installer.package);
-
-  PrepareTestApexForInstall installer2(GetTestFile("apex.apexd_test_v2.apex"));
-  if (!installer2.Prepare()) {
-    return;
-  }
-  ASSERT_EQ(std::string("com.android.apex.test_package"), installer2.package);
-
-  std::vector<std::string> packages;
-  packages.push_back(installer.test_file);
-  packages.push_back(installer2.test_file);
-
-  ASSERT_TRUE(IsOk(service_->stagePackages(packages)));
-  EXPECT_TRUE(RegularFileExists(installer.test_installed_file));
-  EXPECT_TRUE(RegularFileExists(installer2.test_installed_file));
 }
 
 TEST_F(ApexServiceTest, CannotBeRollbackAndHaveRollbackEnabled) {
@@ -1733,6 +1594,90 @@ TEST_F(ApexServicePrePostInstallTest, PostinstallFail) {
   RunPrePost(&IApexService::postinstallPackages,
              {"apex.apexd_test_prepostinstall.fail.apex"},
              /* test_message= */ nullptr, /* expect_success= */ false);
+}
+
+TEST_F(ApexServiceTest, GetStagedApexInfosSinglePackage) {
+  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"),
+                                      "/data/app-staging/session_1111",
+                                      "staging_data_file");
+  if (!installer.Prepare()) {
+    FAIL() << GetDebugStr(&installer);
+  }
+
+  ApexInfoList list;
+  ApexSessionParams params;
+  params.sessionId = 1111;
+  params.childSessionIds = {};
+  ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)))
+      << GetDebugStr(&installer);
+  EXPECT_EQ(1u, list.apexInfos.size());
+
+  ASSERT_TRUE(IsOk(service_->markStagedSessionReady(1111)))
+      << GetDebugStr(&installer);
+
+  std::vector<ApexInfo> result;
+  android::binder::Status status =
+      service_->getStagedApexInfos(params, &result);
+
+  ApexInfo apex_info;
+  apex_info.moduleName = "com.android.apex.test_package";
+  apex_info.modulePath = "/data/app-staging/session_1111/apex.apexd_test.apex";
+  apex_info.preinstalledModulePath = "/system_ext/apex/apex.apexd_test.apex";
+  apex_info.versionCode = 1;
+  apex_info.isFactory = false;
+  apex_info.isActive = false;
+
+  ASSERT_THAT(result, UnorderedElementsAre(ApexInfoEq(apex_info)));
+}
+
+TEST_F(ApexServiceTest, GetStagedApexInfosMultiPackage) {
+  // Parent session id: 1212
+  // Children session ids: 2212 32
+  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"),
+                                      "/data/app-staging/session_2212",
+                                      "staging_data_file");
+  PrepareTestApexForInstall installer2(
+      GetTestFile("apex.apexd_test_different_app.apex"),
+      "/data/app-staging/session_3212", "staging_data_file");
+  if (!installer.Prepare() || !installer2.Prepare()) {
+    FAIL() << GetDebugStr(&installer) << GetDebugStr(&installer2);
+  }
+
+  ApexInfoList list;
+  ApexSessionParams params;
+  params.sessionId = 1212;
+  params.childSessionIds = {2212, 3212};
+  ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)))
+      << GetDebugStr(&installer);
+  EXPECT_EQ(2u, list.apexInfos.size());
+
+  ASSERT_TRUE(IsOk(service_->markStagedSessionReady(1212)))
+      << GetDebugStr(&installer);
+
+  std::vector<ApexInfo> result;
+  android::binder::Status status =
+      service_->getStagedApexInfos(params, &result);
+
+  ApexInfo child_1;
+  child_1.moduleName = "com.android.apex.test_package";
+  child_1.modulePath = "/data/app-staging/session_2212/apex.apexd_test.apex";
+  child_1.preinstalledModulePath = "/system_ext/apex/apex.apexd_test.apex";
+  child_1.versionCode = 1;
+  child_1.isFactory = false;
+  child_1.isActive = false;
+
+  ApexInfo child_2;
+  child_2.moduleName = "com.android.apex.test_package_2";
+  child_2.modulePath =
+      "/data/app-staging/session_3212/apex.apexd_test_different_app.apex";
+  child_2.preinstalledModulePath =
+      "/system_ext/apex/apex.apexd_test_different_app.apex";
+  child_2.versionCode = 1;
+  child_2.isFactory = false;
+  child_2.isActive = false;
+
+  ASSERT_THAT(result,
+              UnorderedElementsAre(ApexInfoEq(child_1), ApexInfoEq(child_2)));
 }
 
 TEST_F(ApexServiceTest, SubmitSingleSessionTestSuccess) {
@@ -2956,195 +2901,6 @@ class LogTestToLogcat : public ::testing::EmptyTestEventListener {
 #endif
   }
 };
-
-struct NoCodeApexNameProvider {
-  static std::string GetTestName() { return "apex.apexd_test_nocode.apex"; }
-  static std::string GetPackageName() {
-    return "com.android.apex.test_package";
-  }
-};
-
-class ApexServiceActivationNoCode
-    : public ApexServiceActivationTest<NoCodeApexNameProvider> {};
-
-TEST_F(ApexServiceActivationNoCode, NoCodeApexIsNotExecutable) {
-  ASSERT_TRUE(IsOk(service_->activatePackage(installer_->test_installed_file)))
-      << GetDebugStr(installer_.get());
-
-  std::string mountinfo;
-  ASSERT_TRUE(
-      android::base::ReadFileToString("/proc/self/mountinfo", &mountinfo));
-  bool found_apex_mountpoint = false;
-  for (const auto& line : android::base::Split(mountinfo, "\n")) {
-    std::vector<std::string> tokens = android::base::Split(line, " ");
-    // line format:
-    // mnt_id parent_mnt_id major:minor source target option propagation_type
-    // ex) 33 260:19 / /apex rw,nosuid,nodev -
-    if (tokens.size() >= 7 &&
-        tokens[4] ==
-            "/apex/" + NoCodeApexNameProvider::GetPackageName() + "@1") {
-      found_apex_mountpoint = true;
-      // Make sure that option contains noexec
-      std::vector<std::string> options = android::base::Split(tokens[5], ",");
-      EXPECT_NE(options.end(),
-                std::find(options.begin(), options.end(), "noexec"));
-      break;
-    }
-  }
-  EXPECT_TRUE(found_apex_mountpoint);
-}
-
-struct BannedNameProvider {
-  static std::string GetTestName() { return "sharedlibs.apex"; }
-  static std::string GetPackageName() { return "sharedlibs"; }
-};
-
-class ApexServiceActivationBannedName
-    : public ApexServiceActivationTest<BannedNameProvider> {
- public:
-  ApexServiceActivationBannedName() : ApexServiceActivationTest(false) {}
-};
-
-TEST_F(ApexServiceActivationBannedName, ApexWithBannedNameCannotBeActivated) {
-  ASSERT_FALSE(
-      IsOk(service_->activatePackage(installer_->test_installed_file)));
-}
-
-namespace {
-void PrepareCompressedTestApex(const std::string& input_apex,
-                               const std::string& builtin_dir,
-                               const std::string& decompressed_dir,
-                               const std::string& active_apex_dir) {
-  const Result<ApexFile>& apex_file = ApexFile::Open(input_apex);
-  ASSERT_TRUE(apex_file.ok());
-  ASSERT_TRUE(apex_file->IsCompressed()) << "Not a compressed APEX";
-
-  auto prebuilt_file_path =
-      builtin_dir + "/" + android::base::Basename(input_apex);
-  fs::copy(input_apex, prebuilt_file_path);
-
-  const ApexManifest& manifest = apex_file->GetManifest();
-  const std::string& package = manifest.name();
-  const int64_t& version = manifest.version();
-
-  auto decompressed_file_path = decompressed_dir + "/" + package + "@" +
-                                std::to_string(version) + ".apex";
-  auto result = apex_file->Decompress(decompressed_file_path);
-  ASSERT_TRUE(result.ok()) << "Failed to decompress " << result.error();
-  auto active_apex_file_path =
-      active_apex_dir + "/" + package + "@" + std::to_string(version) + ".apex";
-  auto error =
-      link(decompressed_file_path.c_str(), active_apex_file_path.c_str());
-  ASSERT_EQ(error, 0) << "Failed to hardlink decompressed APEX";
-}
-
-CompressedApexInfo CreateCompressedApex(const std::string& name,
-                                        const int version, const int size) {
-  CompressedApexInfo result;
-  result.moduleName = name;
-  result.versionCode = version;
-  result.decompressedSize = size;
-  return result;
-}
-}  // namespace
-
-class ApexServiceTestForCompressedApex : public ApexServiceTest {
- public:
-  static constexpr const char* kTempPrebuiltDir = "/data/apex/temp_prebuilt";
-
-  void SetUp() override {
-    ApexServiceTest::SetUp();
-    ASSERT_NE(nullptr, service_.get());
-
-    TemporaryDir decompression_dir, active_apex_dir;
-    if (0 != mkdir(kTempPrebuiltDir, 0777)) {
-      int saved_errno = errno;
-      ASSERT_EQ(saved_errno, EEXIST)
-          << kTempPrebuiltDir << ":" << strerror(saved_errno);
-    }
-    PrepareCompressedTestApex(
-        GetTestFile("com.android.apex.compressed.v1.capex"), kTempPrebuiltDir,
-        kApexDecompressedDir, kActiveApexPackagesDataDir);
-    service_->recollectPreinstalledData({kTempPrebuiltDir});
-    service_->recollectDataApex(kActiveApexPackagesDataDir,
-                                kApexDecompressedDir);
-  }
-
-  void TearDown() override {
-    ApexServiceTest::TearDown();
-    DeleteDirContent(kTempPrebuiltDir);
-    rmdir(kTempPrebuiltDir);
-    DeleteDirContent(kApexDecompressedDir);
-    DeleteDirContent(kActiveApexPackagesDataDir);
-  }
-};
-
-TEST_F(ApexServiceTestForCompressedApex, CalculateSizeForCompressedApex) {
-  int64_t result;
-  // Empty list of compressed apex info
-  {
-    CompressedApexInfoList empty_list;
-    ASSERT_TRUE(
-        IsOk(service_->calculateSizeForCompressedApex(empty_list, &result)));
-    ASSERT_EQ(result, 0LL);
-  }
-
-  // Multiple compressed APEX should get summed
-  {
-    CompressedApexInfoList non_empty_list;
-    CompressedApexInfo new_apex = CreateCompressedApex("new_apex", 1, 1);
-    CompressedApexInfo new_apex_2 = CreateCompressedApex("new_apex_2", 1, 2);
-    CompressedApexInfo compressed_apex_same_version =
-        CreateCompressedApex("com.android.apex.compressed", 1, 4);
-    CompressedApexInfo compressed_apex_higher_version =
-        CreateCompressedApex("com.android.apex.compressed", 2, 8);
-    non_empty_list.apexInfos.push_back(new_apex);
-    non_empty_list.apexInfos.push_back(new_apex_2);
-    non_empty_list.apexInfos.push_back(compressed_apex_same_version);
-    non_empty_list.apexInfos.push_back(compressed_apex_higher_version);
-    ASSERT_TRUE(IsOk(
-        service_->calculateSizeForCompressedApex(non_empty_list, &result)));
-    ASSERT_EQ(result, 11LL);  // 1+2+8. compressed_apex_same_version is ignored
-  }
-}
-
-TEST_F(ApexServiceTestForCompressedApex, ReserveSpaceForCompressedApex) {
-  // Multiple compressed APEX should reserve equal to
-  // CalculateSizeForCompressedApex
-  {
-    CompressedApexInfoList non_empty_list;
-    CompressedApexInfo new_apex = CreateCompressedApex("new_apex", 1, 1);
-    CompressedApexInfo new_apex_2 = CreateCompressedApex("new_apex_2", 1, 2);
-    CompressedApexInfo compressed_apex_same_version =
-        CreateCompressedApex("com.android.apex.compressed", 1, 4);
-    CompressedApexInfo compressed_apex_higher_version =
-        CreateCompressedApex("com.android.apex.compressed", 2, 8);
-    non_empty_list.apexInfos.push_back(new_apex);
-    non_empty_list.apexInfos.push_back(new_apex_2);
-    non_empty_list.apexInfos.push_back(compressed_apex_same_version);
-    non_empty_list.apexInfos.push_back(compressed_apex_higher_version);
-    int64_t required_size;
-    ASSERT_TRUE(IsOk(service_->calculateSizeForCompressedApex(non_empty_list,
-                                                              &required_size)));
-    ASSERT_EQ(required_size,
-              11LL);  // 1+2+8. compressed_apex_same_version is ignored
-
-    ASSERT_TRUE(IsOk(service_->reserveSpaceForCompressedApex(non_empty_list)));
-    auto files = ReadDir(kOtaReservedDir, [](auto _) { return true; });
-    ASSERT_TRUE(IsOk(files));
-    ASSERT_EQ(files->size(), 1u);
-    EXPECT_EQ((int64_t)fs::file_size((*files)[0]), required_size);
-  }
-
-  // Sending empty list should delete reserved file
-  {
-    CompressedApexInfoList empty_list;
-    ASSERT_TRUE(IsOk(service_->reserveSpaceForCompressedApex(empty_list)));
-    auto files = ReadDir(kOtaReservedDir, [](auto _) { return true; });
-    ASSERT_TRUE(IsOk(files));
-    ASSERT_EQ(files->size(), 0u);
-  }
-}
 
 }  // namespace apex
 }  // namespace android

@@ -90,6 +90,9 @@ android::base::Result<std::vector<ApexFile>> SubmitStagedSession(
     const int session_id, const std::vector<int>& child_session_ids,
     const bool has_rollback_enabled, const bool is_rollback,
     const int rollback_id) WARN_UNUSED;
+android::base::Result<std::vector<ApexFile>> GetStagedApexFiles(
+    const int session_id,
+    const std::vector<int>& child_session_ids) WARN_UNUSED;
 android::base::Result<void> MarkStagedSessionReady(const int session_id)
     WARN_UNUSED;
 android::base::Result<void> MarkStagedSessionSuccessful(const int session_id)
@@ -183,8 +186,13 @@ GetTempMountedApexData(const std::string& package);
 android::base::Result<void> RemountPackages();
 
 // Exposed for unit tests
-android::base::Result<bool> ShouldAllocateSpaceForDecompression(
-    const std::string& new_apex_name, int64_t new_apex_version,
+bool ShouldAllocateSpaceForDecompression(const std::string& new_apex_name,
+                                         int64_t new_apex_version,
+                                         const ApexFileRepository& instance);
+
+int64_t CalculateSizeForCompressedApex(
+    const std::vector<std::tuple<std::string, int64_t, int64_t>>&
+        compressed_apexes,
     const ApexFileRepository& instance);
 
 void CollectApexInfoList(std::ostream& os,

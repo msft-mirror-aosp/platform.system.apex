@@ -79,6 +79,8 @@ class ApexService : public BnApexService {
   BinderStatus getSessions(std::vector<ApexSessionInfo>* aidl_return) override;
   BinderStatus getStagedSessionInfo(
       int session_id, ApexSessionInfo* apex_session_info) override;
+  BinderStatus getStagedApexInfos(const ApexSessionParams& params,
+                                  std::vector<ApexInfo>* aidl_return) override;
   BinderStatus activatePackage(const std::string& package_path) override;
   BinderStatus deactivatePackage(const std::string& package_path) override;
   BinderStatus getActivePackages(std::vector<ApexInfo>* aidl_return) override;
@@ -231,15 +233,15 @@ BinderStatus ApexService::markBootCompleted() {
 BinderStatus ApexService::calculateSizeForCompressedApex(
     const CompressedApexInfoList& compressed_apex_info_list,
     int64_t* required_size) {
-  *required_size = 0;
-  const auto& instance = ApexFileRepository::GetInstance();
+  std::vector<std::tuple<std::string, int64_t, int64_t>> compressed_apexes;
+  compressed_apexes.reserve(compressed_apex_info_list.apexInfos.size());
   for (const auto& apex_info : compressed_apex_info_list.apexInfos) {
-    auto should_allocate_space = ShouldAllocateSpaceForDecompression(
-        apex_info.moduleName, apex_info.versionCode, instance);
-    if (!should_allocate_space.ok() || *should_allocate_space) {
-      *required_size += apex_info.decompressedSize;
-    }
+    compressed_apexes.emplace_back(apex_info.moduleName, apex_info.versionCode,
+                                   apex_info.decompressedSize);
   }
+  const auto& instance = ApexFileRepository::GetInstance();
+  *required_size = ::android::apex::CalculateSizeForCompressedApex(
+      compressed_apexes, instance);
   return BinderStatus::ok();
 }
 
@@ -368,6 +370,29 @@ BinderStatus ApexService::getStagedSessionInfo(
   }
 
   ConvertToApexSessionInfo(*session, apex_session_info);
+
+  return BinderStatus::ok();
+}
+
+BinderStatus ApexService::getStagedApexInfos(
+    const ApexSessionParams& params, std::vector<ApexInfo>* aidl_return) {
+  LOG(DEBUG) << "getStagedApexInfos() received by ApexService, session id "
+             << params.sessionId << " child sessions: ["
+             << android::base::Join(params.childSessionIds, ',') << "]";
+  Result<std::vector<ApexFile>> files = ::android::apex::GetStagedApexFiles(
+      params.sessionId, params.childSessionIds);
+  if (!files.ok()) {
+    LOG(ERROR) << "Failed to getStagedApexInfo session id " << params.sessionId
+               << ": " << files.error();
+    return BinderStatus::fromExceptionCode(
+        BinderStatus::EX_SERVICE_SPECIFIC,
+        String8(files.error().message().c_str()));
+  }
+
+  for (const auto& apex_file : *files) {
+    ApexInfo apex_info = GetApexInfo(apex_file);
+    aidl_return->push_back(std::move(apex_info));
+  }
 
   return BinderStatus::ok();
 }
