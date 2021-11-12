@@ -73,6 +73,7 @@ using android::apex::testing::ApexInfoEq;
 using android::apex::testing::CreateSessionInfo;
 using android::apex::testing::IsOk;
 using android::apex::testing::SessionInfoEq;
+using android::base::EndsWith;
 using android::base::ErrnoError;
 using android::base::Join;
 using android::base::ReadFully;
@@ -95,26 +96,6 @@ using ::testing::UnorderedElementsAreArray;
 using MountedApexData = MountedApexDatabase::MountedApexData;
 
 namespace fs = std::filesystem;
-
-static void CleanDir(const std::string& dir) {
-  if (access(dir.c_str(), F_OK) != 0 && errno == ENOENT) {
-    LOG(WARNING) << dir << " does not exist";
-    return;
-  }
-  auto status = WalkDir(dir, [](const fs::directory_entry& p) {
-    std::error_code ec;
-    fs::file_status status = p.status(ec);
-    ASSERT_FALSE(ec) << "Failed to stat " << p.path() << " : " << ec.message();
-    if (fs::is_directory(status)) {
-      fs::remove_all(p.path(), ec);
-    } else {
-      fs::remove(p.path(), ec);
-    }
-    ASSERT_FALSE(ec) << "Failed to delete " << p.path() << " : "
-                     << ec.message();
-  });
-  ASSERT_TRUE(IsOk(status));
-}
 
 class ApexServiceTest : public ::testing::Test {
  public:
@@ -469,10 +450,10 @@ class ApexServiceTest : public ::testing::Test {
 
  private:
   void CleanUp() {
-    CleanDir(kActiveApexPackagesDataDir);
-    CleanDir(kApexBackupDir);
-    CleanDir(kApexHashTreeDir);
-    CleanDir(ApexSession::GetSessionsDir());
+    DeleteDirContent(kActiveApexPackagesDataDir);
+    DeleteDirContent(kApexBackupDir);
+    DeleteDirContent(kApexHashTreeDir);
+    DeleteDirContent(ApexSession::GetSessionsDir());
 
     DeleteIfExists("/data/misc_ce/0/apexdata/apex.apexd_test");
     DeleteIfExists("/data/misc_ce/0/apexrollback/123456");
@@ -971,6 +952,31 @@ TEST_F(ApexServiceTest, DestroyCeSnapshotsNotSpecified) {
       "/data/misc_ce/0/apexrollback/77777/apex.apexd_test/thing.txt"));
   ASSERT_FALSE(DirExists("/data/misc_ce/0/apexrollback/123456"));
   ASSERT_FALSE(DirExists("/data/misc_ce/0/apexrollback/98765"));
+}
+
+TEST_F(ApexServiceTest, SubmitStagedSessionCleanupsTempMountOnFailure) {
+  // Parent session id: 23
+  // Children session ids: 37 73
+  PrepareTestApexForInstall installer(
+      GetTestFile("apex.apexd_test_different_app.apex"),
+      "/data/app-staging/session_37", "staging_data_file");
+  PrepareTestApexForInstall installer2(
+      GetTestFile("apex.apexd_test_manifest_mismatch.apex"),
+      "/data/app-staging/session_73", "staging_data_file");
+  if (!installer.Prepare() || !installer2.Prepare()) {
+    FAIL() << GetDebugStr(&installer) << GetDebugStr(&installer2);
+  }
+  ApexInfoList list;
+  ApexSessionParams params;
+  params.sessionId = 23;
+  params.childSessionIds = {37, 73};
+  ASSERT_FALSE(IsOk(service_->submitStagedSession(params, &list)))
+      << GetDebugStr(&installer);
+
+  // Check that temp mounts were cleanded up.
+  for (const auto& mount : GetApexMounts()) {
+    EXPECT_FALSE(EndsWith(mount, ".tmp")) << "Found temp mount " << mount;
+  }
 }
 
 template <typename NameProvider>
@@ -1907,6 +1913,11 @@ TEST_F(ApexServiceTest, SubmitMultiSessionTestSuccess) {
   expected.isVerified = false;
   expected.isStaged = true;
   ASSERT_THAT(session, SessionInfoEq(expected));
+
+  // Check that temp mounts were cleanded up.
+  for (const auto& mount : GetApexMounts()) {
+    EXPECT_FALSE(EndsWith(mount, ".tmp")) << "Found temp mount " << mount;
+  }
 }
 
 TEST_F(ApexServiceTest, SubmitMultiSessionTestFail) {
@@ -2199,7 +2210,7 @@ TEST_F(ApexServiceTest, ActivePackagesDirEmpty) {
   }
 
   // Make sure that /data/apex/active is empty
-  CleanDir(kActiveApexPackagesDataDir);
+  DeleteDirContent(kActiveApexPackagesDataDir);
 
   ApexInfoList list;
   ApexSessionParams params;
@@ -2288,7 +2299,7 @@ class ApexServiceRevertTest : public ApexServiceTest {
     }
   }
 
-  void CheckRevertWasPerformed(const std::vector<std::string>& expected_pkgs) {
+  void CheckActiveApexContents(const std::vector<std::string>& expected_pkgs) {
     // First check that /data/apex/active exists and has correct permissions.
     struct stat sd;
     ASSERT_EQ(0, stat(kActiveApexPackagesDataDir, &sd));
@@ -2326,7 +2337,38 @@ TEST_F(ApexServiceRevertTest, RevertActiveSessionsSuccessful) {
   auto pkg = StringPrintf("%s/com.android.apex.test_package@1.apex",
                           kActiveApexPackagesDataDir);
   SCOPED_TRACE("");
-  CheckRevertWasPerformed({pkg});
+  CheckActiveApexContents({pkg});
+}
+
+// Calling revertActiveSessions should not restore backup on checkpointing
+// devices
+TEST_F(ApexServiceRevertTest,
+       RevertActiveSessionsDoesNotRestoreBackupIfCheckpointingSupported) {
+  if (!supports_fs_checkpointing_) {
+    GTEST_SKIP() << "Can't run if filesystem checkpointing is not supported";
+  }
+
+  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test_v2.apex"));
+  if (!installer.Prepare()) {
+    return;
+  }
+
+  auto session = ApexSession::CreateSession(1543);
+  ASSERT_TRUE(IsOk(session));
+  ASSERT_TRUE(IsOk(session->UpdateStateAndCommit(SessionState::ACTIVATED)));
+
+  // Make sure /data/apex/active is non-empty.
+  ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
+
+  PrepareBackup({GetTestFile("apex.apexd_test.apex")});
+
+  ASSERT_TRUE(IsOk(service_->revertActiveSessions()));
+
+  // Check that active apexes were not reverted.
+  auto pkg = StringPrintf("%s/com.android.apex.test_package@2.apex",
+                          kActiveApexPackagesDataDir);
+  SCOPED_TRACE("");
+  CheckActiveApexContents({pkg});
 }
 
 // Should fail to revert active sessions when there are none
@@ -2397,7 +2439,7 @@ TEST_F(ApexServiceRevertTest, ResumesRevert) {
   auto pkg2 = StringPrintf("%s/com.android.apex.test_package_2@1.apex",
                            kActiveApexPackagesDataDir);
   SCOPED_TRACE("");
-  CheckRevertWasPerformed({pkg1, pkg2});
+  CheckActiveApexContents({pkg1, pkg2});
 
   std::vector<ApexSessionInfo> sessions;
   ASSERT_TRUE(IsOk(service_->getSessions(&sessions)));
@@ -2487,7 +2529,7 @@ TEST_F(ApexServiceRevertTest, RevertStoresCrashingNativeProcess) {
   // TODO(ioffe): this is calling into internals of apexd which makes test quite
   //  britle. With some refactoring we should be able to call binder api, or
   //  make this a unit test of apexd.cpp.
-  Result<void> res = ::android::apex::RevertActiveSessions(native_process);
+  Result<void> res = ::android::apex::RevertActiveSessions(native_process, "");
   session = ApexSession::GetSession(1543);
   ASSERT_EQ(session->GetCrashingNativeProcess(), native_process);
 }
@@ -3026,10 +3068,10 @@ class ApexServiceTestForCompressedApex : public ApexServiceTest {
 
   void TearDown() override {
     ApexServiceTest::TearDown();
-    CleanDir(kTempPrebuiltDir);
+    DeleteDirContent(kTempPrebuiltDir);
     rmdir(kTempPrebuiltDir);
-    CleanDir(kApexDecompressedDir);
-    CleanDir(kActiveApexPackagesDataDir);
+    DeleteDirContent(kApexDecompressedDir);
+    DeleteDirContent(kActiveApexPackagesDataDir);
   }
 };
 
