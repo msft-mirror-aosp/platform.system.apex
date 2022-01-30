@@ -260,23 +260,42 @@ Result<int> ApexFileRepository::AddBlockApex(
 
     const std::string& name = apex_file->GetManifest().name();
 
+    BlockApexOverride overrides;
+
+    // A block device doesn't have an inherent timestamp, so it is carried in
+    // the metadata.
+    if (int64_t last_update_seconds = apex_config.last_update_seconds();
+        last_update_seconds != 0) {
+      overrides.last_update_seconds = last_update_seconds;
+    }
+
     // When metadata specifies the root digest of the apex, it should be used
     // when activating the apex. So we need to keep it.
     if (auto root_digest = apex_config.root_digest(); root_digest != "") {
-      auto hex_root_digest =
+      overrides.block_apex_root_digest =
           BytesToHex(reinterpret_cast<const uint8_t*>(root_digest.data()),
                      root_digest.size());
-      block_apex_root_digests_.emplace(name, std::move(hex_root_digest));
+    }
+
+    if (overrides.last_update_seconds.has_value() ||
+        overrides.block_apex_root_digest.has_value()) {
+      block_apex_overrides_.emplace(name, std::move(overrides));
     }
 
     // APEX should be unique.
-    auto it = pre_installed_store_.find(name);
-    if (it != pre_installed_store_.end()) {
-      return Error() << "duplicate of " << name << " found in "
-                     << it->second.GetPath();
+    for (const auto* store : {&pre_installed_store_, &data_store_}) {
+      auto it = store->find(name);
+      if (it != store->end()) {
+        return Error() << "duplicate of " << name << " found in "
+                       << it->second.GetPath();
+      }
     }
+    // Depending on whether the APEX was a factory version in the host or not,
+    // put it to different stores.
+    auto& store = apex_config.is_factory() ? pre_installed_store_ : data_store_;
+    store.emplace(name, std::move(*apex_file));
+
     ret++;
-    pre_installed_store_.emplace(name, std::move(*apex_file));
   }
   return {ret};
 }
@@ -360,6 +379,14 @@ Result<const std::string> ApexFileRepository::GetPublicKey(
     const std::string& name) const {
   auto it = pre_installed_store_.find(name);
   if (it == pre_installed_store_.end()) {
+    // Special casing for APEXes backed by block devices, i.e. APEXes in VM.
+    // Inside a VM, we fall back to find the key from data_store_. This is
+    // because an APEX is put to either pre_installed_store_ or data_store,
+    // depending on whether it was a factory APEX or not in the host.
+    it = data_store_.find(name);
+    if (it != data_store_.end() && IsBlockApex(it->second)) {
+      return it->second.GetBundledPublicKey();
+    }
     return Error() << "No preinstalled apex found for package " << name;
   }
   return it->second.GetBundledPublicKey();
@@ -389,11 +416,20 @@ Result<const std::string> ApexFileRepository::GetDataPath(
 
 std::optional<std::string> ApexFileRepository::GetBlockApexRootDigest(
     const std::string& name) const {
-  auto it = block_apex_root_digests_.find(name);
-  if (it == block_apex_root_digests_.end()) {
+  auto it = block_apex_overrides_.find(name);
+  if (it == block_apex_overrides_.end()) {
     return std::nullopt;
   }
-  return it->second;
+  return it->second.block_apex_root_digest;
+}
+
+std::optional<int64_t> ApexFileRepository::GetBlockApexLastUpdateSeconds(
+    const std::string& name) const {
+  auto it = block_apex_overrides_.find(name);
+  if (it == block_apex_overrides_.end()) {
+    return std::nullopt;
+  }
+  return it->second.last_update_seconds;
 }
 
 bool ApexFileRepository::HasPreInstalledVersion(const std::string& name) const {
