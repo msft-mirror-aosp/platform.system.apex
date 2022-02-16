@@ -148,11 +148,11 @@ cc_library_static {
     "libapexd-deps",
   ],
   srcs: [
-    "apex_classpath.cpp",
     "apex_database.cpp",
     "apexd.cpp",
     "apexd_lifecycle.cpp",
     "apexd_loop.cpp",
+    "apexd_prepostinstall.cpp",
     "apexd_private.cpp",
     "apexd_session.cpp",
     "apexd_verity.cpp",
@@ -212,7 +212,6 @@ cc_defaults {
   static_libs: [
     "lib_apex_session_state_proto",
     "lib_apex_manifest_proto",
-    "lib_microdroid_metadata_proto",
     "libavb",
   ],
   static: {
@@ -337,17 +336,6 @@ genrule {
 }
 
 genrule {
-  // Extract the root digest with avbtool
-  name: "apex.apexd_test_erofs_digest",
-  out: ["apex.apexd_test_erofs_digest.txt"],
-  srcs: [":apex.apexd_test_erofs"],
-  tools: ["avbtool"],
-  cmd: "unzip -q $(in) -d $(genDir) apex_payload.img && " +
-       "$(location avbtool) print_partition_digests --image $(genDir)/apex_payload.img " +
-       "| cut -c 3-| tee $(out)"
-}
-
-genrule {
   // Generates an apex which has same module name as apex.apexd_test.apex, but
   // is actually signed with a different key.
   name: "gen_key_mismatch_apex",
@@ -426,18 +414,18 @@ cc_test {
   ],
   data: [
     ":apex.apexd_test",
-    ":apex.apexd_test_erofs",
     ":apex.apexd_test_f2fs",
     ":apex.apexd_test_digest",
-    ":apex.apexd_test_erofs_digest",
     ":apex.apexd_test_f2fs_digest",
-    ":apex.apexd_test_classpath",
     ":apex.apexd_test_different_app",
     ":apex.apexd_test_no_hashtree",
     ":apex.apexd_test_no_hashtree_2",
     ":apex.apexd_test_no_inst_key",
     ":apex.apexd_test_f2fs_no_inst_key",
     ":apex.apexd_test_nocode",
+    ":apex.apexd_test_postinstall",
+    ":apex.apexd_test_preinstall",
+    ":apex.apexd_test_prepostinstall.fail",
     ":apex.apexd_test_v2",
     ":apex.corrupted_b146895998",
     ":apex.banned_name",
@@ -466,7 +454,6 @@ cc_test {
     ":com.android.apex.compressed.v1_original",
     ":com.android.apex.compressed.v2",
     ":com.android.apex.compressed.v2_original",
-    ":com.android.sepolicy",
     ":gen_manifest_mismatch_compressed_apex_v2",
     "apexd_testdata/com.android.apex.test_package.avbpubkey",
     "apexd_testdata/com.android.apex.compressed.avbpubkey",
@@ -487,7 +474,6 @@ cc_test {
     ":test.rebootless_apex_priv_app_in_apex",
   ],
   srcs: [
-    "apex_classpath_test.cpp",
     "apex_database_test.cpp",
     "apex_file_test.cpp",
     "apex_file_repository_test.cpp",
@@ -541,13 +527,4 @@ xsd_config {
   package_name: "com.android.apex",
   api_dir: "apex-info-list-api",
   gen_writer: true,
-}
-
-xsd_config {
-  name: "apex-info-list-tinyxml",
-  srcs: ["ApexInfoList.xsd"],
-  package_name: "com.android.apex",
-  api_dir: "apex-info-list-api",
-  gen_writer: true,
-  tinyxml: true,
 }
