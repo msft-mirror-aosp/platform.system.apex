@@ -24,7 +24,4 @@ parcelable ApexInfo {
     @utf8InCpp String versionName;
     boolean isFactory;
     boolean isActive;
-
-    // Populated only for getStagedApex() API
-    boolean hasClassPathJars;
 }
