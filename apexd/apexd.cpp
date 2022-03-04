@@ -17,22 +17,6 @@
 #define ATRACE_TAG ATRACE_TAG_PACKAGE_MANAGER
 
 #include "apexd.h"
-#include "apex_file_repository.h"
-#include "apexd_private.h"
-
-#include "apex_constants.h"
-#include "apex_database.h"
-#include "apex_file.h"
-#include "apex_manifest.h"
-#include "apex_shim.h"
-#include "apexd_checkpoint.h"
-#include "apexd_lifecycle.h"
-#include "apexd_loop.h"
-#include "apexd_rollback_utils.h"
-#include "apexd_session.h"
-#include "apexd_utils.h"
-#include "apexd_verity.h"
-#include "com_android_apex.h"
 
 #include <ApexProperties.sysprop.h>
 #include <android-base/chrono_utils.h>
@@ -45,18 +29,16 @@
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 #include <android-base/unique_fd.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <google/protobuf/util/message_differencer.h>
 #include <libavb/libavb.h>
 #include <libdm/dm.h>
 #include <libdm/dm_table.h>
 #include <libdm/dm_target.h>
-#include <selinux/android.h>
-#include <utils/Trace.h>
-
-#include <dirent.h>
-#include <fcntl.h>
 #include <linux/f2fs.h>
 #include <linux/loop.h>
+#include <selinux/android.h>
 #include <stdlib.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
@@ -65,7 +47,7 @@
 #include <sys/sysinfo.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <algorithm>
+#include <utils/Trace.h>
 
 #include <algorithm>
 #include <array>
@@ -87,6 +69,23 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "VerityUtils.h"
+#include "apex_constants.h"
+#include "apex_database.h"
+#include "apex_file.h"
+#include "apex_file_repository.h"
+#include "apex_manifest.h"
+#include "apex_shim.h"
+#include "apexd_checkpoint.h"
+#include "apexd_lifecycle.h"
+#include "apexd_loop.h"
+#include "apexd_private.h"
+#include "apexd_rollback_utils.h"
+#include "apexd_session.h"
+#include "apexd_utils.h"
+#include "apexd_verity.h"
+#include "com_android_apex.h"
+
 using android::base::boot_clock;
 using android::base::ConsumePrefix;
 using android::base::ErrnoError;
@@ -94,7 +93,6 @@ using android::base::Error;
 using android::base::GetProperty;
 using android::base::Join;
 using android::base::ParseUint;
-using android::base::ReadFully;
 using android::base::RemoveFileIfExists;
 using android::base::Result;
 using android::base::SetProperty;
@@ -721,6 +719,95 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
 
 namespace {
 
+// TODO(b/218672709): get the ro.build.version.sdk version of the device.
+const auto kSepolicyLevel = std::to_string(__ANDROID_API_T__);
+const auto kVersionedSepolicyZip = "SEPolicy-" + kSepolicyLevel + ".zip";
+const auto kVersionedSepolicySig = "SEPolicy-" + kSepolicyLevel + ".zip.sig";
+const auto kVersionedSepolicyFsv =
+    "SEPolicy-" + kSepolicyLevel + ".zip.fsv_sig";
+
+const auto kSepolicyZip = "SEPolicy.zip";
+const auto kSepolicySig = "SEPolicy.zip.sig";
+const auto kSepolicyFsv = "SEPolicy.zip.fsv_sig";
+
+Result<void> CopySepolicyToMetadata(const std::string& mount_point) {
+  LOG(DEBUG) << "Copying SEPolicy files to /metadata/sepolicy/staged.";
+  const auto policy_dir = mount_point + "/etc";
+
+  // Find SEPolicy zip and signature files.
+  std::optional<std::string> sepolicy_zip;
+  std::optional<std::string> sepolicy_sig;
+  std::optional<std::string> sepolicy_fsv;
+  auto status =
+      WalkDir(policy_dir, [&sepolicy_zip, &sepolicy_sig, &sepolicy_fsv](
+                              const std::filesystem::directory_entry& entry) {
+        if (!entry.is_regular_file()) {
+          return;
+        }
+        const auto& path = entry.path().string();
+        if (base::EndsWith(path, kVersionedSepolicyZip)) {
+          sepolicy_zip = path;
+        } else if (base::EndsWith(path, kVersionedSepolicySig)) {
+          sepolicy_sig = path;
+        } else if (base::EndsWith(path, kVersionedSepolicyFsv)) {
+          sepolicy_fsv = path;
+        }
+      });
+  if (!status.ok()) {
+    return status.error();
+  }
+  if (sepolicy_zip->empty() || sepolicy_sig->empty() || sepolicy_fsv->empty()) {
+    return Error() << "SEPolicy files not found.";
+  }
+  LOG(INFO) << "SEPolicy files found.";
+
+  // Set up staging directory.
+  std::error_code ec;
+  const auto staged_dir =
+      std::string(gConfig->metadata_sepolicy_staged_dir) + "/";
+  status = CreateDirIfNeeded(staged_dir, 0755);
+  if (!status.ok()) {
+    return status.error();
+  }
+
+  // Clean up after myself.
+  auto scope_guard = android::base::make_scope_guard([&staged_dir]() {
+    std::error_code ec;
+    std::filesystem::remove_all(staged_dir, ec);
+    if (ec) {
+      LOG(WARNING) << "Failed to clear " << staged_dir << ": " << ec.message();
+    }
+  });
+
+  // Copy files to staged folder.
+  const auto stagedSepolicyZip = staged_dir + kSepolicyZip;
+  const auto stagedSepolicyFsv = staged_dir + kSepolicyFsv;
+  std::map<std::string, std::string> from_to = {
+      {*sepolicy_zip, stagedSepolicyZip},
+      {*sepolicy_sig, staged_dir + kSepolicySig},
+      {*sepolicy_fsv, stagedSepolicyFsv}};
+  for (const auto& [from, to] : from_to) {
+    std::filesystem::copy_file(
+        from, to, std::filesystem::copy_options::update_existing, ec);
+    if (ec) {
+      return Error() << "Failed to copy " << from << " to " << to << ": "
+                     << ec.message();
+    }
+  }
+
+  status = enableFsVerity(stagedSepolicyZip, stagedSepolicyFsv);
+  if (!status.ok()) {
+    // TODO(b/218672709): once we have a release certificate available, return
+    // an error and make the ApexdMountTest#CopySepolicyToMetadata test pass.
+    LOG(ERROR) << status.error().message();
+  } else {
+    LOG(INFO) << "fs-verity enabled on " << stagedSepolicyZip;
+  }
+
+  scope_guard.Disable();
+  return {};
+}
+
 template <typename VerifyFn>
 Result<void> RunVerifyFnInsideTempMount(const ApexFile& apex,
                                         const VerifyFn& verify_fn,
@@ -828,10 +915,13 @@ Result<void> VerifyPackageStagedInstall(const ApexFile& apex_file) {
     return verify_package_boot_status;
   }
 
-  constexpr const auto kSuccessFn = [](const std::string& /*mount_point*/) {
+  const auto validate_fn = [&apex_file](const std::string& mount_point) {
+    if (apex_file.GetManifest().name() == "com.android.sepolicy.apex") {
+      return CopySepolicyToMetadata(mount_point);
+    }
     return Result<void>{};
   };
-  return RunVerifyFnInsideTempMount(apex_file, kSuccessFn, false);
+  return RunVerifyFnInsideTempMount(apex_file, validate_fn, false);
 }
 
 template <typename VerifyApexFn>
@@ -1591,6 +1681,7 @@ Result<ApexFile> GetActivePackage(const std::string& packageName) {
  * Returns without error only if session was successfully aborted.
  **/
 Result<void> AbortStagedSession(int session_id) {
+  // TODO(b/218672709): Delete staged SEPolicy file if the session is aborted.
   auto session = ApexSession::GetSession(session_id);
   if (!session.ok()) {
     return Error() << "No session found with id " << session_id;
@@ -2857,6 +2948,7 @@ void OnStart() {
   const auto& all_apex = instance.AllApexFilesByName();
   // There can be multiple APEX packages with package name X. Determine which
   // one to activate.
+  // TODO(b/218672709): skip activation of sepolicy APEX during boot.
   auto activation_list = SelectApexForActivation(all_apex, instance);
 
   // Process compressed APEX, if any
