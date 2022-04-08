@@ -23,7 +23,9 @@
 
 #include <android-base/result.h>
 #include <libavb/libavb.h>
+#include <ziparchive/zip_archive.h>
 
+#include "apex_constants.h"
 #include "apex_manifest.h"
 
 namespace android {
@@ -44,41 +46,42 @@ class ApexFile {
   static android::base::Result<ApexFile> Open(const std::string& path);
   ApexFile() = delete;
   ApexFile(ApexFile&&) = default;
-  ApexFile& operator=(ApexFile&&) = default;
 
   const std::string& GetPath() const { return apex_path_; }
-  const std::optional<int32_t>& GetImageOffset() const { return image_offset_; }
-  const std::optional<size_t>& GetImageSize() const { return image_size_; }
-  const ::apex::proto::ApexManifest& GetManifest() const { return manifest_; }
+  int32_t GetImageOffset() const { return image_offset_; }
+  size_t GetImageSize() const { return image_size_; }
+  const ApexManifest& GetManifest() const { return manifest_; }
   const std::string& GetBundledPublicKey() const { return apex_pubkey_; }
-  const std::optional<std::string>& GetFsType() const { return fs_type_; }
-  android::base::Result<ApexVerityData> VerifyApexVerity(
-      const std::string& public_key) const;
-  bool IsCompressed() const { return is_compressed_; }
-  android::base::Result<void> Decompress(const std::string& output_path) const;
+  bool IsBuiltin() const { return is_builtin_; }
+  android::base::Result<ApexVerityData> VerifyApexVerity() const;
+  android::base::Result<void> VerifyManifestMatches(
+      const std::string& mount_path) const;
 
  private:
-  ApexFile(const std::string& apex_path,
-           const std::optional<int32_t>& image_offset,
-           const std::optional<size_t>& image_size,
-           ::apex::proto::ApexManifest manifest, const std::string& apex_pubkey,
-           const std::optional<std::string>& fs_type, bool is_compressed)
+  ApexFile(const std::string& apex_path, int32_t image_offset,
+           size_t image_size, ApexManifest manifest,
+           const std::string& apex_pubkey, bool is_builtin)
       : apex_path_(apex_path),
         image_offset_(image_offset),
         image_size_(image_size),
         manifest_(std::move(manifest)),
         apex_pubkey_(apex_pubkey),
-        fs_type_(fs_type),
-        is_compressed_(is_compressed) {}
+        is_builtin_(is_builtin) {}
 
   std::string apex_path_;
-  std::optional<int32_t> image_offset_;
-  std::optional<size_t> image_size_;
-  ::apex::proto::ApexManifest manifest_;
+  int32_t image_offset_;
+  size_t image_size_;
+  ApexManifest manifest_;
   std::string apex_pubkey_;
-  std::optional<std::string> fs_type_;
-  bool is_compressed_;
+  bool is_builtin_;
 };
+
+android::base::Result<std::vector<std::string>> FindApexes(
+    const std::vector<std::string>& paths);
+android::base::Result<std::vector<std::string>> FindApexFilesByName(
+    const std::string& path);
+
+bool isPathForBuiltinApexes(const std::string& path);
 
 }  // namespace apex
 }  // namespace android

@@ -22,8 +22,6 @@
 
 #include "apex_manifest.h"
 
-using ::apex::proto::ApexManifest;
-
 namespace android {
 namespace apex {
 

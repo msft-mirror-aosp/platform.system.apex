@@ -25,6 +25,10 @@
 #include <android-base/result.h>
 #include <android-base/scopeguard.h>
 #include <logwrap/logwrap.h>
+#include <selinux/android.h>
+
+using android::base::Error;
+using android::base::Result;
 
 namespace android {
 namespace apex {
@@ -36,7 +40,7 @@ static constexpr const char* kCpPath = "/system/bin/cp";
  * path. Note that this will fail if run before APEXes are mounted, due to a
  * dependency on runtime.
  */
-inline int32_t CopyDirectoryRecursive(const char* from, const char* to) {
+int32_t copy_directory_recursive(const char* from, const char* to) {
   const char* const argv[] = {
       kCpPath,
       "-F", /* delete any existing destination file first
@@ -58,15 +62,15 @@ inline int32_t CopyDirectoryRecursive(const char* from, const char* to) {
  * from from_path into to_path. Note that this must be run after APEXes are
  * mounted.
  */
-inline android::base::Result<void> ReplaceFiles(const std::string& from_path,
-                                                const std::string& to_path) {
+inline Result<void> ReplaceFiles(const std::string& from_path,
+                                 const std::string& to_path) {
   namespace fs = std::filesystem;
 
   std::error_code error_code;
   fs::remove_all(to_path, error_code);
   if (error_code) {
-    return android::base::Error() << "Failed to delete existing files at "
-                                  << to_path << " : " << error_code.message();
+    return Error() << "Failed to delete existing files at " << to_path << " : "
+                   << error_code.message();
   }
 
   auto deleter = [&] {
@@ -79,12 +83,20 @@ inline android::base::Result<void> ReplaceFiles(const std::string& from_path,
   };
   auto scope_guard = android::base::make_scope_guard(deleter);
 
-  int rc = CopyDirectoryRecursive(from_path.c_str(), to_path.c_str());
+  int rc = copy_directory_recursive(from_path.c_str(), to_path.c_str());
   if (rc != 0) {
-    return android::base::Error() << "Failed to copy from [" << from_path
-                                  << "] to [" << to_path << "]";
+    return Error() << "Failed to copy from [" << from_path << "] to ["
+                   << to_path << "]";
   }
   scope_guard.Disable();
+  return {};
+}
+
+inline Result<void> RestoreconPath(const std::string& path) {
+  unsigned int seflags = SELINUX_ANDROID_RESTORECON_RECURSE;
+  if (selinux_android_restorecon(path.c_str(), seflags) < 0) {
+    return Error() << "Failed to restorecon " << path;
+  }
   return {};
 }
 

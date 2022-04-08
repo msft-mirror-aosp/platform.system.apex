@@ -29,5 +29,4 @@ parcelable ApexSessionInfo {
     boolean isReverted;
     boolean isRevertFailed;
     @utf8InCpp String crashingNativeProcess;
-    @utf8InCpp String errorMessage;
 }

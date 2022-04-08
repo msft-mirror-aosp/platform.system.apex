@@ -27,20 +27,16 @@ namespace apex {
 
 class ApexFile;
 
-// Forks into: apexd --pre-install <mount-point-of-apex-with-hook>
-// [<other-mount-points>] The caller must pass the temp mount point for each
-// apex file.
+// Temp mounts given apexes and then forks into:
+// apexd --pre-install <mount-point-of-apex-with-hook> [<other-mount-points>]
 android::base::Result<void> StagePreInstall(
-    const std::vector<ApexFile>& apexes,
-    const std::vector<std::string>& mount_points);
+    const std::vector<ApexFile>& apexes);
 int RunPreInstall(char** argv);
 
-// Forks into: apexd --post-install <mount-point-of-apex-with-hook>
-// [<other-mount-points>] The caller must pass the temp mount point for each
-// apex file.
+// Temp mounts given apexes and then forks into:
+// apexd --post-install <mount-point-of-apex-with-hook> [<other-mount-points>]
 android::base::Result<void> StagePostInstall(
-    const std::vector<ApexFile>& apexes,
-    const std::vector<std::string>& mount_points);
+    const std::vector<ApexFile>& apexes);
 int RunPostInstall(char** argv);
 
 }  // namespace apex

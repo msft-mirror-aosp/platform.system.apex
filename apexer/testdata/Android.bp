@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package {
-    default_applicable_licenses: ["Android-Apache-2.0"],
-}
-
 android_app_certificate {
     name: "com.android.example.apex.certificate",
     // This will use com.android.my.apex.x509.pem (the cert) and
@@ -37,8 +33,6 @@ apex {
     key: "com.android.example.apex.key",
     certificate: ":com.android.example.apex.certificate",
     installable: false,
-    updatable:false,
-    generate_hashtree: false,
 }
 
 apex {
@@ -50,7 +44,6 @@ apex {
     certificate: ":com.android.example.apex.certificate",
     min_sdk_version: "29",
     installable: false,
-    generate_hashtree: false,
 }
 
 apex {
@@ -62,7 +55,6 @@ apex {
     certificate: ":com.android.example.apex.certificate",
     installable: false,
     logging_parent: "foobar",
-    updatable: false,
 }
 
 apex {
@@ -74,5 +66,4 @@ apex {
     certificate: ":com.android.example.apex.certificate",
     installable: false,
     package_name: "com.android.overridden.example.apex",
-    updatable: false,
 }

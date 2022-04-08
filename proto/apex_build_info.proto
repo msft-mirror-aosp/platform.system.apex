@@ -48,7 +48,4 @@ message ApexBuildInfo {
 
   // Value of --logging_parent passed at build time.
   string logging_parent = 9;
-
-  // Value of --payload_fs_type passed at build time.
-  string payload_fs_type = 10;
 }
