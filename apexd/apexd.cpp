@@ -17,22 +17,6 @@
 #define ATRACE_TAG ATRACE_TAG_PACKAGE_MANAGER
 
 #include "apexd.h"
-#include "apex_file_repository.h"
-#include "apexd_private.h"
-
-#include "apex_constants.h"
-#include "apex_database.h"
-#include "apex_file.h"
-#include "apex_manifest.h"
-#include "apex_shim.h"
-#include "apexd_checkpoint.h"
-#include "apexd_lifecycle.h"
-#include "apexd_loop.h"
-#include "apexd_rollback_utils.h"
-#include "apexd_session.h"
-#include "apexd_utils.h"
-#include "apexd_verity.h"
-#include "com_android_apex.h"
 
 #include <ApexProperties.sysprop.h>
 #include <android-base/chrono_utils.h>
@@ -45,18 +29,16 @@
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 #include <android-base/unique_fd.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <google/protobuf/util/message_differencer.h>
 #include <libavb/libavb.h>
 #include <libdm/dm.h>
 #include <libdm/dm_table.h>
 #include <libdm/dm_target.h>
-#include <selinux/android.h>
-#include <utils/Trace.h>
-
-#include <dirent.h>
-#include <fcntl.h>
 #include <linux/f2fs.h>
 #include <linux/loop.h>
+#include <selinux/android.h>
 #include <stdlib.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
@@ -65,7 +47,7 @@
 #include <sys/sysinfo.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <algorithm>
+#include <utils/Trace.h>
 
 #include <algorithm>
 #include <array>
@@ -87,6 +69,23 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "VerityUtils.h"
+#include "apex_constants.h"
+#include "apex_database.h"
+#include "apex_file.h"
+#include "apex_file_repository.h"
+#include "apex_manifest.h"
+#include "apex_shim.h"
+#include "apexd_checkpoint.h"
+#include "apexd_lifecycle.h"
+#include "apexd_loop.h"
+#include "apexd_private.h"
+#include "apexd_rollback_utils.h"
+#include "apexd_session.h"
+#include "apexd_utils.h"
+#include "apexd_verity.h"
+#include "com_android_apex.h"
+
 using android::base::boot_clock;
 using android::base::ConsumePrefix;
 using android::base::ErrnoError;
@@ -94,7 +93,6 @@ using android::base::Error;
 using android::base::GetProperty;
 using android::base::Join;
 using android::base::ParseUint;
-using android::base::ReadFully;
 using android::base::RemoveFileIfExists;
 using android::base::Result;
 using android::base::SetProperty;
@@ -782,20 +780,29 @@ Result<void> CopySepolicyToMetadata(const std::string& mount_point) {
   });
 
   // Copy files to staged folder.
+  const auto stagedSepolicyZip = staged_dir + kSepolicyZip;
+  const auto stagedSepolicyFsv = staged_dir + kSepolicyFsv;
   std::map<std::string, std::string> from_to = {
-      {*sepolicy_zip, staged_dir + kSepolicyZip},
+      {*sepolicy_zip, stagedSepolicyZip},
       {*sepolicy_sig, staged_dir + kSepolicySig},
-      {*sepolicy_fsv, staged_dir + kSepolicyFsv}};
+      {*sepolicy_fsv, stagedSepolicyFsv}};
   for (const auto& [from, to] : from_to) {
     std::filesystem::copy_file(
-        from, to, std::filesystem::copy_options::overwrite_existing, ec);
+        from, to, std::filesystem::copy_options::update_existing, ec);
     if (ec) {
       return Error() << "Failed to copy " << from << " to " << to << ": "
                      << ec.message();
     }
   }
 
-  // TODO(b/218672709): if the kernel supports fs-verity, apply it after copy.
+  status = enableFsVerity(stagedSepolicyZip, stagedSepolicyFsv);
+  if (!status.ok()) {
+    // TODO(b/218672709): once we have a release certificate available, return
+    // an error and make the ApexdMountTest#CopySepolicyToMetadata test pass.
+    LOG(ERROR) << status.error().message();
+  } else {
+    LOG(INFO) << "fs-verity enabled on " << stagedSepolicyZip;
+  }
 
   scope_guard.Disable();
   return {};
@@ -898,6 +905,8 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
   return {};
 }
 
+static constexpr auto kSepolicyApexName = "com.android.sepolicy.apex";
+
 // A version of apex verification that happens on SubmitStagedSession.
 // This function contains checks that might be expensive to perform, e.g. temp
 // mounting a package and reading entire dm-verity device, and shouldn't be run
@@ -909,7 +918,7 @@ Result<void> VerifyPackageStagedInstall(const ApexFile& apex_file) {
   }
 
   const auto validate_fn = [&apex_file](const std::string& mount_point) {
-    if (apex_file.GetManifest().name() == "com.android.sepolicy.apex") {
+    if (apex_file.GetManifest().name() == kSepolicyApexName) {
       return CopySepolicyToMetadata(mount_point);
     }
     return Result<void>{};
@@ -1668,17 +1677,40 @@ Result<ApexFile> GetActivePackage(const std::string& packageName) {
   return ErrnoError() << "Cannot find matching package for: " << packageName;
 }
 
+Result<void> DeleteStagedSepolicy() {
+  const auto staged_dir =
+      std::string(gConfig->metadata_sepolicy_staged_dir) + "/";
+  LOG(DEBUG) << "Deleting " << staged_dir;
+  std::error_code ec;
+  auto removed = std::filesystem::remove_all(staged_dir, ec);
+  if (removed == 0) {
+    LOG(INFO) << staged_dir << " already deleted.";
+  } else if (ec) {
+    return Error() << "Failed to clear " << staged_dir << ": " << ec.message();
+  }
+  return {};
+}
+
 /**
  * Abort individual staged session.
  *
  * Returns without error only if session was successfully aborted.
  **/
 Result<void> AbortStagedSession(int session_id) {
-  // TODO(b/218672709): Delete staged SEPolicy file if the session is aborted.
   auto session = ApexSession::GetSession(session_id);
   if (!session.ok()) {
     return Error() << "No session found with id " << session_id;
   }
+
+  const auto& apex_names = session->GetApexNames();
+  if (std::find(std::begin(apex_names), std::end(apex_names),
+                kSepolicyApexName) != std::end(apex_names)) {
+    const auto result = DeleteStagedSepolicy();
+    if (!result.ok()) {
+      return result.error();
+    }
+  }
+
   switch (session->GetState()) {
     case SessionState::VERIFIED:
       [[clang::fallthrough]];
@@ -2189,7 +2221,6 @@ void ScanStagedSessionsDirAndStage() {
         LOG(ERROR) << "Cannot open apex file during staging: " << apex;
         continue;
       }
-      session.AddApexName(apex_file->GetManifest().name());
     }
 
     const Result<void> result = StagePackages(apexes);
@@ -3093,6 +3124,9 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   session->SetHasRollbackEnabled(has_rollback_enabled);
   session->SetIsRollback(is_rollback);
   session->SetRollbackId(rollback_id);
+  for (const auto& apex_file : ret) {
+    session->AddApexName(apex_file.GetManifest().name());
+  }
   Result<void> commit_status =
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {
