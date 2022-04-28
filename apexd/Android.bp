@@ -87,6 +87,7 @@ cc_defaults {
     "libavb",
     "libdm",
     "libext2_uuid",
+    "libsigningutils",
     "libverity_tree",
     "libvold_binder",
     "libxml2",
@@ -214,6 +215,7 @@ cc_defaults {
     "lib_apex_manifest_proto",
     "lib_microdroid_metadata_proto",
     "libavb",
+    "libverity_tree",
   ],
   static: {
     whole_static_libs: ["libc++fs"],
@@ -235,6 +237,7 @@ cc_library_static {
     "apex_file_repository.cpp",
     "apex_manifest.cpp",
     "apex_shim.cpp",
+    "apexd_verity.cpp",
   ],
   host_supported: true,
   target: {
@@ -248,6 +251,7 @@ cc_library_static {
   export_header_lib_headers: [
     "libutils_headers",
   ],
+  export_include_dirs: ["."],
 }
 
 genrule {
