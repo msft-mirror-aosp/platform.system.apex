@@ -122,6 +122,7 @@ static constexpr const char* kDmVerityRestartOnCorruption =
 
 MountedApexDatabase gMountedApexes;
 
+// Can be set by SetConfig()
 std::optional<ApexdConfig> gConfig;
 
 CheckpointInterface* gVoldService;
@@ -1637,31 +1638,22 @@ std::vector<ApexFile> GetFactoryPackages() {
     }
   }
 
-  for (const auto& dir : gConfig->apex_built_in_dirs) {
-    auto all_apex_files = FindFilesBySuffix(
-        dir, {kApexPackageSuffix, kCompressedApexPackageSuffix});
-    if (!all_apex_files.ok()) {
-      LOG(ERROR) << all_apex_files.error();
+  const auto& file_repository = ApexFileRepository::GetInstance();
+  for (const auto& ref : file_repository.GetPreInstalledApexFiles()) {
+    Result<ApexFile> apex_file = ApexFile::Open(ref.get().GetPath());
+    if (!apex_file.ok()) {
+      LOG(ERROR) << apex_file.error();
+      continue;
+    }
+    // Ignore compressed APEX if it has been decompressed already
+    if (apex_file->IsCompressed() &&
+        std::find(decompressed_pkg_names.begin(), decompressed_pkg_names.end(),
+                  apex_file->GetManifest().name()) !=
+            decompressed_pkg_names.end()) {
       continue;
     }
 
-    for (const std::string& path : *all_apex_files) {
-      Result<ApexFile> apex_file = ApexFile::Open(path);
-      if (!apex_file.ok()) {
-        LOG(ERROR) << apex_file.error();
-        continue;
-      }
-      // Ignore compressed APEX if it has been decompressed already
-      if (apex_file->IsCompressed() &&
-          std::find(decompressed_pkg_names.begin(),
-                    decompressed_pkg_names.end(),
-                    apex_file->GetManifest().name()) !=
-              decompressed_pkg_names.end()) {
-        continue;
-      }
-
-      ret.emplace_back(std::move(*apex_file));
-    }
+    ret.emplace_back(std::move(*apex_file));
   }
   return ret;
 }
