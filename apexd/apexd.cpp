@@ -122,6 +122,7 @@ static constexpr const char* kDmVerityRestartOnCorruption =
 
 MountedApexDatabase gMountedApexes;
 
+// Can be set by SetConfig()
 std::optional<ApexdConfig> gConfig;
 
 CheckpointInterface* gVoldService;
@@ -905,6 +906,8 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
   return {};
 }
 
+static constexpr auto kSepolicyApexName = "com.android.sepolicy.apex";
+
 // A version of apex verification that happens on SubmitStagedSession.
 // This function contains checks that might be expensive to perform, e.g. temp
 // mounting a package and reading entire dm-verity device, and shouldn't be run
@@ -916,7 +919,7 @@ Result<void> VerifyPackageStagedInstall(const ApexFile& apex_file) {
   }
 
   const auto validate_fn = [&apex_file](const std::string& mount_point) {
-    if (apex_file.GetManifest().name() == "com.android.sepolicy.apex") {
+    if (apex_file.GetManifest().name() == kSepolicyApexName) {
       return CopySepolicyToMetadata(mount_point);
     }
     return Result<void>{};
@@ -1635,31 +1638,22 @@ std::vector<ApexFile> GetFactoryPackages() {
     }
   }
 
-  for (const auto& dir : gConfig->apex_built_in_dirs) {
-    auto all_apex_files = FindFilesBySuffix(
-        dir, {kApexPackageSuffix, kCompressedApexPackageSuffix});
-    if (!all_apex_files.ok()) {
-      LOG(ERROR) << all_apex_files.error();
+  const auto& file_repository = ApexFileRepository::GetInstance();
+  for (const auto& ref : file_repository.GetPreInstalledApexFiles()) {
+    Result<ApexFile> apex_file = ApexFile::Open(ref.get().GetPath());
+    if (!apex_file.ok()) {
+      LOG(ERROR) << apex_file.error();
+      continue;
+    }
+    // Ignore compressed APEX if it has been decompressed already
+    if (apex_file->IsCompressed() &&
+        std::find(decompressed_pkg_names.begin(), decompressed_pkg_names.end(),
+                  apex_file->GetManifest().name()) !=
+            decompressed_pkg_names.end()) {
       continue;
     }
 
-    for (const std::string& path : *all_apex_files) {
-      Result<ApexFile> apex_file = ApexFile::Open(path);
-      if (!apex_file.ok()) {
-        LOG(ERROR) << apex_file.error();
-        continue;
-      }
-      // Ignore compressed APEX if it has been decompressed already
-      if (apex_file->IsCompressed() &&
-          std::find(decompressed_pkg_names.begin(),
-                    decompressed_pkg_names.end(),
-                    apex_file->GetManifest().name()) !=
-              decompressed_pkg_names.end()) {
-        continue;
-      }
-
-      ret.emplace_back(std::move(*apex_file));
-    }
+    ret.emplace_back(std::move(*apex_file));
   }
   return ret;
 }
@@ -1675,17 +1669,40 @@ Result<ApexFile> GetActivePackage(const std::string& packageName) {
   return ErrnoError() << "Cannot find matching package for: " << packageName;
 }
 
+Result<void> DeleteStagedSepolicy() {
+  const auto staged_dir =
+      std::string(gConfig->metadata_sepolicy_staged_dir) + "/";
+  LOG(DEBUG) << "Deleting " << staged_dir;
+  std::error_code ec;
+  auto removed = std::filesystem::remove_all(staged_dir, ec);
+  if (removed == 0) {
+    LOG(INFO) << staged_dir << " already deleted.";
+  } else if (ec) {
+    return Error() << "Failed to clear " << staged_dir << ": " << ec.message();
+  }
+  return {};
+}
+
 /**
  * Abort individual staged session.
  *
  * Returns without error only if session was successfully aborted.
  **/
 Result<void> AbortStagedSession(int session_id) {
-  // TODO(b/218672709): Delete staged SEPolicy file if the session is aborted.
   auto session = ApexSession::GetSession(session_id);
   if (!session.ok()) {
     return Error() << "No session found with id " << session_id;
   }
+
+  const auto& apex_names = session->GetApexNames();
+  if (std::find(std::begin(apex_names), std::end(apex_names),
+                kSepolicyApexName) != std::end(apex_names)) {
+    const auto result = DeleteStagedSepolicy();
+    if (!result.ok()) {
+      return result.error();
+    }
+  }
+
   switch (session->GetState()) {
     case SessionState::VERIFIED:
       [[clang::fallthrough]];
@@ -2196,7 +2213,6 @@ void ScanStagedSessionsDirAndStage() {
         LOG(ERROR) << "Cannot open apex file during staging: " << apex;
         continue;
       }
-      session.AddApexName(apex_file->GetManifest().name());
     }
 
     const Result<void> result = StagePackages(apexes);
@@ -3100,6 +3116,9 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   session->SetHasRollbackEnabled(has_rollback_enabled);
   session->SetIsRollback(is_rollback);
   session->SetRollbackId(rollback_id);
+  for (const auto& apex_file : ret) {
+    session->AddApexName(apex_file.GetManifest().name());
+  }
   Result<void> commit_status =
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {
