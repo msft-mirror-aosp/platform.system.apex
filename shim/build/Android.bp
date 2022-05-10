@@ -101,7 +101,8 @@ apex {
 
 apex {
   name: "com.android.apex.cts.shim.v2_sign_payload_with_different_key",
-  manifest: "manifest_v2.json",
+  // Use manifest_v2_rebootless to also re-use this APEX in the rebootless update test case.
+  manifest: "manifest_v2_rebootless.json",
   androidManifest: "AndroidManifest.xml",
   file_contexts: ":apex.test-file_contexts",
   key: "com.android.apex.cts.shim.debug.key",
@@ -139,7 +140,8 @@ apex {
 
 apex {
   name: "com.android.apex.cts.shim.v2_unsigned_payload",
-  manifest: "manifest_v2.json",
+  // Use manifest_v2_rebootless to also re-use this APEX in the rebootless update test case.
+  manifest: "manifest_v2_rebootless.json",
   androidManifest: "AndroidManifest.xml",
   file_contexts: ":apex.test-file_contexts",
   key: "com.android.apex.cts.shim.key",
@@ -154,7 +156,8 @@ apex {
 override_apex {
     name: "com.android.apex.cts.shim.v2_different_package_name",
     package_name: "com.android.apex.cts.shim.different",
-    base: "com.android.apex.cts.shim.v2",
+    // Use rebootless APEX to re-use this APEX in the rebootless update test case.
+    base: "com.android.apex.cts.shim.v2_rebootless",
 }
 
 genrule {
@@ -174,7 +177,8 @@ prebuilt_etc {
 // to stage it should fail.
 apex {
   name: "com.android.apex.cts.shim.v2_wrong_sha",
-  manifest: "manifest_v2.json",
+  // Use manifest_v2_rebootless to also re-use this APEX in the rebootless update test case.
+  manifest: "manifest_v2_rebootless.json",
   androidManifest: "AndroidManifest.xml",
   file_contexts: ":apex.test-file_contexts",
   key: "com.android.apex.cts.shim.key",
@@ -192,7 +196,8 @@ prebuilt_etc {
 
 apex {
   name: "com.android.apex.cts.shim.v2_additional_file",
-  manifest: "manifest_v2.json",
+  // Use manifest_v2_rebootless to also re-use this APEX in the rebootless update test case.
+  manifest: "manifest_v2_rebootless.json",
   androidManifest: "AndroidManifest.xml",
   file_contexts: ":apex.test-file_contexts",
   key: "com.android.apex.cts.shim.key",
@@ -211,7 +216,8 @@ prebuilt_etc {
 
 apex {
   name: "com.android.apex.cts.shim.v2_additional_folder",
-  manifest: "manifest_v2.json",
+  // Use manifest_v2_rebootless to also re-use this APEX in the rebootless update test case.
+  manifest: "manifest_v2_rebootless.json",
   androidManifest: "AndroidManifest.xml",
   file_contexts: ":apex.test-file_contexts",
   key: "com.android.apex.cts.shim.key",
@@ -259,8 +265,10 @@ genrule {
     ":com.android.apex.cts.shim.v2_with_post_install_hook",
     ":com.android.apex.cts.shim.v2_sdk_target_p",
     ":com.android.apex.cts.shim.v2_apk_in_apex_sdk_target_p",
+    ":com.android.apex.cts.shim.v2_apk_in_apex_upgrades",
     ":com.android.apex.cts.shim.v2_rebootless",
     ":com.android.apex.cts.shim.v3",
+    ":com.android.apex.cts.shim.v3_rebootless",
     ":com.android.apex.cts.shim.v3_signed_bob",
     ":com.android.apex.cts.shim.v3_signed_bob_rot",
   ],
@@ -335,7 +343,8 @@ apex {
 
 apex {
   name: "com.android.apex.cts.shim.v2_different_certificate",
-  manifest: "manifest_v2.json",
+  // Use manifest_v2_rebootless to also re-use this APEX in the rebootless update test case.
+  manifest: "manifest_v2_rebootless.json",
   androidManifest: "AndroidManifest.xml",
   file_contexts: ":apex.test-file_contexts",
   key: "com.android.apex.cts.shim.key",
@@ -439,7 +448,7 @@ genrule {
     targets: ["com.android.apex.cts.shim.v2_signed_bob_rot"],
     dest: "com.android.apex.cts.shim.v2_signed_bob_rot.apex",
   },
-  cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot) --out $(out) $(location :com.android.apex.cts.shim.v2)",
+  cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot) --rotation-min-sdk-version 28 --out $(out) $(location :com.android.apex.cts.shim.v2)",
 }
 
 // v2 cts shim package signed by bob + lineage + rollback capability
@@ -457,7 +466,7 @@ genrule {
     targets: ["com.android.apex.cts.shim.v2_signed_bob_rot_rollback"],
     dest: "com.android.apex.cts.shim.v2_signed_bob_rot_rollback.apex",
   },
-  cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot.rollback) --out $(out) $(location :com.android.apex.cts.shim.v2)",
+  cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot.rollback) --rotation-min-sdk-version 28 --out $(out) $(location :com.android.apex.cts.shim.v2)",
 }
 
 // v3 cts shim package signed by bob
@@ -492,7 +501,7 @@ genrule {
     targets: ["com.android.apex.cts.shim.v3_signed_bob_rot"],
     dest: "com.android.apex.cts.shim.v3_signed_bob_rot.apex",
   },
-  cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot) --out $(out) $(location :com.android.apex.cts.shim.v3)",
+  cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot) --rotation-min-sdk-version 28 --out $(out) $(location :com.android.apex.cts.shim.v3)",
 }
 
 // This one is only used in ApexdHostTest and not meant to be installed
@@ -521,7 +530,8 @@ genrule {
 // Apex shim that targets an old sdk (P)
 apex {
   name: "com.android.apex.cts.shim.v2_sdk_target_p",
-  manifest: "manifest_v2.json",
+  // Use manifest_v2_rebootless to also re-use this APEX in the rebootless update test case.
+  manifest: "manifest_v2_rebootless.json",
   androidManifest: "AndroidManifestSdkTargetP.xml",
   file_contexts: ":apex.test-file_contexts",
   key: "com.android.apex.cts.shim.key",
@@ -547,7 +557,8 @@ apex {
 // Apex shim with unsigned apk
 genrule {
   name: "com.android.apex.cts.shim.v2_unsigned_apk_container",
-  srcs: [":com.android.apex.cts.shim.v2"],
+  // Use shim.v2_rebootless to re-use same APEX in the rebootless update test case.
+  srcs: [":com.android.apex.cts.shim.v2_rebootless"],
   out: ["com.android.apex.cts.shim.v2_unsigned_apk_container.apex"],
   cmd: "cp -v $(in) $(out) && zip -d $(out) META-INF*",
 }
@@ -569,6 +580,19 @@ apex {
   file_contexts: ":apex.test-file_contexts",
   key: "com.android.apex.cts.shim.key",
   prebuilts: ["hash_of_dev_null"],
+  installable: false,
+  updatable: false,
+}
+
+// Apex shim with upgraded apk-in-apexes
+apex {
+  name: "com.android.apex.cts.shim.v2_apk_in_apex_upgrades",
+  manifest: "manifest_v2.json",
+  androidManifest: "AndroidManifest.xml",
+  file_contexts: ":apex.test-file_contexts",
+  key: "com.android.apex.cts.shim.key",
+  prebuilts: ["hash_of_dev_null"],
+  apps: ["CtsShim", "CtsShimPrivUpgrade"],
   installable: false,
   updatable: false,
 }
