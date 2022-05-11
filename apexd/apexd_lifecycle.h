@@ -32,6 +32,8 @@ class ApexdLifecycle {
   ApexdLifecycle& operator=(const ApexdLifecycle&) = delete;
   ApexdLifecycle& operator=(ApexdLifecycle&&) = delete;
 
+  void WaitForBootStatus();
+
  public:
   static ApexdLifecycle& GetInstance() {
     static ApexdLifecycle instance;
@@ -39,8 +41,8 @@ class ApexdLifecycle {
   }
   bool IsBooting();
   void MarkBootCompleted();
-  void WaitForBootStatus(
-      android::base::Result<void> (&rollback_fn)(const std::string&));
+  void WaitForBootStatus(android::base::Result<void> (&rollback_fn)(
+      const std::string&, const std::string&));
 };
 }  // namespace apex
 }  // namespace android

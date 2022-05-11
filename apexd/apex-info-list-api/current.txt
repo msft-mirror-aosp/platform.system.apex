@@ -5,16 +5,20 @@ package com.android.apex {
     ctor public ApexInfo();
     method public boolean getIsActive();
     method public boolean getIsFactory();
+    method public long getLastUpdateMillis();
     method public String getModuleName();
     method public String getModulePath();
     method public String getPreinstalledModulePath();
+    method public boolean getProvideSharedApexLibs();
     method public long getVersionCode();
     method public String getVersionName();
     method public void setIsActive(boolean);
     method public void setIsFactory(boolean);
+    method public void setLastUpdateMillis(long);
     method public void setModuleName(String);
     method public void setModulePath(String);
     method public void setPreinstalledModulePath(String);
+    method public void setProvideSharedApexLibs(boolean);
     method public void setVersionCode(long);
     method public void setVersionName(String);
   }
