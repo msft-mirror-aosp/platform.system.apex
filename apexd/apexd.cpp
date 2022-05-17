@@ -122,11 +122,21 @@ static constexpr const char* kDmVerityRestartOnCorruption =
 
 MountedApexDatabase gMountedApexes;
 
+// Can be set by SetConfig()
 std::optional<ApexdConfig> gConfig;
 
 CheckpointInterface* gVoldService;
 bool gSupportsFsCheckpoints = false;
 bool gInFsCheckpointMode = false;
+
+// APEXEs for which a different version was activated than in the previous boot.
+// This can happen in the following scenarios:
+//  1. This APEX is part of the staged session that was applied during this
+//    boot.
+//  2. This is a compressed APEX that was decompressed during this boot.
+//  3. We failed to activate APEX from /data/apex/active and fallback to the
+//  pre-installed APEX.
+std::set<std::string> gChangedActiveApexes;
 
 static constexpr size_t kLoopDeviceSetupAttempts = 3u;
 
@@ -1637,31 +1647,22 @@ std::vector<ApexFile> GetFactoryPackages() {
     }
   }
 
-  for (const auto& dir : gConfig->apex_built_in_dirs) {
-    auto all_apex_files = FindFilesBySuffix(
-        dir, {kApexPackageSuffix, kCompressedApexPackageSuffix});
-    if (!all_apex_files.ok()) {
-      LOG(ERROR) << all_apex_files.error();
+  const auto& file_repository = ApexFileRepository::GetInstance();
+  for (const auto& ref : file_repository.GetPreInstalledApexFiles()) {
+    Result<ApexFile> apex_file = ApexFile::Open(ref.get().GetPath());
+    if (!apex_file.ok()) {
+      LOG(ERROR) << apex_file.error();
+      continue;
+    }
+    // Ignore compressed APEX if it has been decompressed already
+    if (apex_file->IsCompressed() &&
+        std::find(decompressed_pkg_names.begin(), decompressed_pkg_names.end(),
+                  apex_file->GetManifest().name()) !=
+            decompressed_pkg_names.end()) {
       continue;
     }
 
-    for (const std::string& path : *all_apex_files) {
-      Result<ApexFile> apex_file = ApexFile::Open(path);
-      if (!apex_file.ok()) {
-        LOG(ERROR) << apex_file.error();
-        continue;
-      }
-      // Ignore compressed APEX if it has been decompressed already
-      if (apex_file->IsCompressed() &&
-          std::find(decompressed_pkg_names.begin(),
-                    decompressed_pkg_names.end(),
-                    apex_file->GetManifest().name()) !=
-              decompressed_pkg_names.end()) {
-        continue;
-      }
-
-      ret.emplace_back(std::move(*apex_file));
-    }
+    ret.emplace_back(std::move(*apex_file));
   }
   return ret;
 }
@@ -1862,6 +1863,14 @@ Result<void> ActivateMissingApexes(const std::vector<ApexFileRef>& apexes,
         /* is_ota_chroot= */ mode == ActivationMode::kOtaChrootMode);
     for (const ApexFile& apex_file : decompressed_apex) {
       fallback_apexes.emplace_back(std::cref(apex_file));
+    }
+  }
+  if (mode == kBootMode) {
+    // Treat fallback to pre-installed APEXes as a change of the acitve APEX,
+    // since we are already in a pretty dire situation, so it's better if we
+    // drop all the caches.
+    for (const auto& apex : fallback_apexes) {
+      gChangedActiveApexes.insert(apex.get().GetManifest().name());
     }
   }
   return ActivateApexPackages(fallback_apexes, mode);
@@ -2214,6 +2223,7 @@ void ScanStagedSessionsDirAndStage() {
       continue;
     }
 
+    std::vector<std::string> staged_apex_names;
     for (const auto& apex : apexes) {
       // TODO(b/158470836): Avoid opening ApexFile repeatedly.
       Result<ApexFile> apex_file = ApexFile::Open(apex);
@@ -2221,6 +2231,7 @@ void ScanStagedSessionsDirAndStage() {
         LOG(ERROR) << "Cannot open apex file during staging: " << apex;
         continue;
       }
+      staged_apex_names.push_back(apex_file->GetManifest().name());
     }
 
     const Result<void> result = StagePackages(apexes);
@@ -2235,6 +2246,10 @@ void ScanStagedSessionsDirAndStage() {
 
     // Session was OK, release scopeguard.
     scope_guard.Disable();
+
+    for (const std::string& apex : staged_apex_names) {
+      gChangedActiveApexes.insert(apex);
+    }
 
     auto st = session.UpdateStateAndCommit(SessionState::ACTIVATED);
     if (!st.ok()) {
@@ -2860,6 +2875,7 @@ Result<ApexFile> ProcessCompressedApex(const ApexFile& capex,
     return Error() << "Failed to decompress CAPEX: " << return_apex.error();
   }
 
+  gChangedActiveApexes.insert(return_apex->GetManifest().name());
   /// Release compressed blocks in case decompression_dest is on f2fs-compressed
   // filesystem.
   ReleaseF2fsCompressedBlocks(decompression_dest);
@@ -4011,6 +4027,15 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
   ReleaseF2fsCompressedBlocks(target_file);
 
   return new_apex;
+}
+
+bool IsActiveApexChanged(const ApexFile& apex) {
+  return gChangedActiveApexes.find(apex.GetManifest().name()) !=
+         gChangedActiveApexes.end();
+}
+
+std::set<std::string>& GetChangedActiveApexesForTesting() {
+  return gChangedActiveApexes;
 }
 
 }  // namespace apex
