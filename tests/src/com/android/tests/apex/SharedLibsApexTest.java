@@ -33,7 +33,6 @@ import org.junit.rules.RuleChain;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
-import java.time.Duration;
 
 @RunWith(DeviceJUnit4ClassRunner.class)
 public class SharedLibsApexTest extends BaseHostJUnit4Test {
@@ -512,13 +511,12 @@ public class SharedLibsApexTest extends BaseHostJUnit4Test {
         assertThat(getDevice().doesFileExist("/data/apex/active/"
                 + getInstalledApexFileName(ApexName.SHAREDLIBS, ApexVersion.ONE))).isTrue();
         mPreparer.reboot();
-        mHostUtils.waitForFileDeleted("/data/apex/active/"
-                + getInstalledApexFileName(ApexName.BAR, ApexVersion.ONE), Duration.ofMinutes(3));
-        mHostUtils.waitForFileDeleted("/data/apex/active/"
-                + getInstalledApexFileName(ApexName.FOO, ApexVersion.ONE), Duration.ofMinutes(3));
-        mHostUtils.waitForFileDeleted("/data/apex/active/"
-                + getInstalledApexFileName(ApexName.SHAREDLIBS, ApexVersion.ONE),
-                Duration.ofMinutes(3));
+        assertThat(getDevice().doesFileExist("/data/apex/active/"
+                + getInstalledApexFileName(ApexName.BAR, ApexVersion.ONE))).isFalse();
+        assertThat(getDevice().doesFileExist("/data/apex/active/"
+                + getInstalledApexFileName(ApexName.FOO, ApexVersion.ONE))).isFalse();
+        assertThat(getDevice().doesFileExist("/data/apex/active/"
+                + getInstalledApexFileName(ApexName.SHAREDLIBS, ApexVersion.ONE))).isFalse();
 
         getDevice().disableAdbRoot();
         runAsResult = getDevice().executeShellCommand(

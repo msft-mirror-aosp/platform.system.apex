@@ -42,15 +42,12 @@ struct ApexVerityData {
 class ApexFile {
  public:
   static android::base::Result<ApexFile> Open(const std::string& path);
-
   ApexFile() = delete;
   ApexFile(ApexFile&&) = default;
   ApexFile& operator=(ApexFile&&) = default;
 
   const std::string& GetPath() const { return apex_path_; }
-  const std::optional<uint32_t>& GetImageOffset() const {
-    return image_offset_;
-  }
+  const std::optional<int32_t>& GetImageOffset() const { return image_offset_; }
   const std::optional<size_t>& GetImageSize() const { return image_size_; }
   const ::apex::proto::ApexManifest& GetManifest() const { return manifest_; }
   const std::string& GetBundledPublicKey() const { return apex_pubkey_; }
@@ -62,7 +59,7 @@ class ApexFile {
 
  private:
   ApexFile(const std::string& apex_path,
-           const std::optional<uint32_t>& image_offset,
+           const std::optional<int32_t>& image_offset,
            const std::optional<size_t>& image_size,
            ::apex::proto::ApexManifest manifest, const std::string& apex_pubkey,
            const std::optional<std::string>& fs_type, bool is_compressed)
@@ -75,7 +72,7 @@ class ApexFile {
         is_compressed_(is_compressed) {}
 
   std::string apex_path_;
-  std::optional<uint32_t> image_offset_;
+  std::optional<int32_t> image_offset_;
   std::optional<size_t> image_size_;
   ::apex::proto::ApexManifest manifest_;
   std::string apex_pubkey_;

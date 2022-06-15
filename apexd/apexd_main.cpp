@@ -25,6 +25,7 @@
 #include "apexd.h"
 #include "apexd_checkpoint_vold.h"
 #include "apexd_lifecycle.h"
+#include "apexd_prepostinstall.h"
 #include "apexservice.h"
 
 #include <android-base/properties.h>
@@ -32,6 +33,16 @@
 namespace {
 
 int HandleSubcommand(char** argv) {
+  if (strcmp("--pre-install", argv[1]) == 0) {
+    LOG(INFO) << "Preinstall subcommand detected";
+    return android::apex::RunPreInstall(argv);
+  }
+
+  if (strcmp("--post-install", argv[1]) == 0) {
+    LOG(INFO) << "Postinstall subcommand detected";
+    return android::apex::RunPostInstall(argv);
+  }
+
   if (strcmp("--bootstrap", argv[1]) == 0) {
     LOG(INFO) << "Bootstrap subcommand detected";
     return android::apex::OnBootstrap();
@@ -69,11 +80,6 @@ int HandleSubcommand(char** argv) {
       android::apex::OnAllPackagesReady();
     }
     return result;
-  }
-
-  if (strcmp("--vm", argv[1]) == 0) {
-    LOG(INFO) << "VM subcommand detected";
-    return android::apex::OnStartInVmMode();
   }
 
   LOG(ERROR) << "Unknown subcommand: " << argv[1];
@@ -131,11 +137,7 @@ int main(int /*argc*/, char** argv) {
       // mark apexd as ready
       android::apex::OnAllPackagesReady();
     } else if (strcmp("--otachroot-bootstrap", argv[1]) == 0) {
-      LOG(INFO) << "OTA chroot bootstrap subcommand detected";
-      return android::apex::ActivateFlattenedApex();
-    } else if (strcmp("--bootstrap", argv[1]) == 0) {
-      LOG(INFO) << "Bootstrap subcommand detected";
-      return android::apex::ActivateFlattenedApex();
+      return android::apex::OnOtaChrootBootstrapFlattenedApex();
     }
     return 0;
   }
@@ -183,9 +185,6 @@ int main(int /*argc*/, char** argv) {
     lifecycle.WaitForBootStatus(android::apex::RevertActiveSessionsAndReboot);
   }
 
-  // Run cleanup routine before AllowServiceShutdown(), to prevent
-  // service_manager killing apexd in the middle of the cleanup.
-  android::apex::BootCompletedCleanup();
   android::apex::binder::AllowServiceShutdown();
 
   android::apex::binder::JoinThreadPool();

@@ -91,7 +91,7 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
      * For example, <code>runPhase("testApkOnlyEnableRollback");</code>
      */
     private void runPhase(String phase) throws Exception {
-        assertTrue(runDeviceTests("com.android.tests.apex.compression.app",
+        assertTrue(runDeviceTests("com.android.tests.apex.app",
                 "com.android.tests.apex.app.ApexCompressionTests",
                 phase));
     }
@@ -283,10 +283,10 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
         runPhase("testUnusedDecompressedApexIsCleanedUp_HigherVersion");
         getDevice().reboot();
 
-        // Verify that the decompressed APEX has been cleaned up
-        String filePath = Paths.get(DECOMPRESSED_DIR_PATH,
-                COMPRESSED_APEX_PACKAGE_NAME + "@1" + DECOMPRESSED_APEX_SUFFIX).toString();
-        mHostUtils.waitForFileDeleted(filePath, Duration.ofSeconds(15));
+        // Verify that DECOMPRESSED_DIR_PATH does not contain the decompressed APEX
+        files = getFilesInDir(DECOMPRESSED_DIR_PATH);
+        assertThat(files).doesNotContain(
+                COMPRESSED_APEX_PACKAGE_NAME + "@1" + DECOMPRESSED_APEX_SUFFIX);
     }
 
     @Test
@@ -302,10 +302,10 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
         runPhase("testUnusedDecompressedApexIsCleanedUp_SameVersion");
         getDevice().reboot();
 
-        // Verify that the decompressed APEX has been cleaned up
-        String filePath = Paths.get(DECOMPRESSED_DIR_PATH,
-                COMPRESSED_APEX_PACKAGE_NAME + "@1" + DECOMPRESSED_APEX_SUFFIX).toString();
-        mHostUtils.waitForFileDeleted(filePath, Duration.ofSeconds(15));
+        // Verify that DECOMPRESSED_DIR_PATH does not contain the decompressed APEX
+        files = getFilesInDir(DECOMPRESSED_DIR_PATH);
+        assertThat(files).doesNotContain(
+                COMPRESSED_APEX_PACKAGE_NAME + "@1" + DECOMPRESSED_APEX_SUFFIX);
     }
 
     @Test
@@ -378,9 +378,8 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
                         "Can't find " + COMPRESSED_APEX_PACKAGE_NAME));
         assertThat(activeApex.sourceDir).startsWith("/system");
         // Ensure previous decompressed APEX has been cleaned up
-        String filePath = Paths.get(DECOMPRESSED_DIR_PATH,
-                COMPRESSED_APEX_PACKAGE_NAME + "@1" + DECOMPRESSED_APEX_SUFFIX).toString();
-        mHostUtils.waitForFileDeleted(filePath, Duration.ofSeconds(15));
+        assertThat(getFilesInDir(DECOMPRESSED_DIR_PATH))
+            .doesNotContain(COMPRESSED_APEX_PACKAGE_NAME + "@1" + DECOMPRESSED_APEX_SUFFIX);
     }
 
     @Test
@@ -432,9 +431,8 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
                         "Can't find " + COMPRESSED_APEX_PACKAGE_NAME));
         assertThat(activeApex.sourceDir).startsWith("/system");
         // Ensure orphaned decompressed APEX has been cleaned up
-        String filePath = Paths.get(DECOMPRESSED_DIR_PATH,
-                COMPRESSED_APEX_PACKAGE_NAME + "@1" + DECOMPRESSED_APEX_SUFFIX).toString();
-        mHostUtils.waitForFileDeleted(filePath, Duration.ofSeconds(15));
+        assertThat(getFilesInDir(APEX_ACTIVE_DIR))
+            .doesNotContain(COMPRESSED_APEX_PACKAGE_NAME + "@1" + DECOMPRESSED_APEX_SUFFIX);
     }
 }
 

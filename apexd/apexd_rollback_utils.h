@@ -41,7 +41,7 @@ inline int32_t CopyDirectoryRecursive(const char* from, const char* to) {
       kCpPath,
       "-F", /* delete any existing destination file first
                       (--remove-destination) */
-      "--preserve=mode,ownership,timestamps,xattr", /* preserve properties */
+      "-p", /* preserve timestamps, ownership, and permissions */
       "-R", /* recurse into subdirectories (DEST must be a directory) */
       "-P", /* Do not follow symlinks [default] */
       "-d", /* don't dereference symlinks */

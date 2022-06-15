@@ -32,8 +32,6 @@ class ApexdLifecycle {
   ApexdLifecycle& operator=(const ApexdLifecycle&) = delete;
   ApexdLifecycle& operator=(ApexdLifecycle&&) = delete;
 
-  void WaitForBootStatus();
-
  public:
   static ApexdLifecycle& GetInstance() {
     static ApexdLifecycle instance;
