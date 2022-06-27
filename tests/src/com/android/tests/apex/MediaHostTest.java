@@ -46,6 +46,9 @@ public class MediaHostTest extends ApexE2EBaseHostTest {
                     + ", version\\((\\d+)\\), path\\((.+)\\), supports: (.*)");
     private static final int DEFAULT_EXTRACTOR_PLUGIN_COUNT = 10;
     private static final String MEDIA_APEX_PATH = "/apex/com.android.media";
+    // NOTE: This size cap is strict as this artifact is pinned to memory on
+    // various devices running Q, R, and S. Until such devices no longer receive
+    // mainline media updates, please avoid increasing. See also b/214499288.
     private static final int UPDATABLE_MEDIA_JAR_SIZE_CAP = 550000;
 
     @Override
