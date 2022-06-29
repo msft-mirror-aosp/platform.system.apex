@@ -85,6 +85,7 @@ void LoopbackDeviceUniqueFd::MaybeCloseBad() {
 }
 
 Result<void> ConfigureScheduler(const std::string& device_path) {
+  ATRACE_NAME("ConfigureScheduler");
   if (!StartsWith(device_path, "/dev/")) {
     return Error() << "Invalid argument " << device_path;
   }
@@ -206,6 +207,7 @@ static Result<uint32_t> BlockDeviceQueueDepth(const std::string& file_path) {
 // the block device backing `file_path`.
 Result<void> ConfigureQueueDepth(const std::string& loop_device_path,
                                  const std::string& file_path) {
+  ATRACE_NAME("ConfigureQueueDepth");
   if (!StartsWith(loop_device_path, "/dev/")) {
     return Error() << "Invalid argument " << loop_device_path;
   }
@@ -247,6 +249,7 @@ Result<void> ConfigureQueueDepth(const std::string& loop_device_path,
 }
 
 Result<void> ConfigureReadAhead(const std::string& device_path) {
+  ATRACE_NAME("ConfigureReadAhead");
   CHECK(StartsWith(device_path, "/dev/"));
   std::string device_name = Basename(device_path);
 
