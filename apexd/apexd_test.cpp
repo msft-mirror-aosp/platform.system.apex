@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "apex_database.h"
+#include "apex_file.h"
 #include "apex_file_repository.h"
 #include "apex_manifest.pb.h"
 #include "apexd_checkpoint.h"
@@ -139,7 +140,8 @@ class ApexdUnitTest : public ::testing::Test {
     ota_reserved_dir_ = StringPrintf("%s/ota-reserved", td_.path);
     hash_tree_dir_ = StringPrintf("%s/apex-hash-tree", td_.path);
     staged_session_dir_ = StringPrintf("%s/staged-session-dir", td_.path);
-    metadata_sepolicy_dir_ = StringPrintf("%s/metadata-sepolicy-dir", td_.path);
+    metadata_sepolicy_staged_dir_ =
+        StringPrintf("%s/metadata-sepolicy-staged-dir", td_.path);
 
     vm_payload_disk_ = StringPrintf("%s/vm-payload", td_.path);
 
@@ -150,7 +152,7 @@ class ApexdUnitTest : public ::testing::Test {
                ota_reserved_dir_.c_str(),
                hash_tree_dir_.c_str(),
                staged_session_dir_.c_str(),
-               metadata_sepolicy_dir_.c_str(),
+               metadata_sepolicy_staged_dir_.c_str(),
                kTestVmPayloadMetadataPartitionProp,
                kTestActiveApexSelinuxCtx};
   }
@@ -164,7 +166,9 @@ class ApexdUnitTest : public ::testing::Test {
     return StringPrintf("%s/session_%d", staged_session_dir_.c_str(),
                         session_id);
   }
-  const std::string& GetMetadataSepolicyDir() { return metadata_sepolicy_dir_; }
+  const std::string& GetMetadataSepolicyStagedDir() {
+    return metadata_sepolicy_staged_dir_;
+  }
 
   std::string GetRootDigest(const ApexFile& apex) {
     if (apex.IsCompressed()) {
@@ -191,6 +195,18 @@ class ApexdUnitTest : public ::testing::Test {
                           const std::string& target_name) {
     fs::copy(GetTestFile(apex_name), data_dir_ + "/" + target_name);
     return StringPrintf("%s/%s", data_dir_.c_str(), target_name.c_str());
+  }
+
+  std::string AddDecompressedApex(const std::string& apex_name) {
+    auto apex_file = ApexFile::Open(GetTestFile(apex_name));
+    CHECK(apex_file.ok());
+    std::string target_name =
+        apex_file->GetManifest().name() + "@" +
+        std::to_string(apex_file->GetManifest().version()) +
+        std::string(kDecompressedApexPackageSuffix);
+    fs::copy(GetTestFile(apex_name), decompression_dir_ + "/" + target_name);
+    return StringPrintf("%s/%s", decompression_dir_.c_str(),
+                        target_name.c_str());
   }
 
   std::string AddBlockApex(const std::string& apex_name,
@@ -247,7 +263,7 @@ class ApexdUnitTest : public ::testing::Test {
     ASSERT_EQ(mkdir(ota_reserved_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(hash_tree_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(staged_session_dir_.c_str(), 0755), 0);
-    ASSERT_EQ(mkdir(metadata_sepolicy_dir_.c_str(), 0755), 0);
+    ASSERT_EQ(mkdir(metadata_sepolicy_staged_dir_.c_str(), 0755), 0);
 
     DeleteDirContent(ApexSession::GetSessionsDir());
   }
@@ -287,7 +303,7 @@ class ApexdUnitTest : public ::testing::Test {
   std::string vm_payload_disk_;
   std::string vm_payload_metadata_path_;
   std::string staged_session_dir_;
-  std::string metadata_sepolicy_dir_;
+  std::string metadata_sepolicy_staged_dir_;
   ApexdConfig config_;
   std::vector<loop::LoopbackDeviceUniqueFd> loop_devices_;  // to be cleaned up
 };
@@ -411,7 +427,7 @@ TEST_F(ApexdUnitTest, SharedLibsDataVersionDeletedIfLower) {
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*shared_lib_v2))));
 }
 
-TEST_F(ApexdUnitTest, ProcessCompressedApex) {
+TEST_F(ApexdUnitTest, DISABLED_ProcessCompressedApex) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
 
@@ -526,7 +542,7 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexCanBeCalledMultipleTimes) {
 }
 
 // Test behavior of ProcessCompressedApex when is_ota_chroot is true
-TEST_F(ApexdUnitTest, ProcessCompressedApexOnOtaChroot) {
+TEST_F(ApexdUnitTest, DISABLED_ProcessCompressedApexOnOtaChroot) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
 
@@ -902,6 +918,7 @@ class ApexdMountTest : public ApexdUnitTest {
   void SetUp() final {
     ApexdUnitTest::SetUp();
     GetApexDatabaseForTesting().Reset();
+    GetChangedActiveApexesForTesting().clear();
     ASSERT_THAT(SetUpApexTestEnvironment(), Ok());
   }
 
@@ -4295,11 +4312,27 @@ TEST_F(ApexdMountTest, CopySepolicyToMetadata) {
                           /* is_rollback= */ false, /* rollback_id= */ -1),
       Ok());
 
-  auto metadata_dir = GetMetadataSepolicyDir();
-  ASSERT_THAT(PathExists(metadata_dir + "/SEPolicy.zip"), HasValue(true));
-  ASSERT_THAT(PathExists(metadata_dir + "/SEPolicy.zip.sig"), HasValue(true));
-  ASSERT_THAT(PathExists(metadata_dir + "/SEPolicy.zip.fsv_sig"),
-              HasValue(true));
+  auto staged_dir = GetMetadataSepolicyStagedDir();
+  ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip"), HasValue(true));
+  ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip.sig"), HasValue(true));
+  ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip.fsv_sig"), HasValue(true));
+}
+
+TEST_F(ApexdMountTest, AbortSepolicyApexInstall) {
+  std::string file_path = AddPreInstalledApex("com.android.sepolicy.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
+  ASSERT_THAT(CreateStagedSession("com.android.sepolicy.apex", 666), Ok());
+  ASSERT_THAT(
+      SubmitStagedSession(666, {}, /* has_rollback_enabled= */ false,
+                          /* is_rollback= */ false, /* rollback_id= */ -1),
+      Ok());
+
+  auto staged_dir = GetMetadataSepolicyStagedDir();
+  ASSERT_THAT(PathExists(staged_dir), HasValue(true));
+  ASSERT_FALSE(IsEmptyDirectory(staged_dir));
+
+  ASSERT_THAT(AbortStagedSession(666), Ok());
+  ASSERT_THAT(PathExists(staged_dir), HasValue(false));
 }
 
 class ApexActivationFailureTests : public ApexdMountTest {};
@@ -4677,6 +4710,153 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexWrongSELinuxContext) {
   // Verify that it again has correct context.
   ASSERT_EQ(kTestActiveApexSelinuxCtx,
             GetSelinuxContext(decompressed_apex_path));
+}
+
+TEST_F(ApexdMountTest, OnStartNoApexUpdated) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  AddPreInstalledApex("com.android.apex.compressed.v1.capex");
+  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
+  std::string apex_path_2 =
+      AddPreInstalledApex("apex.apexd_test_different_app.apex");
+  std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
+  std::string apex_path_4 =
+      AddDecompressedApex("com.android.apex.compressed.v1_original.apex");
+
+  ASSERT_THAT(
+      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
+      Ok());
+
+  OnStart();
+
+  UnmountOnTearDown(apex_path_2);
+  UnmountOnTearDown(apex_path_3);
+  UnmountOnTearDown(apex_path_4);
+
+  auto updated_apexes = GetChangedActiveApexesForTesting();
+  ASSERT_EQ(updated_apexes.size(), 0u);
+  // Quick check that all apexes were mounted
+  auto apex_mounts = GetApexMounts();
+  ASSERT_EQ(apex_mounts.size(), 6u);
+}
+
+TEST_F(ApexdMountTest, OnStartDecompressingConsideredApexUpdate) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  AddPreInstalledApex("com.android.apex.compressed.v1.capex");
+  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
+  std::string decompressed_active_apex = StringPrintf(
+      "%s/com.android.apex.compressed@1%s", GetDecompressionDir().c_str(),
+      kDecompressedApexPackageSuffix);
+  UnmountOnTearDown(decompressed_active_apex);
+
+  ASSERT_THAT(
+      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
+      Ok());
+
+  OnStart();
+
+  UnmountOnTearDown(apex_path_1);
+  UnmountOnTearDown(decompressed_active_apex);
+
+  auto updated_apexes = GetChangedActiveApexesForTesting();
+  ASSERT_EQ(updated_apexes.size(), 1u);
+  auto apex_file = ApexFile::Open(decompressed_active_apex);
+  ASSERT_THAT(apex_file, Ok());
+  ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+}
+
+TEST_F(ApexdMountTest, ActivatesStagedSession) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
+  auto apex_session = CreateStagedSession("apex.apexd_test_v2.apex", 37);
+  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+
+  ASSERT_THAT(
+      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
+      Ok());
+
+  std::string active_apex =
+      GetDataDir() + "/" + "com.android.apex.test_package@2.apex";
+
+  UnmountOnTearDown(preinstalled_apex);
+  UnmountOnTearDown(active_apex);
+  OnStart();
+
+  // Quick check that session was activated
+  {
+    auto session = ApexSession::GetSession(37);
+    ASSERT_THAT(session, Ok());
+    ASSERT_EQ(session->GetState(), SessionState::ACTIVATED);
+  }
+
+  auto updated_apexes = GetChangedActiveApexesForTesting();
+  ASSERT_EQ(updated_apexes.size(), 1u);
+  auto apex_file = ApexFile::Open(active_apex);
+  ASSERT_THAT(apex_file, Ok());
+  ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+}
+
+TEST_F(ApexdMountTest, FailsToActivateStagedSession) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
+  auto apex_session =
+      CreateStagedSession("apex.apexd_test_manifest_mismatch.apex", 73);
+  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+
+  ASSERT_THAT(
+      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
+      Ok());
+
+  UnmountOnTearDown(preinstalled_apex);
+  OnStart();
+
+  // Quick check that session was activated
+  {
+    auto session = ApexSession::GetSession(73);
+    ASSERT_THAT(session, Ok());
+    ASSERT_NE(session->GetState(), SessionState::ACTIVATED);
+  }
+
+  auto updated_apexes = GetChangedActiveApexesForTesting();
+  ASSERT_EQ(updated_apexes.size(), 1u);
+
+  auto apex_file = ApexFile::Open(preinstalled_apex);
+  ASSERT_THAT(apex_file, Ok());
+  ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+}
+
+TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
+  AddDataApex("apex.apexd_test_manifest_mismatch.apex");
+
+  ASSERT_THAT(
+      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
+      Ok());
+
+  UnmountOnTearDown(preinstalled_apex);
+  OnStart();
+
+  auto updated_apexes = GetChangedActiveApexesForTesting();
+  ASSERT_EQ(updated_apexes.size(), 1u);
+
+  auto apex_file = ApexFile::Open(preinstalled_apex);
+  ASSERT_THAT(apex_file, Ok());
+  ASSERT_TRUE(IsActiveApexChanged(*apex_file));
 }
 
 }  // namespace apex

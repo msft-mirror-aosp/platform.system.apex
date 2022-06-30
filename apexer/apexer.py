@@ -482,6 +482,12 @@ def ShaHashFiles(file_paths):
 
 def CreateImageExt4(args, work_dir, manifests_dir, img_file):
   """Create image for ext4 file system."""
+
+  lost_found_location = os.path.join(args.input_dir, 'lost+found')
+  if os.path.exists(lost_found_location):
+    print('Warning: input_dir contains a lost+found/ root folder, which '
+          'has been known to cause non-deterministic apex builds.')
+
   # sufficiently big = size + 16MB margin
   size_in_mb = (GetDirSize(args.input_dir) // (1024 * 1024))
   size_in_mb += 16
@@ -786,8 +792,6 @@ def CreateApex(args, work_dir):
   # in payload image file
   android_manifest_file = CreateAndroidManifestXml(
       args, work_dir, manifest_apex)
-  files_to_hash = [android_manifest_file]
-  manifest_apex.apexContainerFilesHash = ShaHashFiles(files_to_hash)
 
   # APEX manifest is also included in the image. The manifest is included
   # twice: once inside the image and once outside the image (but still
