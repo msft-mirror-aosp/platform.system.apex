@@ -36,6 +36,7 @@ import zipfile
 import glob
 from apex_manifest import ValidateApexManifest
 from apex_manifest import ApexManifestError
+from apex_manifest import ParseApexManifest
 from manifest import android_ns
 from manifest import find_child_with_attribute
 from manifest import get_children_with_tag
@@ -187,6 +188,12 @@ def ParseArgs(argv):
           'Add testOnly=true attribute to application element in '
           'AndroidManifest file.')
   )
+  parser.add_argument(
+    '--apex_version',
+    type=int,
+    help='APEX version to use if it\'s not set in manifest'
+  )
+
 
   return parser.parse_args(argv)
 
@@ -770,13 +777,10 @@ def CreateApex(args, work_dir):
     shutil.copyfile(src, dst)
 
   try:
-    manifest_apex = ValidateApexManifest(args.manifest)
+    manifest_apex = CreateApexManifest(args.manifest, args.apex_version)
   except ApexManifestError as err:
     print("'" + args.manifest + "' is not a valid manifest file")
     print(err.errmessage)
-    return False
-  except IOError:
-    print("Cannot read manifest file: '" + args.manifest + "'")
     return False
 
   # Create content dir and manifests dir, the manifests dir is used to
@@ -861,6 +865,15 @@ def CreateApex(args, work_dir):
 
   return True
 
+def CreateApexManifest(manifest_path, default_version):
+  try:
+    manifest_apex = ParseApexManifest(manifest_path)
+    if default_version is not None and manifest_apex.version == 0:
+      manifest_apex.version = default_version
+    ValidateApexManifest(manifest_apex)
+    return manifest_apex
+  except IOError:
+    raise ApexManifestError("Cannot read manifest file: '" + manifest_path + "'")
 
 class TempDirectory(object):
 
