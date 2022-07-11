@@ -19,7 +19,6 @@
 import hashlib
 import logging
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -28,6 +27,7 @@ import unittest
 from zipfile import ZipFile
 
 from apex_manifest import ValidateApexManifest
+from apex_manifest import ParseApexManifest
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ TEST_APEX = "com.android.example.apex"
 TEST_APEX_LEGACY = "com.android.example-legacy.apex"
 TEST_APEX_WITH_LOGGING_PARENT = "com.android.example-logging_parent.apex"
 TEST_APEX_WITH_OVERRIDDEN_PACKAGE_NAME = "com.android.example-overridden_package_name.apex"
+TEST_APEX_NO_VERSION = "com.android.example-no_version.apex"
 
 TEST_PRIVATE_KEY = os.path.join("testdata", "com.android.example.apex.pem")
 TEST_X509_KEY = os.path.join("testdata", "com.android.example.apex.x509.pem")
@@ -347,7 +348,8 @@ class ApexerRebuildTest(unittest.TestCase):
         cmd.extend(['--algorithm', 'SHA256_RSA4096'])
         cmd.extend(['--hash_algorithm', 'sha256'])
         cmd.extend(['--key', os.path.join(get_current_dir(), TEST_PRIVATE_KEY)])
-        manifest_apex = ValidateApexManifest(container_files["apex_manifest.pb"])
+        manifest_apex = ParseApexManifest(container_files["apex_manifest.pb"])
+        ValidateApexManifest(manifest_apex)
         cmd.extend(['--prop', 'apex.key:' + manifest_apex.name])
         # Set up the salt based on manifest content which includes name
         # and version
@@ -424,6 +426,40 @@ class ApexerRebuildTest(unittest.TestCase):
 
     def test_apex_with_overridden_package_name(self):
       self._run_build_test(TEST_APEX_WITH_OVERRIDDEN_PACKAGE_NAME)
+
+    def test_apex_default_version(self):
+        default_version = 12345
+        apex_file_path = os.path.join(get_current_dir(), TEST_APEX_NO_VERSION + ".apex")
+        container_files = self._get_container_files(apex_file_path)
+        payload_dir = self._extract_payload(apex_file_path)
+
+        manifest_pb = ParseApexManifest(container_files["apex_manifest.pb"])
+        manifest_pb.ClearField("version")
+        with open(container_files["apex_manifest.pb"], "wb") as f:
+            f.write(manifest_pb.SerializeToString())
+
+        repack_apex_file_path = self._run_apexer(container_files, payload_dir,
+                                                 ["--apex_version", str(default_version)])
+        repack_container_files = self._get_container_files(repack_apex_file_path)
+        manifest_apex = ParseApexManifest(repack_container_files["apex_manifest.pb"])
+        self.assertEqual(manifest_apex.version, default_version)
+
+    def test_apex_doesnt_override_existing_version(self):
+        default_version = 12345
+        apex_file_path = os.path.join(get_current_dir(), TEST_APEX + ".apex")
+        container_files = self._get_container_files(apex_file_path)
+        payload_dir = self._extract_payload(apex_file_path)
+
+        manifest_pb = ParseApexManifest(container_files["apex_manifest.pb"])
+        with open(container_files["apex_manifest.pb"], "wb") as f:
+            f.write(manifest_pb.SerializeToString())
+
+        repack_apex_file_path = self._run_apexer(container_files, payload_dir,
+                                                 ["--apex_version", str(default_version)])
+        repack_container_files = self._get_container_files(repack_apex_file_path)
+        manifest_apex = ParseApexManifest(repack_container_files["apex_manifest.pb"])
+        self.assertEqual(manifest_apex.version, 1)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
