@@ -76,3 +76,15 @@ apex {
     package_name: "com.android.overridden.example.apex",
     updatable: false,
 }
+
+apex {
+    name: "com.android.example-no_version.apex",
+    manifest: "manifest-no-version.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.example.apex.key",
+    certificate: ":com.android.example.apex.certificate",
+    installable: false,
+    updatable:false,
+    generate_hashtree: false,
+}
