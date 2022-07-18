@@ -124,7 +124,6 @@ python_test_host {
     ],
     data: [
         ":com.android.example.apex",
-        ":com.android.example-no_version.apex",
         ":com.android.example-legacy.apex",
         ":com.android.example-logging_parent.apex",
         ":com.android.example-overridden_package_name.apex",

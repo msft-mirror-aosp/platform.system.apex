@@ -203,6 +203,7 @@ Result<void> PreAllocateLoopDevices() {
   for (const auto& path : *scan) {
     auto apex_file = ApexFile::Open(path);
     if (!apex_file.ok()) {
+      LOG(ERROR) << "Failed to open " << path << " : " << apex_file.error();
       continue;
     }
     size++;
@@ -2525,10 +2526,14 @@ int OnBootstrap() {
     LOG(ERROR) << status.error();
     return 1;
   }
-  pre_allocate = loop::PreAllocateLoopDevices(*block_count);
-  if (!pre_allocate.ok()) {
-    LOG(ERROR) << "Failed to pre-allocate loop devices for block apexes : "
-               << pre_allocate.error();
+  if (*block_count > 0) {
+    LOG(INFO) << "Pre-allocation " << *block_count
+              << " loop devices for block APEXes";
+    pre_allocate = loop::PreAllocateLoopDevices(*block_count);
+    if (!pre_allocate.ok()) {
+      LOG(ERROR) << "Failed to pre-allocate loop devices for block apexes : "
+                 << pre_allocate.error();
+    }
   }
 
   DeviceMapper& dm = DeviceMapper::Instance();
@@ -3007,18 +3012,6 @@ void OnStart() {
         ProcessCompressedApex(compressed_apex, /* is_ota_chroot= */ false);
     for (const ApexFile& apex_file : decompressed_apex) {
       activation_list.emplace_back(std::cref(apex_file));
-    }
-  }
-
-  int data_apex_cnt = std::count_if(
-      activation_list.begin(), activation_list.end(), [](const auto& a) {
-        return !ApexFileRepository::GetInstance().IsPreInstalledApex(a.get());
-      });
-  if (data_apex_cnt > 0) {
-    Result<void> pre_allocate = loop::PreAllocateLoopDevices(data_apex_cnt);
-    if (!pre_allocate.ok()) {
-      LOG(ERROR) << "Failed to pre-allocate loop devices : "
-                 << pre_allocate.error();
     }
   }
 
@@ -3519,8 +3512,10 @@ Result<int> AddBlockApex(ApexFileRepository& instance) {
 // - ActivateApexPackages
 // - setprop apexd.status: activated/ready
 int OnStartInVmMode() {
-  // waits for /dev/loop-control
-  loop::PreAllocateLoopDevices(0);
+  Result<void> loop_ready = WaitForFile("/dev/loop-control", 20s);
+  if (!loop_ready.ok()) {
+    LOG(ERROR) << loop_ready.error();
+  }
 
   // Create directories for APEX shared libraries.
   if (auto status = CreateSharedLibsApexDir(); !status.ok()) {
@@ -3919,6 +3914,40 @@ Result<void> UpdateApexInfoList() {
   return {};
 }
 
+// TODO(b/238820991) Handle failures
+void UnloadApexFromInit(const std::string& apex_name) {
+  if (!SetProperty(kCtlApexUnloadSysprop, apex_name)) {
+    // When failed to SetProperty(), there's nothing we can do here.
+    // Log error and return early to avoid indefinite waiting for ack.
+    PLOG(ERROR) << "Failed to set " << kCtlApexUnloadSysprop << " to "
+                << apex_name;
+    return;
+  }
+  const static auto kTimeoutForUnloading = 10s;
+  const auto init_apex_prop_name = "init.apex." + apex_name;
+  if (!base::WaitForProperty(init_apex_prop_name, kInitApexUnloaded,
+                             kTimeoutForUnloading)) {
+    PLOG(ERROR) << "Failed to wait for init to unload " << apex_name;
+  }
+}
+
+// TODO(b/238820991) Handle failures
+void LoadApexFromInit(const std::string& apex_name) {
+  if (!SetProperty(kCtlApexLoadSysprop, apex_name)) {
+    // When failed to SetProperty(), there's nothing we can do here.
+    // Log error and return early to avoid indefinite waiting for ack.
+    PLOG(ERROR) << "Failed to set " << kCtlApexLoadSysprop << " to "
+                << apex_name;
+    return;
+  }
+  const static auto kTimeoutForLoading = 10s;
+  const auto init_apex_prop_name = "init.apex." + apex_name;
+  if (!base::WaitForProperty(init_apex_prop_name, kInitApexLoaded,
+                             kTimeoutForLoading)) {
+    PLOG(ERROR) << "Failed to wait for init to load " << apex_name;
+  }
+}
+
 Result<ApexFile> InstallPackage(const std::string& package_path) {
   LOG(INFO) << "Installing " << package_path;
   auto temp_apex = ApexFile::Open(package_path);
@@ -3960,6 +3989,15 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
 
   std::string new_id = GetPackageId(temp_apex->GetManifest()) + "_" +
                        std::to_string(*new_id_minor);
+
+  // Before unmounting the current apex, unload it from the init process:
+  // terminates services started from the apex and init scripts read from the
+  // apex.
+  UnloadApexFromInit(module_name);
+
+  // And then reload it from the init process whether it succeeds or not.
+  auto reload_apex =
+      android::base::make_scope_guard([&]() { LoadApexFromInit(module_name); });
 
   // 2. Unmount currently active APEX.
   if (auto res = UnmountPackage(*cur_apex, /* allow_latest= */ true,

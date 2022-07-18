@@ -461,6 +461,7 @@ bool ApexFileRepository::IsBlockApex(const ApexFile& apex) const {
 
 std::vector<ApexFileRef> ApexFileRepository::GetPreInstalledApexFiles() const {
   std::vector<ApexFileRef> result;
+  result.reserve(pre_installed_store_.size());
   for (const auto& it : pre_installed_store_) {
     result.emplace_back(std::cref(it.second));
   }
@@ -469,6 +470,7 @@ std::vector<ApexFileRef> ApexFileRepository::GetPreInstalledApexFiles() const {
 
 std::vector<ApexFileRef> ApexFileRepository::GetDataApexFiles() const {
   std::vector<ApexFileRef> result;
+  result.reserve(data_store_.size());
   for (const auto& it : data_store_) {
     result.emplace_back(std::cref(it.second));
   }
