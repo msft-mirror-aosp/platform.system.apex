@@ -66,17 +66,25 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     @Test
     @LargeTest
     public void testRebootlessUpdate() throws Exception {
-        pushTestApex("com.android.apex.vendor.foo.apex", "/vendor/apex");
-        getDevice().reboot();
+        pushPreinstalledApex("com.android.apex.vendor.foo.apex");
 
         runPhase("testRebootlessUpdate");
     }
 
-    private void pushTestApex(String fileName, String destDir) throws Exception {
+    @Test
+    @LargeTest
+    public void testGenerateLinkerConfigurationOnUpdate() throws Exception {
+        pushPreinstalledApex("com.android.apex.vendor.foo.apex");
+
+        runPhase("testGenerateLinkerConfigurationOnUpdate");
+    }
+
+    private void pushPreinstalledApex(String fileName) throws Exception {
         CompatibilityBuildHelper buildHelper = new CompatibilityBuildHelper(getBuild());
         final File apex = buildHelper.getTestFile(fileName);
-        getDevice().remountSystemWritable();
-        assertTrue(getDevice().pushFile(apex, Paths.get(destDir, fileName).toString()));
+        getDevice().remountVendorWritable();
+        assertTrue(getDevice().pushFile(apex, Paths.get("/vendor/apex", fileName).toString()));
+        getDevice().reboot();
     }
 
     /**
@@ -94,7 +102,7 @@ public class VendorApexTests extends BaseHostJUnit4Test {
         }
 
         if (found) {
-            getDevice().remountSystemWritable();
+            getDevice().remountVendorWritable();
             for (String file : files) {
                 getDevice().executeShellCommand("rm -rf " + file);
             }

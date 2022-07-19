@@ -211,6 +211,7 @@ android_test_helper_app {
     sdk_version: "test_current",
     java_resources: [
         ":com.android.apex.vendor.foo.v2",
+        ":com.android.apex.vendor.foo.v2_with_requireNativeLibs",
     ],
     test_suites: [
         "general-tests",

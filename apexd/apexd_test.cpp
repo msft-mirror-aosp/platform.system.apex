@@ -1056,7 +1056,7 @@ TEST_F(ApexdMountTest, InstallPackageRejectsJniLibs) {
   ASSERT_THAT(ret, HasError(WithMessage(HasSubstr(" requires JNI libs"))));
 }
 
-TEST_F(ApexdMountTest, InstallPackageRejectsAddRequiredNativeLib) {
+TEST_F(ApexdMountTest, InstallPackageAcceptsAddRequiredNativeLib) {
   std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
   ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
 
@@ -1065,14 +1065,11 @@ TEST_F(ApexdMountTest, InstallPackageRejectsAddRequiredNativeLib) {
 
   auto ret =
       InstallPackage(GetTestFile("test.rebootless_apex_add_native_lib.apex"));
-  ASSERT_THAT(
-      ret, HasError(WithMessage(HasSubstr("Set of native libs required by"))));
-  ASSERT_THAT(ret,
-              HasError(WithMessage(HasSubstr(
-                  "differs from the one required by the currently active"))));
+  ASSERT_THAT(ret, Ok());
+  UnmountOnTearDown(ret->GetPath());
 }
 
-TEST_F(ApexdMountTest, InstallPackageRejectsRemovesRequiredNativeLib) {
+TEST_F(ApexdMountTest, InstallPackageAcceptsRemoveRequiredNativeLib) {
   std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
   ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
 
@@ -1081,11 +1078,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsRemovesRequiredNativeLib) {
 
   auto ret = InstallPackage(
       GetTestFile("test.rebootless_apex_remove_native_lib.apex"));
-  ASSERT_THAT(
-      ret, HasError(WithMessage(HasSubstr("Set of native libs required by"))));
-  ASSERT_THAT(ret,
-              HasError(WithMessage(HasSubstr(
-                  "differs from the one required by the currently active"))));
+  ASSERT_THAT(ret, Ok());
+  UnmountOnTearDown(ret->GetPath());
 }
 
 TEST_F(ApexdMountTest, InstallPackageRejectsAppInApex) {

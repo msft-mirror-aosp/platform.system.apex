@@ -3776,9 +3776,7 @@ Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file) {
   return RunVerifyFnInsideTempMount(apex_file, check_fn, true);
 }
 
-Result<void> CheckSupportsNonStagedInstall(const ApexFile& cur_apex,
-                                           const ApexFile& new_apex) {
-  const auto& cur_manifest = cur_apex.GetManifest();
+Result<void> CheckSupportsNonStagedInstall(const ApexFile& new_apex) {
   const auto& new_manifest = new_apex.GetManifest();
 
   if (!new_manifest.supportsrebootlessupdate()) {
@@ -3808,25 +3806,6 @@ Result<void> CheckSupportsNonStagedInstall(const ApexFile& cur_apex,
   // We don't allow non-staged updates of APEXES that have java libs inside.
   if (new_manifest.jnilibs_size() > 0) {
     return Error() << new_apex.GetPath() << " requires JNI libs";
-  }
-
-  // For requireNativeLibs bit, we only allow updates that don't change list of
-  // required libs.
-
-  std::vector<std::string> cur_required_libs(
-      cur_manifest.requirenativelibs().begin(),
-      cur_manifest.requirenativelibs().end());
-  sort(cur_required_libs.begin(), cur_required_libs.end());
-
-  std::vector<std::string> new_required_libs(
-      new_manifest.requirenativelibs().begin(),
-      new_manifest.requirenativelibs().end());
-  sort(new_required_libs.begin(), new_required_libs.end());
-
-  if (cur_required_libs != new_required_libs) {
-    return Error() << "Set of native libs required by " << new_apex.GetPath()
-                   << " differs from the one required by the currently active "
-                   << cur_apex.GetPath();
   }
 
   auto expected_public_key =
@@ -3970,7 +3949,7 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
   // Do a quick check if this APEX can be installed without a reboot.
   // Note that passing this check doesn't guarantee that APEX will be
   // successfully installed.
-  if (auto r = CheckSupportsNonStagedInstall(*cur_apex, *temp_apex); !r.ok()) {
+  if (auto r = CheckSupportsNonStagedInstall(*temp_apex); !r.ok()) {
     return r.error();
   }
 

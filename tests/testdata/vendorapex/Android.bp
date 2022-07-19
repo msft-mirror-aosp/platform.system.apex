@@ -52,3 +52,26 @@ apex {
     ],
     manifest: "manifest_v2.json",
 }
+
+apex {
+    name: "com.android.apex.vendor.foo.v2_with_requireNativeLibs",
+    defaults: [
+        "com.android.apex.vendor.foo.defaults",
+    ],
+    manifest: "manifest_v2.json",
+    binaries: [
+        "apex_vendor_foo_test_binary",
+    ],
+}
+
+cc_binary {
+    name: "apex_vendor_foo_test_binary",
+    shared_libs: [
+        "libbinder_ndk",  // will add "requireNativeLibs"
+    ],
+    srcs: [
+        "apex_vendor_foo_test_binary.cpp",
+    ],
+    vendor: true,
+    installable: false,
+}
