@@ -188,12 +188,6 @@ def ParseArgs(argv):
           'Add testOnly=true attribute to application element in '
           'AndroidManifest file.')
   )
-  parser.add_argument(
-    '--apex_version',
-    type=int,
-    help='APEX version to use if it\'s not set in manifest'
-  )
-
 
   return parser.parse_args(argv)
 
@@ -777,7 +771,7 @@ def CreateApex(args, work_dir):
     shutil.copyfile(src, dst)
 
   try:
-    manifest_apex = CreateApexManifest(args.manifest, args.apex_version)
+    manifest_apex = CreateApexManifest(args.manifest)
   except ApexManifestError as err:
     print("'" + args.manifest + "' is not a valid manifest file")
     print(err.errmessage)
@@ -865,11 +859,9 @@ def CreateApex(args, work_dir):
 
   return True
 
-def CreateApexManifest(manifest_path, default_version):
+def CreateApexManifest(manifest_path):
   try:
     manifest_apex = ParseApexManifest(manifest_path)
-    if default_version is not None and manifest_apex.version == 0:
-      manifest_apex.version = default_version
     ValidateApexManifest(manifest_apex)
     return manifest_apex
   except IOError:
