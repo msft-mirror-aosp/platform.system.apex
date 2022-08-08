@@ -138,6 +138,9 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
       pre_installed_store_.emplace(name, std::move(*apex_file));
     } else if (it->second.GetPath() != apex_file->GetPath()) {
       auto level = base::FATAL;
+      if (ignore_duplicate_apex_definitions_) {
+        level = base::INFO;
+      }
       // On some development (non-REL) builds the VNDK apex could be in /vendor.
       // When testing CTS-on-GSI on these builds, there would be two VNDK apexes
       // in the system, one in /system and one in /vendor.
