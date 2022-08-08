@@ -19,7 +19,6 @@
 import hashlib
 import logging
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -28,6 +27,7 @@ import unittest
 from zipfile import ZipFile
 
 from apex_manifest import ValidateApexManifest
+from apex_manifest import ParseApexManifest
 
 logger = logging.getLogger(__name__)
 
@@ -347,7 +347,8 @@ class ApexerRebuildTest(unittest.TestCase):
         cmd.extend(['--algorithm', 'SHA256_RSA4096'])
         cmd.extend(['--hash_algorithm', 'sha256'])
         cmd.extend(['--key', os.path.join(get_current_dir(), TEST_PRIVATE_KEY)])
-        manifest_apex = ValidateApexManifest(container_files["apex_manifest.pb"])
+        manifest_apex = ParseApexManifest(container_files["apex_manifest.pb"])
+        ValidateApexManifest(manifest_apex)
         cmd.extend(['--prop', 'apex.key:' + manifest_apex.name])
         # Set up the salt based on manifest content which includes name
         # and version
@@ -424,6 +425,7 @@ class ApexerRebuildTest(unittest.TestCase):
 
     def test_apex_with_overridden_package_name(self):
       self._run_build_test(TEST_APEX_WITH_OVERRIDDEN_PACKAGE_NAME)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
