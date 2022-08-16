@@ -19,11 +19,13 @@
 
 #include "apexd_loop.h"
 
-#include <array>
-#include <filesystem>
-#include <mutex>
-#include <string_view>
-
+#include <ApexProperties.sysprop.h>
+#include <android-base/file.h>
+#include <android-base/logging.h>
+#include <android-base/parseint.h>
+#include <android-base/properties.h>
+#include <android-base/stringprintf.h>
+#include <android-base/strings.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <libdm/dm.h>
@@ -35,17 +37,14 @@
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-#include <android-base/file.h>
-#include <android-base/logging.h>
-#include <android-base/parseint.h>
-#include <android-base/properties.h>
-#include <android-base/stringprintf.h>
-#include <android-base/strings.h>
 #include <utils/Trace.h>
 
+#include <array>
+#include <filesystem>
+#include <mutex>
+#include <string_view>
+
 #include "apexd_utils.h"
-#include "string_log.h"
 
 using android::base::Basename;
 using android::base::ErrnoError;
@@ -67,13 +66,6 @@ static constexpr const char* kApexLoopIdPrefix = "apex:";
 
 // 128 kB read-ahead, which we currently use for /system as well
 static constexpr const char* kReadAheadKb = "128";
-
-// TODO(b/122059364): Even though the kernel has created the loop
-// device, we still depend on ueventd to run to actually create the
-// device node in userspace. To solve this properly we should listen on
-// the netlink socket for uevents, or use inotify. For now, this will
-// have to do.
-static constexpr size_t kLoopDeviceRetryAttempts = 3u;
 
 void LoopbackDeviceUniqueFd::MaybeCloseBad() {
   if (device_fd.get() != -1) {
@@ -195,7 +187,7 @@ static Result<uint32_t> BlockDeviceQueueDepth(const std::string& file_path) {
       StringPrintf("/sys/class/block/%s/mq/0/nr_tags", blockdev.c_str());
   std::string nr_tags;
   if (!ReadFileToString(nr_tags_path, &nr_tags)) {
-    return Error() << "Failed to read " << nr_tags_path;
+    return ErrnoError() << "Failed to read " << nr_tags_path;
   }
   nr_tags = android::base::Trim(nr_tags);
   LOG(VERBOSE) << file_path << " is backed by /dev/" << blockdev
@@ -218,7 +210,7 @@ Result<void> ConfigureQueueDepth(const std::string& loop_device_path,
       StringPrintf("/sys/block/%s/queue/nr_requests", loop_device_name.c_str());
   std::string cur_nr_requests_str;
   if (!ReadFileToString(sysfs_path, &cur_nr_requests_str)) {
-    return Error() << "Failed to read " << sysfs_path;
+    return ErrnoError() << "Failed to read " << sysfs_path;
   }
   cur_nr_requests_str = android::base::Trim(cur_nr_requests_str);
   uint32_t cur_nr_requests = 0;
@@ -283,18 +275,22 @@ Result<void> PreAllocateLoopDevices(size_t num) {
   bool found = false;
   size_t start_id = 0;
   constexpr const char* kLoopPrefix = "loop";
-  WalkDir("/dev/block", [&](const std::filesystem::directory_entry& entry) {
-    std::string devname = entry.path().filename().string();
-    if (StartsWith(devname, kLoopPrefix)) {
-      size_t id;
-      auto parse_ok = ParseUint(
-          devname.substr(std::char_traits<char>::length(kLoopPrefix)), &id);
-      if (parse_ok && id > start_id) {
-        start_id = id;
-        found = true;
-      }
-    }
-  });
+  auto walk_res =
+      WalkDir("/sys/block", [&](const std::filesystem::directory_entry& entry) {
+        std::string devname = entry.path().filename().string();
+        if (StartsWith(devname, kLoopPrefix)) {
+          size_t id;
+          auto parse_ok = ParseUint(
+              devname.substr(std::char_traits<char>::length(kLoopPrefix)), &id);
+          if (parse_ok && id > start_id) {
+            start_id = id;
+            found = true;
+          }
+        }
+      });
+  if (!walk_res.ok()) {
+    return walk_res.error();
+  }
   if (found) ++start_id;
 
   // Assumption: loop device ID [0..num) is valid.
@@ -303,9 +299,14 @@ Result<void> PreAllocateLoopDevices(size_t num) {
   // as many as CONFIG_BLK_DEV_LOOP_MIN_COUNT,
   // Within the amount of kernel-pre-allocation,
   // LOOP_CTL_ADD will fail with EEXIST
-  for (size_t id = start_id; id < num + start_id; ++id) {
+  for (size_t id = start_id, cnt = 0; cnt < num; ++id) {
     int ret = ioctl(ctl_fd.get(), LOOP_CTL_ADD, id);
-    if (ret < 0 && errno != EEXIST) {
+    if (ret > 0) {
+      LOG(INFO) << "Pre-allocated loop device " << id;
+      cnt++;
+    } else if (errno == EEXIST) {
+      LOG(WARNING) << "Loop device " << id << " already exists";
+    } else {
       return ErrnoError() << "Failed LOOP_CTL_ADD";
     }
   }
@@ -444,9 +445,15 @@ Result<LoopbackDeviceUniqueFd> WaitForDevice(int num) {
   // rare cases apexd would try attempt to mount an apex before ueventd created
   // a loop device for it. To work around this we keep polling for loop device
   // to be created until ueventd's cold boot sequence is done.
-  // See comment on kLoopDeviceRetryAttempts.
   bool cold_boot_done = GetBoolProperty("ro.cold_boot_done", false);
-  for (size_t i = 0; i != kLoopDeviceRetryAttempts; ++i) {
+
+  // Even though the kernel has created the loop device, we still depend on
+  // ueventd to run to actually create the device node in userspace. To solve
+  // this properly we should listen on the netlink socket for uevents, or use
+  // inotify. For now, this will have to do.
+  size_t attempts =
+      android::sysprop::ApexProperties::loop_wait_attempts().value_or(3u);
+  for (size_t i = 0; i != attempts; ++i) {
     if (!cold_boot_done) {
       cold_boot_done = GetBoolProperty("ro.cold_boot_done", false);
     }

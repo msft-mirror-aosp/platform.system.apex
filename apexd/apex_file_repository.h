@@ -52,6 +52,11 @@ class ApexFileRepository final {
       : multi_install_select_prop_prefixes_(multi_install_select_prop_prefixes),
         enforce_multi_install_partition_(enforce_multi_install_partition){};
 
+  explicit ApexFileRepository(const std::string& decompression_dir,
+                              bool ignore_duplicate_apex_definitions)
+      : ignore_duplicate_apex_definitions_(ignore_duplicate_apex_definitions),
+        decompression_dir_(decompression_dir){};
+
   ~ApexFileRepository() {
     pre_installed_store_.clear();
     data_store_.clear();
@@ -185,6 +190,10 @@ class ApexFileRepository final {
   // Allows multi-install APEXes outside of expected partitions.
   // Only set false in tests.
   bool enforce_multi_install_partition_ = true;
+
+  // Ignore duplicate vendor APEX definitions, normally a duplicate definition
+  // is considered an error.
+  bool ignore_duplicate_apex_definitions_ = false;
 
   // Decompression directory which will be used to determine if apex is
   // decompressed or not

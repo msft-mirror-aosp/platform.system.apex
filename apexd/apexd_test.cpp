@@ -1056,7 +1056,7 @@ TEST_F(ApexdMountTest, InstallPackageRejectsJniLibs) {
   ASSERT_THAT(ret, HasError(WithMessage(HasSubstr(" requires JNI libs"))));
 }
 
-TEST_F(ApexdMountTest, InstallPackageRejectsAddRequiredNativeLib) {
+TEST_F(ApexdMountTest, InstallPackageAcceptsAddRequiredNativeLib) {
   std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
   ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
 
@@ -1065,14 +1065,11 @@ TEST_F(ApexdMountTest, InstallPackageRejectsAddRequiredNativeLib) {
 
   auto ret =
       InstallPackage(GetTestFile("test.rebootless_apex_add_native_lib.apex"));
-  ASSERT_THAT(
-      ret, HasError(WithMessage(HasSubstr("Set of native libs required by"))));
-  ASSERT_THAT(ret,
-              HasError(WithMessage(HasSubstr(
-                  "differs from the one required by the currently active"))));
+  ASSERT_THAT(ret, Ok());
+  UnmountOnTearDown(ret->GetPath());
 }
 
-TEST_F(ApexdMountTest, InstallPackageRejectsRemovesRequiredNativeLib) {
+TEST_F(ApexdMountTest, InstallPackageAcceptsRemoveRequiredNativeLib) {
   std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
   ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
 
@@ -1081,11 +1078,8 @@ TEST_F(ApexdMountTest, InstallPackageRejectsRemovesRequiredNativeLib) {
 
   auto ret = InstallPackage(
       GetTestFile("test.rebootless_apex_remove_native_lib.apex"));
-  ASSERT_THAT(
-      ret, HasError(WithMessage(HasSubstr("Set of native libs required by"))));
-  ASSERT_THAT(ret,
-              HasError(WithMessage(HasSubstr(
-                  "differs from the one required by the currently active"))));
+  ASSERT_THAT(ret, Ok());
+  UnmountOnTearDown(ret->GetPath());
 }
 
 TEST_F(ApexdMountTest, InstallPackageRejectsAppInApex) {
@@ -1199,6 +1193,31 @@ TEST_F(ApexdMountTest, InstallPackagePreInstallVersionActiveSamegrade) {
         ASSERT_EQ(data.full_path, ret->GetPath());
         ASSERT_EQ(data.device_name, "test.apex.rebootless@1_1");
       });
+}
+
+TEST_F(ApexdMountTest, InstallPackageUnloadOldApex) {
+  std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
+
+  bool unloaded = false;
+  bool loaded = false;
+  std::thread monitor_init_apex_status([&]() {
+    unloaded = base::WaitForProperty("init.apex.test.apex.rebootless",
+                                     kInitApexUnloaded, 10s);
+    loaded = base::WaitForProperty("init.apex.test.apex.rebootless",
+                                   kInitApexLoaded, 10s);
+  });
+
+  ASSERT_THAT(ActivatePackage(file_path), Ok());
+  UnmountOnTearDown(file_path);
+
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
+  ASSERT_THAT(ret, Ok());
+  UnmountOnTearDown(ret->GetPath());
+
+  monitor_init_apex_status.join();
+  ASSERT_TRUE(unloaded);
+  ASSERT_TRUE(loaded);
 }
 
 TEST_F(ApexdMountTest, InstallPackageDataVersionActive) {

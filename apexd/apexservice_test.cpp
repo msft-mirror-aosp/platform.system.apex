@@ -1608,8 +1608,6 @@ TEST_F(ApexServiceTest, ApexdIsInSameMountNamespaceAsInit) {
 
 // These are NOT exhaustive list of early processes be should be enough
 static const std::vector<const std::string> kEarlyProcesses = {
-    "servicemanager",
-    "hwservicemanager",
     "vold",
     "logd",
 };
