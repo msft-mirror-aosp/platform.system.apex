@@ -92,7 +92,7 @@ cc_defaults {
     "libvold_binder",
     "libxml2",
   ],
-  whole_static_libs: ["com.android.sysprop.apex"],
+  whole_static_libs: ["libcom.android.sysprop.apex"],
 }
 
 aidl_interface {
