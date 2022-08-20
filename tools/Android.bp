@@ -134,3 +134,19 @@ sh_test_host {
         "libziparchive",
     ],
 }
+
+python_binary_host {
+    name: "apexer_with_DCLA_preprocessing",
+    srcs: [
+        "apexer_with_DCLA_preprocessing.py",
+    ],
+    version: {
+        py2: {
+            enabled: false,
+        },
+        py3: {
+            enabled: true,
+            embedded_launcher: true,
+        },
+    },
+}
