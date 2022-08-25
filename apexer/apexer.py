@@ -36,6 +36,7 @@ import zipfile
 import glob
 from apex_manifest import ValidateApexManifest
 from apex_manifest import ApexManifestError
+from apex_manifest import ParseApexManifest
 from manifest import android_ns
 from manifest import find_child_with_attribute
 from manifest import get_children_with_tag
@@ -770,13 +771,10 @@ def CreateApex(args, work_dir):
     shutil.copyfile(src, dst)
 
   try:
-    manifest_apex = ValidateApexManifest(args.manifest)
+    manifest_apex = CreateApexManifest(args.manifest)
   except ApexManifestError as err:
     print("'" + args.manifest + "' is not a valid manifest file")
     print(err.errmessage)
-    return False
-  except IOError:
-    print("Cannot read manifest file: '" + args.manifest + "'")
     return False
 
   # Create content dir and manifests dir, the manifests dir is used to
@@ -861,6 +859,13 @@ def CreateApex(args, work_dir):
 
   return True
 
+def CreateApexManifest(manifest_path):
+  try:
+    manifest_apex = ParseApexManifest(manifest_path)
+    ValidateApexManifest(manifest_apex)
+    return manifest_apex
+  except IOError:
+    raise ApexManifestError("Cannot read manifest file: '" + manifest_path + "'")
 
 class TempDirectory(object):
 
