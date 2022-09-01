@@ -150,3 +150,31 @@ python_binary_host {
         },
     },
 }
+
+python_test_host {
+    name: "apexer_with_DCLA_preprocessing_test",
+    main: "apexer_with_DCLA_preprocessing_test.py",
+    srcs: [
+        "apexer_with_DCLA_preprocessing_test.py",
+    ],
+    data: [
+        ":apexer_test_host_tools",
+        ":com.android.example.apex",
+        "testdata/com.android.example.apex.pem",
+    ],
+    version: {
+        py2: {
+            enabled: false,
+        },
+        py3: {
+            enabled: true,
+        },
+    },
+    test_suites: ["general-tests"],
+    test_options: {
+        unit_test: true,
+    },
+    required: [
+        "apexer_with_DCLA_preprocessing",
+    ],
+}

@@ -1199,25 +1199,27 @@ TEST_F(ApexdMountTest, InstallPackageUnloadOldApex) {
   std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
   ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
 
-  bool unloaded = false;
-  bool loaded = false;
-  std::thread monitor_init_apex_status([&]() {
-    unloaded = base::WaitForProperty("init.apex.test.apex.rebootless",
-                                     kInitApexUnloaded, 10s);
-    loaded = base::WaitForProperty("init.apex.test.apex.rebootless",
-                                   kInitApexLoaded, 10s);
-  });
-
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
   auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
+}
 
-  monitor_init_apex_status.join();
-  ASSERT_TRUE(unloaded);
-  ASSERT_TRUE(loaded);
+TEST_F(ApexdMountTest, InstallPackageWithService) {
+  std::string file_path = AddPreInstalledApex("test.rebootless_apex_service_v1.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
+
+  ASSERT_THAT(ActivatePackage(file_path), Ok());
+  UnmountOnTearDown(file_path);
+
+  auto ret = InstallPackage(GetTestFile("test.rebootless_apex_service_v2.apex"));
+  ASSERT_THAT(ret, Ok());
+  auto manifest = ReadManifest("/apex/test.apex.rebootless/apex_manifest.pb");
+  ASSERT_THAT(manifest, Ok());
+  ASSERT_EQ(2u, manifest->version());
+  UnmountOnTearDown(ret->GetPath());
 }
 
 TEST_F(ApexdMountTest, InstallPackageDataVersionActive) {

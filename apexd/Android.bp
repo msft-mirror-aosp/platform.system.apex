@@ -497,6 +497,8 @@ cc_test {
     ":test.rebootless_apex_v1",
     ":test.rebootless_apex_v2",
     ":test.rebootless_apex_v2_no_hashtree",
+    ":test.rebootless_apex_service_v1",
+    ":test.rebootless_apex_service_v2",
     ":gen_manifest_mismatch_rebootless_apex",
     ":gen_corrupt_rebootless_apex",
     ":test.rebootless_apex_provides_sharedlibs",

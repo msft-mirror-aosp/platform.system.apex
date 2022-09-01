@@ -3903,37 +3903,37 @@ Result<void> UpdateApexInfoList() {
 }
 
 // TODO(b/238820991) Handle failures
-void UnloadApexFromInit(const std::string& apex_name) {
+Result<void> UnloadApexFromInit(const std::string& apex_name) {
   if (!SetProperty(kCtlApexUnloadSysprop, apex_name)) {
     // When failed to SetProperty(), there's nothing we can do here.
     // Log error and return early to avoid indefinite waiting for ack.
-    PLOG(ERROR) << "Failed to set " << kCtlApexUnloadSysprop << " to "
+    return Error() << "Failed to set " << kCtlApexUnloadSysprop << " to "
                 << apex_name;
-    return;
   }
   const static auto kTimeoutForUnloading = 10s;
   const auto init_apex_prop_name = "init.apex." + apex_name;
   if (!base::WaitForProperty(init_apex_prop_name, kInitApexUnloaded,
                              kTimeoutForUnloading)) {
-    PLOG(ERROR) << "Failed to wait for init to unload " << apex_name;
+    return Error() << "Failed to wait for init to unload " << apex_name;
   }
+  return {};
 }
 
 // TODO(b/238820991) Handle failures
-void LoadApexFromInit(const std::string& apex_name) {
+Result<void> LoadApexFromInit(const std::string& apex_name) {
   if (!SetProperty(kCtlApexLoadSysprop, apex_name)) {
     // When failed to SetProperty(), there's nothing we can do here.
     // Log error and return early to avoid indefinite waiting for ack.
-    PLOG(ERROR) << "Failed to set " << kCtlApexLoadSysprop << " to "
+    return Error() << "Failed to set " << kCtlApexLoadSysprop << " to "
                 << apex_name;
-    return;
   }
   const static auto kTimeoutForLoading = 10s;
   const auto init_apex_prop_name = "init.apex." + apex_name;
   if (!base::WaitForProperty(init_apex_prop_name, kInitApexLoaded,
                              kTimeoutForLoading)) {
-    PLOG(ERROR) << "Failed to wait for init to load " << apex_name;
+    return Error() << "Failed to wait for init to load " << apex_name;
   }
+  return {};
 }
 
 Result<ApexFile> InstallPackage(const std::string& package_path) {
@@ -3981,11 +3981,15 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
   // Before unmounting the current apex, unload it from the init process:
   // terminates services started from the apex and init scripts read from the
   // apex.
-  UnloadApexFromInit(module_name);
+  OR_RETURN(UnloadApexFromInit(module_name));
 
   // And then reload it from the init process whether it succeeds or not.
-  auto reload_apex =
-      android::base::make_scope_guard([&]() { LoadApexFromInit(module_name); });
+  auto reload_apex = android::base::make_scope_guard([&]() {
+    if (auto status = LoadApexFromInit(module_name); !status.ok()) {
+      PLOG(ERROR) << "Failed to load apex " << module_name
+                  << " : " << status.error().message();
+    }
+  });
 
   // 2. Unmount currently active APEX.
   if (auto res = UnmountPackage(*cur_apex, /* allow_latest= */ true,
