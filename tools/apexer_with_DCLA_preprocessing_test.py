@@ -22,6 +22,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+from typing import List
 import unittest
 import zipfile
 
@@ -46,7 +47,7 @@ def get_current_dir():
 
 # TODO: consolidate these common test utilities into a common python_library_host
 # to be shared across tests under system/apex
-def run_command(cmd: list[str]) -> None:
+def run_command(cmd: List[str]) -> None:
   """Run a command."""
   try:
     if DEBUG_TEST:
@@ -63,6 +64,14 @@ def run_command(cmd: list[str]) -> None:
     print(err.output)
     raise err
 
+def get_apexer_with_DCLA_preprocessing() -> str:
+  tool_binary = os.path.join(get_current_dir(), 'apexer_with_DCLA_preprocessing')
+  if not os.path.isfile(tool_binary):
+    raise FileNotFoundError(f'cannot find tooling apexer with DCLA preprocessing')
+  else:
+    os.chmod(tool_binary, stat.S_IRUSR | stat.S_IXUSR);
+    return tool_binary
+
 def get_host_tool(tool_name: str) -> str:
   """get host tools."""
   tool_binary = os.path.join(get_current_dir(), 'bin', tool_name)
@@ -77,7 +86,7 @@ def get_host_tool(tool_name: str) -> str:
     else:
       tool_binary = shutil.which(tool_name)
 
-  if not os.path.isfile(tool_binary):
+  if not tool_binary or not os.path.isfile(tool_binary):
     raise FileNotFoundError(f'cannot find tooling {tool_name}')
   else:
     return tool_binary
@@ -188,7 +197,7 @@ class ApexerWithDCLAPreprocessingTest(unittest.TestCase):
     build_info_file = os.path.join(apex_dir, 'apex_build_info.pb')
     key_file = os.path.join(get_current_dir(), TEST_PRIVATE_KEY)
     apexer= get_host_tool('apexer')
-    apexer_wrapper = get_host_tool('apexer_with_DCLA_preprocessing')
+    apexer_wrapper = get_apexer_with_DCLA_preprocessing()
     android_jar = get_host_tool('android.jar')
     apex_out = os.path.join(apex_dir, 'DCLA_preprocessed_output.apex')
     run_command([apexer_wrapper,

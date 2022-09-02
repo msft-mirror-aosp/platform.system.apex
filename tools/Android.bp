@@ -159,6 +159,7 @@ python_test_host {
     ],
     data: [
         ":apexer_test_host_tools",
+        ":apexer_with_DCLA_preprocessing",
         ":com.android.example.apex",
         "testdata/com.android.example.apex.pem",
     ],
@@ -174,7 +175,4 @@ python_test_host {
     test_options: {
         unit_test: true,
     },
-    required: [
-        "apexer_with_DCLA_preprocessing",
-    ],
 }
