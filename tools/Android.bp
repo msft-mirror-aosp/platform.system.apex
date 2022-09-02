@@ -91,3 +91,88 @@ python_test_host {
         unit_test: true,
     },
 }
+
+cc_binary_host {
+    name: "host_apex_verifier",
+    srcs: ["host_apex_verifier.cc"],
+    defaults: [
+        "libapex-deps",
+    ],
+    shared_libs: [
+        "libhidl-gen-utils",
+        "libprocessgroup",
+    ],
+    static_libs: [
+        "libapex",
+        "libinit_host",
+    ],
+}
+
+sh_test_host {
+    name: "host-apex-verifier",
+    src: "host-apex-verifier.sh",
+    test_suites: ["device-tests"],
+    test_config: "host-apex-verifier.xml",
+    test_options: {
+        unit_test: false,
+    },
+    data_bins: [
+        "deapexer",
+        "debugfs_static",
+        "host_apex_verifier",
+    ],
+    data_libs: [
+        "libbase",
+        "libc++",
+        "libcgrouprc",
+        "libcrypto",
+        "libcutils",
+        "liblog",
+        "libprocessgroup",
+        "libprotobuf-cpp-full",
+        "libz",
+        "libziparchive",
+    ],
+}
+
+python_binary_host {
+    name: "apexer_with_DCLA_preprocessing",
+    srcs: [
+        "apexer_with_DCLA_preprocessing.py",
+    ],
+    version: {
+        py2: {
+            enabled: false,
+        },
+        py3: {
+            enabled: true,
+            embedded_launcher: true,
+        },
+    },
+}
+
+python_test_host {
+    name: "apexer_with_DCLA_preprocessing_test",
+    main: "apexer_with_DCLA_preprocessing_test.py",
+    srcs: [
+        "apexer_with_DCLA_preprocessing_test.py",
+    ],
+    data: [
+        ":apexer_test_host_tools",
+        ":apexer_with_DCLA_preprocessing",
+        ":com.android.example.apex",
+        "testdata/com.android.example.apex.pem",
+    ],
+    version: {
+        py2: {
+            enabled: false,
+        },
+        py3: {
+            enabled: true,
+        },
+    },
+    test_suites: ["general-tests"],
+    test_options: {
+        unit_test: true,
+    },
+}

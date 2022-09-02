@@ -1583,7 +1583,9 @@ static void ExecInMountNamespaceOf(pid_t pid,
   ASSERT_NE(-1, res);
 }
 
-TEST(ApexdTest, ApexdIsInSameMountNamespaceAsInit) {
+// This test case is part of the ApexServiceTest suite to ensure that apexd is
+// running when this test is executed.
+TEST_F(ApexServiceTest, ApexdIsInSameMountNamespaceAsInit) {
   // TODO(b/136647373): Move this check to environment setup
   if (!android::base::GetBoolProperty("ro.apex.updatable", false)) {
     GTEST_SKIP() << "Skipping test because device doesn't support APEX";
@@ -1606,13 +1608,13 @@ TEST(ApexdTest, ApexdIsInSameMountNamespaceAsInit) {
 
 // These are NOT exhaustive list of early processes be should be enough
 static const std::vector<const std::string> kEarlyProcesses = {
-    "servicemanager",
-    "hwservicemanager",
     "vold",
     "logd",
 };
 
-TEST(ApexdTest, EarlyProcessesAreInDifferentMountNamespace) {
+// This test case is part of the ApexServiceTest suite to ensure that apexd is
+// running when this test is executed.
+TEST_F(ApexServiceTest, EarlyProcessesAreInDifferentMountNamespace) {
   // TODO(b/136647373): Move this check to environment setup
   if (!android::base::GetBoolProperty("ro.apex.updatable", false)) {
     GTEST_SKIP() << "Skipping test because device doesn't support APEX";
