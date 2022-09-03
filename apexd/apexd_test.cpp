@@ -1199,12 +1199,24 @@ TEST_F(ApexdMountTest, InstallPackageUnloadOldApex) {
   std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
   ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
 
+  bool unloaded = false;
+  bool loaded = false;
+  const std::string prop = "apex.test.apex.rebootless.ready";
+  std::thread monitor_apex_ready_prop([&]() {
+    unloaded = base::WaitForProperty(prop, "false", 10s);
+    loaded = base::WaitForProperty(prop, "true", 10s);
+  });
+
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
   auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"));
   ASSERT_THAT(ret, Ok());
   UnmountOnTearDown(ret->GetPath());
+
+  monitor_apex_ready_prop.join();
+  ASSERT_TRUE(unloaded);
+  ASSERT_TRUE(loaded);
 }
 
 TEST_F(ApexdMountTest, InstallPackageWithService) {
