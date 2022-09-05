@@ -191,6 +191,8 @@ java_test_host {
     data: [
         ":VendorApexTestsApp",
         ":com.android.apex.vendor.foo",
+        ":com.android.apex.vendor.foo",
+        ":com.android.apex.vendor.foo.apex.all.ready",
     ],
     test_config: "vendor-apex-tests.xml",
     test_suites: [

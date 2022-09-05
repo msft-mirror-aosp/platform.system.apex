@@ -111,7 +111,7 @@ void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
   // in the APEX, possibly including different requirements depending
   // on the SDK version.
   for (const auto& c :
-       parser.FilterVersionedConfigs(init_configs, sdk_version)) {
+       init::FilterVersionedConfigs(init_configs, sdk_version)) {
     parser.ParseConfigFile(c);
   }
 

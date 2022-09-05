@@ -179,6 +179,7 @@ genrule {
         "cp $(location avbtool) $$BIN && " +
         "cp $(location aapt2) $$BIN && " +
         "cp $(location e2fsdroid) $$BIN && " +
+        "cp $(location make_erofs) $$BIN && " +
         "cp $(location merge_zips) $$BIN && " +
         "cp $(location mke2fs) $$BIN && " +
         "cp $(location resize2fs) $$BIN && " +

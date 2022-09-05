@@ -75,3 +75,18 @@ cc_binary {
     vendor: true,
     installable: false,
 }
+
+apex {
+    name: "com.android.apex.vendor.foo.apex.all.ready",
+    defaults: [
+        "com.android.apex.vendor.foo.defaults",
+    ],
+    prebuilts: [
+        "foo.apex.all.ready.rc",
+    ],
+}
+
+prebuilt_etc {
+    name: "foo.apex.all.ready.rc",
+    src: "foo.apex.all.ready.rc",
+}

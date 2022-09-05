@@ -51,6 +51,7 @@ def RunCommand(cmd: list[str]) -> None:
         stderr=subprocess.PIPE)
   except subprocess.CalledProcessError as err:
     print(err.stderr)
+    print(err.output)
     raise err
 
 def GetDigest(file_path: str) -> str:
