@@ -3065,6 +3065,12 @@ void OnAllPackagesReady() {
     PLOG(ERROR) << "Failed to set " << gConfig->apex_status_sysprop << " to "
                 << kApexStatusReady;
   }
+  // Since apexd.status property is a system property, we expose yet another
+  // property as system_restricted_prop so that, for example, vendor can rely on
+  // the "ready" event.
+  if (!SetProperty(kApexAllReadyProp, "true")) {
+    PLOG(ERROR) << "Failed to set " << kApexAllReadyProp << " to true";
+  }
 }
 
 Result<std::vector<ApexFile>> SubmitStagedSession(
