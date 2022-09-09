@@ -86,6 +86,13 @@ public class VendorApexTests extends BaseHostJUnit4Test {
         assertThat(getDevice().getProperty("vendor.test.apex.all.ready")).isEqualTo("triggered");
     }
 
+    @Test
+    @LargeTest
+    public void testRestartServiceAfterRebootlessUpdate() throws Exception {
+        pushPreinstalledApex("com.android.apex.vendor.foo.v1_with_service.apex");
+        runPhase("testRestartServiceAfterRebootlessUpdate");
+    }
+
     private void pushPreinstalledApex(String fileName) throws Exception {
         CompatibilityBuildHelper buildHelper = new CompatibilityBuildHelper(getBuild());
         final File apex = buildHelper.getTestFile(fileName);

@@ -19,10 +19,12 @@ package com.android.tests.apex.app;
 import static com.google.common.truth.Truth.assertThat;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import android.Manifest;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.os.SystemProperties;
 
 import androidx.test.platform.app.InstrumentationRegistry;
 
@@ -37,6 +39,7 @@ import org.junit.runners.JUnit4;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.function.Supplier;
 
 @RunWith(JUnit4.class)
 public class VendorApexTests {
@@ -50,6 +53,9 @@ public class VendorApexTests {
     private static final TestApp Apex2RequireNativeLibs = new TestApp(
             "com.android.apex.vendor.foo.v2_with_requireNativeLibs", APEX_PACKAGE_NAME, 2,
             /*isApex*/true, "com.android.apex.vendor.foo.v2_with_requireNativeLibs.apex");
+    private static final TestApp Apex2Service = new TestApp(
+            "com.android.apex.vendor.foo.v2_with_service", APEX_PACKAGE_NAME, 2,
+            /*isApex*/true, "com.android.apex.vendor.foo.v2_with_service.apex");
 
     @Test
     public void testRebootlessUpdate() throws Exception {
@@ -88,5 +94,46 @@ public class VendorApexTests {
         assertTrue(Files.exists(ldConfigTxt));
         assertThat(Files.readAllLines(ldConfigTxt))
             .contains("namespace.default.link.system.shared_libs += libbinder_ndk.so");
+    }
+
+    @Test
+    public void testRestartServiceAfterRebootlessUpdate() throws Exception {
+        InstallUtils.dropShellPermissionIdentity();
+        InstallUtils.adoptShellPermissionIdentity(Manifest.permission.INSTALL_PACKAGE_UPDATES);
+
+        assertThat(SystemProperties.get("init.svc.apex_vendor_foo_v1", ""))
+            .isEqualTo("running");
+        assertThat(SystemProperties.get("init.svc.apex_vendor_foo_v2", ""))
+            .isEqualTo("");
+
+        Install.single(Apex2Service).commit();
+
+        assertThat(SystemProperties.get("init.svc.apex_vendor_foo_v1", ""))
+            .isEqualTo("stopped");
+        assertThat(SystemProperties.get("apex." + APEX_PACKAGE_NAME + ".ready", ""))
+            .isEqualTo("true");
+        assertAwait(
+                () -> SystemProperties.get("init.svc.apex_vendor_foo_v2", "").equals("running"),
+                5000,
+                "v2 not started");
+    }
+
+    private static void assertAwait(Supplier<Boolean> test, long millis, String failMessage)
+            throws Exception {
+        long start = System.currentTimeMillis();
+        do {
+            if (test.get()) {
+                return;
+            }
+            if (System.currentTimeMillis() - start > millis) {
+                fail(failMessage);
+                return;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                // nothing to do
+            }
+        } while (true);
     }
 }

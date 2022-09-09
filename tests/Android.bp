@@ -193,6 +193,7 @@ java_test_host {
         ":com.android.apex.vendor.foo",
         ":com.android.apex.vendor.foo",
         ":com.android.apex.vendor.foo.apex.all.ready",
+        ":com.android.apex.vendor.foo.v1_with_service"
     ],
     test_config: "vendor-apex-tests.xml",
     test_suites: [
@@ -215,6 +216,7 @@ android_test_helper_app {
     java_resources: [
         ":com.android.apex.vendor.foo.v2",
         ":com.android.apex.vendor.foo.v2_with_requireNativeLibs",
+        ":com.android.apex.vendor.foo.v2_with_service",
     ],
     test_suites: [
         "general-tests",
