@@ -1878,8 +1878,8 @@ class LogTestToLogcat : public ::testing::EmptyTestEventListener {
     std::string msg =
         StringPrintf("=== %s::%s (%s:%d)", test_info.test_suite_name(),
                      test_info.name(), test_info.file(), test_info.line());
-    l(LogId::MAIN, LogSeverity::INFO, "ApexTestCases", __FILE__, __LINE__,
-      msg.c_str());
+    l(LogId::MAIN, LogSeverity::INFO, "ApexServiceTestCases", __FILE__,
+      __LINE__, msg.c_str());
 #else
     UNUSED(test_info);
 #endif

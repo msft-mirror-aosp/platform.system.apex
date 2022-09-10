@@ -4892,5 +4892,32 @@ TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
   ASSERT_TRUE(IsActiveApexChanged(*apex_file));
 }
 
+class LogTestToLogcat : public ::testing::EmptyTestEventListener {
+  void OnTestStart(const ::testing::TestInfo& test_info) override {
+#ifdef __ANDROID__
+    using base::LogId;
+    using base::LogSeverity;
+    using base::StringPrintf;
+    base::LogdLogger l;
+    std::string msg =
+        StringPrintf("=== %s::%s (%s:%d)", test_info.test_suite_name(),
+                     test_info.name(), test_info.file(), test_info.line());
+    l(LogId::MAIN, LogSeverity::INFO, "ApexTestCases", __FILE__, __LINE__,
+      msg.c_str());
+#else
+    UNUSED(test_info);
+#endif
+  }
+};
+
 }  // namespace apex
 }  // namespace android
+
+int main(int argc, char** argv) {
+  android::base::InitLogging(argv, &android::base::StderrLogger);
+  android::base::SetMinimumLogSeverity(android::base::VERBOSE);
+  ::testing::InitGoogleTest(&argc, argv);
+  ::testing::UnitTest::GetInstance()->listeners().Append(
+      new android::apex::LogTestToLogcat());
+  return RUN_ALL_TESTS();
+}
