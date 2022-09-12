@@ -90,3 +90,51 @@ prebuilt_etc {
     name: "foo.apex.all.ready.rc",
     src: "foo.apex.all.ready.rc",
 }
+
+// Runs forever like /bin/yes
+cc_binary {
+    name: "apex_vendor_foo",
+    srcs: [
+        "apex_vendor_foo.cpp",
+    ],
+    vendor: true,
+    installable: false,
+}
+
+prebuilt_etc {
+    name: "apex_vendor_foo_v1.rc",
+    src: "apex_vendor_foo_v1.rc",
+}
+
+prebuilt_etc {
+    name: "apex_vendor_foo_v2.rc",
+    src: "apex_vendor_foo_v2.rc",
+}
+
+apex {
+    name: "com.android.apex.vendor.foo.v1_with_service",
+    defaults: [
+        "com.android.apex.vendor.foo.defaults",
+    ],
+    manifest: "manifest_v1.json",
+    binaries: [
+        "apex_vendor_foo",
+    ],
+    prebuilts: [
+        "apex_vendor_foo_v1.rc",
+    ],
+}
+
+apex {
+    name: "com.android.apex.vendor.foo.v2_with_service",
+    defaults: [
+        "com.android.apex.vendor.foo.defaults",
+    ],
+    manifest: "manifest_v2.json",
+    binaries: [
+        "apex_vendor_foo",
+    ],
+    prebuilts: [
+        "apex_vendor_foo_v2.rc",
+    ],
+}
