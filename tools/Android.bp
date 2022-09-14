@@ -22,11 +22,7 @@ python_binary_host {
         "deapexer.py",
     ],
     version: {
-        py2: {
-            enabled: false,
-        },
         py3: {
-            enabled: true,
             embedded_launcher: true,
         },
     },
@@ -44,11 +40,7 @@ python_binary_host {
         "apex_compression_tool.py",
     ],
     version: {
-        py2: {
-            enabled: false,
-        },
         py3: {
-            enabled: true,
             embedded_launcher: true,
         },
     },
