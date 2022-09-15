@@ -71,6 +71,8 @@ using android::base::testing::HasValue;
 using android::base::testing::Ok;
 using android::base::testing::WithMessage;
 using android::dm::DeviceMapper;
+using android::fs_mgr::Fstab;
+using android::fs_mgr::ReadFstabFromFile;
 using ::apex::proto::SessionState;
 using com::android::apex::testing::ApexInfoXmlEq;
 using ::testing::ByRef;
@@ -427,7 +429,7 @@ TEST_F(ApexdUnitTest, SharedLibsDataVersionDeletedIfLower) {
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*shared_lib_v2))));
 }
 
-TEST_F(ApexdUnitTest, DISABLED_ProcessCompressedApex) {
+TEST_F(ApexdUnitTest, ProcessCompressedApex) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
 
@@ -442,13 +444,6 @@ TEST_F(ApexdUnitTest, DISABLED_ProcessCompressedApex) {
   // Assert output path is not empty
   auto exists = PathExists(decompressed_file_path);
   ASSERT_THAT(exists, HasValue(true));
-
-  // Assert that decompressed apex is same as original apex
-  const std::string original_apex_file_path =
-      GetTestFile("com.android.apex.compressed.v1_original.apex");
-  auto comparison_result =
-      CompareFiles(original_apex_file_path, decompressed_file_path);
-  ASSERT_THAT(comparison_result, HasValue(true));
 
   // Assert that return value contains decompressed APEX
   auto decompressed_apex = ApexFile::Open(decompressed_file_path);
@@ -542,7 +537,7 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexCanBeCalledMultipleTimes) {
 }
 
 // Test behavior of ProcessCompressedApex when is_ota_chroot is true
-TEST_F(ApexdUnitTest, DISABLED_ProcessCompressedApexOnOtaChroot) {
+TEST_F(ApexdUnitTest, ProcessCompressedApexOnOtaChroot) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
 
@@ -560,13 +555,6 @@ TEST_F(ApexdUnitTest, DISABLED_ProcessCompressedApexOnOtaChroot) {
   auto exists = PathExists(decompressed_file_path);
   ASSERT_THAT(exists, HasValue(true))
       << decompressed_file_path << " does not exist";
-
-  // Assert that decompressed apex is same as original apex
-  const std::string original_apex_file_path =
-      GetTestFile("com.android.apex.compressed.v1_original.apex");
-  auto comparison_result =
-      CompareFiles(original_apex_file_path, decompressed_file_path);
-  ASSERT_THAT(comparison_result, HasValue(true));
 
   // Assert that return value contains the decompressed APEX
   auto apex_file = ApexFile::Open(decompressed_file_path);
@@ -2350,7 +2338,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSharedLibsApexBothVersions) {
       "/apex/sharedlibs/lib/libsharedlibtest.so->"
       "/apex/com.android.apex.test.sharedlibs@1/lib/libsharedlibtest.so",
       "/apex/sharedlibs/lib/libc++.so->"
-      "/apex/com.android.apex.test.sharedlibs@1/lib/libc++.so",
+      "/apex/com.android.apex.test.sharedlibs@2/lib/libc++.so",
   };
   // On 64bit devices we also have lib64.
   if (!GetProperty("ro.product.cpu.abilist64", "").empty()) {
@@ -2362,7 +2350,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSharedLibsApexBothVersions) {
         "/apex/com.android.apex.test.sharedlibs@1/lib64/libsharedlibtest.so");
     expected.push_back(
         "/apex/sharedlibs/lib64/libc++.so->"
-        "/apex/com.android.apex.test.sharedlibs@1/lib64/libc++.so");
+        "/apex/com.android.apex.test.sharedlibs@2/lib64/libc++.so");
   }
 
   ASSERT_THAT(sharedlibs, UnorderedElementsAreArray(expected));
@@ -4890,6 +4878,54 @@ TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
   auto apex_file = ApexFile::Open(preinstalled_apex);
   ASSERT_THAT(apex_file, Ok());
   ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+}
+
+TEST_F(ApexdMountTest, FinishLoopConfiguration) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
+  std::string apex_path_2 =
+      AddPreInstalledApex("apex.apexd_test_different_app.apex");
+  std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
+  std::string apex_path_4 = AddPreInstalledApex(
+      "com.android.apex.test.sharedlibs_generated.v1.libvX.apex");
+  std::string apex_path_5 =
+      AddDataApex("com.android.apex.test.sharedlibs_generated.v2.libvY.apex");
+
+  ASSERT_THAT(
+      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
+      Ok());
+
+  OnStart();
+
+  UnmountOnTearDown(apex_path_1);
+  UnmountOnTearDown(apex_path_2);
+  UnmountOnTearDown(apex_path_3);
+  UnmountOnTearDown(apex_path_4);
+  UnmountOnTearDown(apex_path_5);
+
+  // Just make sure that FinisLoopConfiguration() doesn't crash. Ideally we want
+  // to check the value of the queue depth and the scheduler, but for the time
+  // being this should do.
+  std::future<void> result = FinishLoopConfiguration();
+  result.get();
+
+  Fstab proc_mounts;
+  ASSERT_TRUE(ReadFstabFromFile("/proc/mounts", &proc_mounts));
+  std::vector<std::string> apex_block_devices;
+  for (const auto& entry : proc_mounts) {
+    if (!android::base::StartsWith(entry.mount_point, "/apex/")) {
+      continue;
+    }
+    // Skip bind mounts
+    if (entry.mount_point.find('@') == std::string::npos) {
+      continue;
+    }
+    apex_block_devices.emplace_back(entry.blk_device);
+  }
+  ASSERT_EQ(4u, apex_block_devices.size());
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {

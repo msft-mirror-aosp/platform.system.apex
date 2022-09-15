@@ -31,23 +31,29 @@
 
 namespace {
 
+using android::base::SetDefaultTag;
+
 int HandleSubcommand(char** argv) {
   if (strcmp("--bootstrap", argv[1]) == 0) {
+    SetDefaultTag("apexd-bootstrap");
     LOG(INFO) << "Bootstrap subcommand detected";
     return android::apex::OnBootstrap();
   }
 
   if (strcmp("--unmount-all", argv[1]) == 0) {
+    SetDefaultTag("apexd-unmount-all");
     LOG(INFO) << "Unmount all subcommand detected";
     return android::apex::UnmountAll();
   }
 
   if (strcmp("--otachroot-bootstrap", argv[1]) == 0) {
+    SetDefaultTag("apexd-otachroot");
     LOG(INFO) << "OTA chroot bootstrap subcommand detected";
     return android::apex::OnOtaChrootBootstrap();
   }
 
   if (strcmp("--snapshotde", argv[1]) == 0) {
+    SetDefaultTag("apexd-snapshotde");
     LOG(INFO) << "Snapshot DE subcommand detected";
     // Need to know if checkpointing is enabled so that a prerestore snapshot
     // can be taken if it's not.
@@ -72,6 +78,7 @@ int HandleSubcommand(char** argv) {
   }
 
   if (strcmp("--vm", argv[1]) == 0) {
+    SetDefaultTag("apexd-vm");
     LOG(INFO) << "VM subcommand detected";
     return android::apex::OnStartInVmMode();
   }
@@ -131,6 +138,7 @@ int main(int /*argc*/, char** argv) {
       // mark apexd as ready
       android::apex::OnAllPackagesReady();
     } else if (strcmp("--otachroot-bootstrap", argv[1]) == 0) {
+      SetDefaultTag("apexd-otachroot");
       LOG(INFO) << "OTA chroot bootstrap subcommand detected";
       return android::apex::ActivateFlattenedApex();
     } else if (strcmp("--bootstrap", argv[1]) == 0) {
@@ -180,7 +188,14 @@ int main(int /*argc*/, char** argv) {
     // the "--snapshotde" subcommand is received and snapshot/restore is
     // complete.
     android::apex::OnAllPackagesActivated(/*is_bootstrap=*/false);
+    // The boot sequence continues, and we can finish up configuring loop
+    // devices in peace.
+    auto result = android::apex::FinishLoopConfiguration();
     lifecycle.WaitForBootStatus(android::apex::RevertActiveSessionsAndReboot);
+    // Wait for loop devices to be configured before running the boot cleanup
+    // logic to make sure that service_manager won't kill apexd in the middle of
+    // loop configuration.
+    result.wait();
   }
 
   // Run cleanup routine before AllowServiceShutdown(), to prevent

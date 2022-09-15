@@ -1201,16 +1201,7 @@ Result<void> ResumeRevertIfNeeded() {
   return RevertActiveSessions("", "");
 }
 
-Result<void> ActivateSharedLibsPackage(const std::string& mount_point) {
-  // Having static mutex here is not great, but since this function is called
-  // only twice during boot we can probably live with that. In U+ we will have
-  // a proper solution implemented.
-  static std::mutex mtx;
-  // ActivateSharedLibsPackage can be called concurrently from multiple threads.
-  // Since this function mutates the shared state in /apex/sharedlibs hold the
-  // mutex to avoid potential race conditions.
-  std::lock_guard guard(mtx);
-
+Result<void> ContributeToSharedLibs(const std::string& mount_point) {
   for (const auto& lib_path : {"lib", "lib64"}) {
     std::string apex_lib_path = mount_point + "/" + lib_path;
     auto lib_dir = PathExists(apex_lib_path);
@@ -1315,6 +1306,22 @@ bool IsValidPackageName(const std::string& package_name) {
   return kBannedApexName.count(package_name) == 0;
 }
 
+// Activates given APEX file.
+//
+// In a nutshel activation of an APEX consist of the following steps:
+//   1. Create loop devices that is backed by the given apex_file
+//   2. If apex_file resides on /data partition then create a dm-verity device
+//    backed by the loop device created in step (1).
+//   3. Create a mount point under /apex for this APEX.
+//   4. Mount the dm-verity device on that mount point.
+//     4.1 In case APEX file comes from a partition that is already
+//       dm-verity protected (e.g. /system) then we mount the loop device.
+//
+//
+// Note: this function only does the job to activate this single APEX.
+// In case this APEX file contributes to the /apex/sharedlibs mount point, then
+// you must also call ContributeToSharedLibs after finishing activating all
+// APEXes. See ActivateApexPackages for more context.
 Result<void> ActivatePackageImpl(const ApexFile& apex_file,
                                  const std::string& device_name,
                                  bool reuse_device) {
@@ -1411,20 +1418,14 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file,
     }
   }
 
-  if (manifest.providesharedapexlibs()) {
-    const auto& handle_shared_libs_apex =
-        ActivateSharedLibsPackage(mount_point);
-    if (!handle_shared_libs_apex.ok()) {
-      return handle_shared_libs_apex;
-    }
-  }
-
   LOG(DEBUG) << "Successfully activated " << apex_file.GetPath()
              << " package_name: " << manifest.name()
              << " version: " << manifest.version();
   return {};
 }
 
+// Wrapper around ActivatePackageImpl.
+// Do not use, this wrapper is going away.
 Result<void> ActivatePackage(const std::string& full_path) {
   LOG(INFO) << "Trying to activate " << full_path;
 
@@ -1704,11 +1705,11 @@ namespace {
 
 enum ActivationMode { kBootstrapMode = 0, kBootMode, kOtaChrootMode, kVmMode };
 
-std::vector<Result<void>> ActivateApexWorker(
+std::vector<Result<const ApexFile*>> ActivateApexWorker(
     ActivationMode mode, std::queue<const ApexFile*>& apex_queue,
     std::mutex& mutex) {
   ATRACE_NAME("ActivateApexWorker");
-  std::vector<Result<void>> ret;
+  std::vector<Result<const ApexFile*>> ret;
 
   while (true) {
     const ApexFile* apex;
@@ -1734,7 +1735,7 @@ std::vector<Result<void>> ActivateApexWorker(
       ret.push_back(Error() << "Failed to activate " << apex->GetPath() << "("
                             << device_name << "): " << res.error());
     } else {
-      ret.push_back({});
+      ret.push_back({apex});
     }
   }
 
@@ -1764,7 +1765,7 @@ Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
     worker_num = 1;
   }
 
-  std::vector<std::future<std::vector<Result<void>>>> futures;
+  std::vector<std::future<std::vector<Result<const ApexFile*>>>> futures;
   futures.reserve(worker_num);
   for (size_t i = 0; i < worker_num; i++) {
     futures.push_back(std::async(std::launch::async, ActivateApexWorker,
@@ -1775,16 +1776,56 @@ Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
   size_t activated_cnt = 0;
   size_t failed_cnt = 0;
   std::string error_message;
+  std::vector<const ApexFile*> activated_sharedlibs_apexes;
   for (size_t i = 0; i < futures.size(); i++) {
     for (const auto& res : futures[i].get()) {
       if (res.ok()) {
         ++activated_cnt;
+        if (res.value()->GetManifest().providesharedapexlibs()) {
+          activated_sharedlibs_apexes.push_back(res.value());
+        }
       } else {
         ++failed_cnt;
         LOG(ERROR) << res.error();
         if (failed_cnt == 1) {
           error_message = res.error().message();
         }
+      }
+    }
+  }
+
+  // We finished activation of APEX packages and now are ready to populate the
+  // /apex/sharedlibs mount point. Since there can be multiple different APEXes
+  // contributing to shared libs (at the point of writing this comment there can
+  // be up 2 APEXes: pre-installed sharedlibs APEX and its updated counterpart)
+  // we need to call ContributeToSharedLibs sequentially to avoid potential race
+  // conditions. See b/240291921
+  const auto& apex_repo = ApexFileRepository::GetInstance();
+  // To make things simpler we also provide an order in which APEXes contribute
+  // to sharedlibs.
+  auto cmp = [&apex_repo](const auto& apex_a, const auto& apex_b) {
+    // An APEX with higher version should contribute first
+    if (apex_a->GetManifest().version() != apex_b->GetManifest().version()) {
+      return apex_a->GetManifest().version() > apex_b->GetManifest().version();
+    }
+    // If they have the same version, then we pick the updated APEX first.
+    return !apex_repo.IsPreInstalledApex(*apex_a);
+  };
+  std::sort(activated_sharedlibs_apexes.begin(),
+            activated_sharedlibs_apexes.end(), cmp);
+  for (const auto& sharedlibs_apex : activated_sharedlibs_apexes) {
+    LOG(DEBUG) << "Populating sharedlibs with APEX "
+               << sharedlibs_apex->GetPath() << " ( "
+               << sharedlibs_apex->GetManifest().name()
+               << " ) version : " << sharedlibs_apex->GetManifest().version();
+    auto mount_point =
+        apexd_private::GetPackageMountPoint(sharedlibs_apex->GetManifest());
+    if (auto ret = ContributeToSharedLibs(mount_point); !ret.ok()) {
+      LOG(ERROR) << "Failed to populate sharedlibs with APEX package "
+                 << sharedlibs_apex->GetPath() << " : " << ret.error();
+      ++failed_cnt;
+      if (failed_cnt == 1) {
+        error_message = ret.error().message();
       }
     }
   }
@@ -3052,6 +3093,34 @@ void OnAllPackagesActivated(bool is_bootstrap) {
     PLOG(ERROR) << "Failed to set " << gConfig->apex_status_sysprop << " to "
                 << kApexStatusActivated;
   }
+}
+
+std::future<void> FinishLoopConfiguration() {
+  // Now we can finish configuring loop devices, as it won't block the boot
+  // sequence.
+  std::vector<MountedApexData> mounted_apexes;
+  gMountedApexes.ForallMountedApexes(
+      [&](const std::string& /*package*/, const MountedApexData& data,
+          bool latest) { mounted_apexes.emplace_back(data); });
+  LOG(INFO) << "Finalizing configuration of " << mounted_apexes.size()
+            << " loop devices";
+  // A very basic version of the async IO. We should use the io_uring on
+  // devices that support it.
+  return std::async(
+      std::launch::async,
+      [](std::vector<MountedApexData>&& mounted_apexes) {
+        auto time_started = boot_clock::now();
+        for (const auto& apex : mounted_apexes) {
+          loop::FinishConfiguring(apex.loop_name, apex.full_path);
+        }
+        auto time_elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                boot_clock::now() - time_started)
+                .count();
+        LOG(INFO) << "Finished confuring " << mounted_apexes.size()
+                  << " loop devices duration=" << time_elapsed;
+      },
+      std::move(mounted_apexes));
 }
 
 void OnAllPackagesReady() {
