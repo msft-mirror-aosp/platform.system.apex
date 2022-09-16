@@ -109,7 +109,7 @@ int main(int /*argc*/, char** argv) {
   android::base::SetMinimumLogSeverity(android::base::INFO);
 
   // set umask to 022 so that files/dirs created are accessible to other
-  // processes e.g.) apex-info-file.xml is supposed to be read by other
+  // processes e.g.) /apex/apex-info-list.xml is supposed to be read by other
   // processes
   umask(022);
 
