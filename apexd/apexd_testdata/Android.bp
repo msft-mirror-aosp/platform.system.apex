@@ -543,7 +543,7 @@ apex_test {
     updatable: false,
 }
 
-bootclasspath_fragment {
+bootclasspath_fragment_test {
     name: "apex.apexd_test_bootclasspath-fragment",
     contents: ["test_framework-apexd"],
 }
