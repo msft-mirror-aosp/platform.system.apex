@@ -67,14 +67,6 @@ python_test_host {
         ":deapexer",
         ":soong_zip",
     ],
-    version: {
-        py2: {
-            enabled: false,
-        },
-        py3: {
-            enabled: true,
-        },
-    },
     libs: [
         "apex_manifest_proto",
     ],
@@ -133,11 +125,7 @@ python_binary_host {
         "apexer_with_DCLA_preprocessing.py",
     ],
     version: {
-        py2: {
-            enabled: false,
-        },
         py3: {
-            enabled: true,
             embedded_launcher: true,
         },
     },
@@ -155,14 +143,6 @@ python_test_host {
         ":com.android.example.apex",
         "testdata/com.android.example.apex.pem",
     ],
-    version: {
-        py2: {
-            enabled: false,
-        },
-        py3: {
-            enabled: true,
-        },
-    },
     test_suites: ["general-tests"],
     test_options: {
         unit_test: true,
