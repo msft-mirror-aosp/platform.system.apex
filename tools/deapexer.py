@@ -206,9 +206,23 @@ class Apex(object):
     return ApexImageDirectory(path, entries, self)
 
   def _extract(self, path, dest):
-    process = subprocess.Popen([self._debugfs, '-R', 'rdump %s %s' % (path, dest), self._payload],
+    # get filesystem type
+    process = subprocess.Popen(['blkid', '-o', 'value', '-s', 'TYPE', self._payload],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                universal_newlines=True)
+    output, stderr = process.communicate()
+    if process.returncode != 0:
+      print(stderr, file=sys.stderr)
+
+    if output.rstrip() == 'erofs':
+      process = subprocess.Popen([self._fsckerofs, '--extract=%s' % (dest), '--overwrite', self._payload],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 universal_newlines=True)
+    else:
+      process = subprocess.Popen([self._debugfs, '-R', 'rdump %s %s' % (path, dest), self._payload],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 universal_newlines=True)
+
     _, stderr = process.communicate()
     if process.returncode != 0:
       print(stderr, file=sys.stderr)
@@ -251,8 +265,8 @@ def RunExtract(args):
     if not os.path.exists(args.dest):
       os.makedirs(args.dest, mode=0o755)
     apex.extract(args.dest)
-    shutil.rmtree(os.path.join(args.dest, "lost+found"))
-
+    if os.path.isdir(os.path.join(args.dest, "lost+found")):
+      shutil.rmtree(os.path.join(args.dest, "lost+found"))
 
 class ApexType(enum.Enum):
   INVALID = 0
@@ -323,9 +337,12 @@ def main(argv):
   parser = argparse.ArgumentParser()
 
   debugfs_default = None
+  fsckerofs_default = None
   if 'ANDROID_HOST_OUT' in os.environ:
     debugfs_default = '%s/bin/debugfs_static' % os.environ['ANDROID_HOST_OUT']
+    fsckerofs_default = '%s/bin/fsck.erofs' % os.environ['ANDROID_HOST_OUT']
   parser.add_argument('--debugfs_path', help='The path to debugfs binary', default=debugfs_default)
+  parser.add_argument('--fsckerofs_path', help='The path to fsck.erofs binary', default=fsckerofs_default)
 
   subparsers = parser.add_subparsers(required=True, dest='cmd')
 

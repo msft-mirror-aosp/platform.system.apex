@@ -39,7 +39,10 @@ import org.junit.runners.JUnit4;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @RunWith(JUnit4.class)
 public class VendorApexTests {
@@ -90,10 +93,20 @@ public class VendorApexTests {
 
         Install.single(Apex2RequireNativeLibs).commit();
 
-        // v2 uses "libbinder_ndk.so" (requireNativeLibs)
+        // v2 has a binary using "libbinder_ndk.so" (requireNativeLibs).
+        // So, the linker config should exist,
         assertTrue(Files.exists(ldConfigTxt));
-        assertThat(Files.readAllLines(ldConfigTxt))
-            .contains("namespace.default.link.system.shared_libs += libbinder_ndk.so");
+        // and it should have "namespace.default.link.system.shared_libs = libbinder_ndk.so".
+        final List<String> sharedLibs = Files.readAllLines(ldConfigTxt).stream().flatMap(line -> {
+            if (line.startsWith("namespace.default.link.system.shared_libs")) {
+                // "link" line has two forms as follows:
+                //   namespace.Foo.link.Bar.shared_libs = libA.so:libB.so:...
+                //   namespace.Foo.link.Bar.shared_libs += libC.so:libD.so:...
+                return Stream.of(line.split(" ")[2].split(":"));
+            }
+            return Stream.empty();
+        }).collect(Collectors.toList());
+        assertThat(sharedLibs).contains("libbinder_ndk.so");
     }
 
     @Test
