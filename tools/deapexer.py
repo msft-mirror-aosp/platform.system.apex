@@ -132,6 +132,7 @@ class Apex(object):
 
   def __init__(self, args):
     self._debugfs = args.debugfs_path
+    self._fsckerofs = args.fsckerofs_path
     self._apex = args.apex
     self._tempdir = tempfile.mkdtemp()
     # TODO(b/139125405): support flattened APEXes.
