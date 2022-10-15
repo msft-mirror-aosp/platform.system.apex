@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The Android Open Source Project
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,38 +19,40 @@ package {
 }
 
 cc_defaults {
-    name: "libapexutil-deps",
+    name: "libapexinfo-deps",
     static_libs: [
         "libbase",
-        "liblog_for_runtime_apex",
-        "libprotobuf-cpp-lite",
-        "lib_apex_manifest_proto_lite",
+        "liblog",
+        "libtinyxml2",
     ],
 }
 
 cc_library_static {
-    name: "libapexutil",
-    defaults: ["libapexutil-deps"],
+    name: "libapexinfo",
+    defaults: ["libapexinfo-deps"],
     export_include_dirs: ["."],
-    srcs: [ "apexutil.cpp" ],
-    host_supported: true,
-    apex_available: [
-        "//apex_available:platform",
-        "com.android.runtime",
+    srcs: [
+        "apex_info.cpp",
+        "apex_info_cache.cpp",
     ],
+    host_supported: true,
+    recovery_available: true,
+    generated_sources: ["apex-info-list-tinyxml"],
+    visibility: ["//system/libvintf"],
 }
 
 cc_test {
-    name: "libapexutil_tests",
+    name: "libapexinfo_tests",
     srcs: ["*_test.cpp"],
-    defaults: ["libapexutil-deps"],
+    defaults: ["libapexinfo-deps"],
     static_libs: [
-        "libapexutil",
+        "libapexinfo",
         "libgmock",
     ],
     test_suites: [
         "device-tests",
         "general-tests",
     ],
+    generated_sources: ["apex-info-list-tinyxml"],
     host_supported: true,
 }

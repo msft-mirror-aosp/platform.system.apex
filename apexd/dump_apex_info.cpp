@@ -15,6 +15,7 @@
  */
 
 #include <android-base/file.h>
+#include <android-base/logging.h>
 #include <getopt.h>
 
 #include <chrono>
@@ -31,6 +32,8 @@ void usage(const char* cmd) {
 
 // Create apex-info-list based on pre installed apexes
 int main(int argc, char** argv) {
+  android::base::InitLogging(argv, android::base::StdioLogger);
+  auto severity = android::base::ERROR;
   static constexpr const char* kRootDir = "root_dir";
   static constexpr const char* kOutFile = "out_file";
 
@@ -41,7 +44,7 @@ int main(int argc, char** argv) {
   std::map<std::string, std::string> opts;
   int index = 0;
   for (;;) {
-    int c = getopt_long(argc, argv, "h", long_options, &index);
+    int c = getopt_long(argc, argv, "hv", long_options, &index);
 
     if (c == -1) {
       break;
@@ -53,7 +56,9 @@ int main(int argc, char** argv) {
       case 'h':
         usage(argv[0]);
         return 0;
-
+      case 'v':
+        severity = android::base::VERBOSE;
+        break;
       case '?':
       default:
         usage(argv[0]);
@@ -65,8 +70,14 @@ int main(int argc, char** argv) {
     usage(argv[0]);
     return -1;
   }
+  android::base::SetMinimumLogSeverity(severity);
+  std::string root_dir;
+  if (!android::base::Realpath(opts[kRootDir], &root_dir)) {
+    LOG(ERROR) << "Failed to resolve realpath for root directory "
+               << opts[kRootDir];
+    return -1;
+  }
 
-  std::string root_dir(opts[kRootDir]);
   const std::string apex_root =
       root_dir + std::string(::android::apex::kApexRoot);
 
@@ -85,14 +96,14 @@ int main(int argc, char** argv) {
   }
   auto ret = repo.AddPreInstalledApex(prebuilt_dirs);
   if (!ret.ok()) {
-    std::cerr << "Failed to add pre-installed apex directories" << std::endl;
+    LOG(ERROR) << "Failed to add pre-installed apex directories";
     return -1;
   }
 
   std::vector<com::android::apex::ApexInfo> apex_infos;
   for (const auto& [name, files] : repo.AllApexFilesByName()) {
     if (files.size() != 1) {
-      std::cerr << "Multiple APEXs found for " << name << std::endl;
+      LOG(ERROR) << "Multiple APEXs found for " << name;
       return -1;
     }
 
@@ -108,7 +119,6 @@ int main(int argc, char** argv) {
       }
     }
     auto path = apex.GetPath().substr(root_dir.length());
-
     const bool is_active = true;
     const std::optional<int64_t> mtime;
     com::android::apex::ApexInfo apex_info(
@@ -128,14 +138,12 @@ int main(int argc, char** argv) {
       open(file_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)));
 
   if (fd.get() == -1) {
-    std::cerr << "Can't create " << file_name << " " << strerror(errno)
-              << std::endl;
+    PLOG(ERROR) << "Can't create " << file_name;
     return -1;
   }
 
   if (!android::base::WriteStringToFd(xml.str(), fd)) {
-    std::cerr << "Can't write to " << file_name << " " << strerror(errno)
-              << std::endl;
+    PLOG(ERROR) << "Can't write to " << file_name;
     return -1;
   }
 

@@ -15,8 +15,6 @@
  */
 #pragma once
 
-#include "apexutil.h"
-
 #include <list>
 #include <string>
 
@@ -24,7 +22,7 @@
 
 namespace android {
 namespace apex {
-namespace util {
+namespace info {
 
 // APEX types
 enum class ApexType {
@@ -37,28 +35,28 @@ enum class ApexType {
 // ApexInfo -- APEX active information
 class ApexInfo {
 public:
-  ApexInfo(const std::string &manifest_name, const std::string &path,
-           ApexType type);
+  ApexInfo(const std::string &manifest_name, ApexType type);
 
   // Manifest name from apex-info
   const std::string &ManifestName() const { return manifest_name_; }
   // Active mount path
-  const std::string &Path() const { return path_; }
+  std::string Path() const;
 
   ApexType Type() const { return type_; }
 
 private:
   std::string manifest_name_;
-  std::string path_;
   ApexType type_;
 };
+
+constexpr const char *const kApexInfoFileName = "apex-info-list.xml";
+constexpr const char *const kApexInfoFile = "/apex/apex-info-list.xml";
 
 // Get list of active APEXs
 using ApexInfoData = std::vector<ApexInfo>;
 android::base::Result<ApexInfoData>
-GetApexes(const std::string &apex_root = kApexRoot,
-          const std::string &info_file_list = kApexInfoFile);
+GetApexes(const std::string &info_file_list = kApexInfoFile);
 
-} // namespace util
+} // namespace info
 } // namespace apex
 } // namespace android

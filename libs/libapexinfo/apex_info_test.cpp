@@ -28,8 +28,8 @@
 
 using namespace std::literals;
 
-using ::android::apex::util::ApexInfoCache;
-using ::android::apex::util::ApexType;
+using ::android::apex::info::ApexInfoCache;
+using ::android::apex::info::ApexType;
 using ::android::base::WriteStringToFile;
 
 // Create an ApexInfo object based on inputs, writing data to the apex_dir/name
@@ -84,7 +84,7 @@ void CreateApexData(const std::string &apex_dir, const std::string &info_file,
   // Write the info list
   UpdateApexInfoList(info_file, apex_infos);
 
-  auto apex = android::apex::util::GetApexes(apex_dir, info_file);
+  auto apex = android::apex::info::GetApexes(info_file);
   auto exp_size = system.size() + system_ext.size() + product.size() +
                   vendor.size() + odm.size();
   ASSERT_TRUE(apex.ok());
@@ -122,25 +122,28 @@ void CreateApexData(const std::string &apex_dir, const std::string &info_file,
   ASSERT_EQ(odm.size(), 0);
 }
 
-TEST(ApexUtil, ApexInfo) {
+TEST(ApexInfo, ApexInfo) {
   TemporaryDir td;
   const std::string apex_dir = td.path + "/apex/"s;
-  const std::string info_file = apex_dir + ::android::apex::kApexInfoFileName;
+  const std::string info_file =
+      apex_dir + ::android::apex::info::kApexInfoFileName;
 
   std::vector<com::android::apex::ApexInfo> apex_infos;
   CreateApexData(apex_dir, info_file, apex_infos);
 }
 
-TEST(ApexUtil, ApexInfoCache) {
+TEST(ApexInfo, ApexInfoCache) {
   // Monitor based on Update()
   TemporaryDir td;
   const std::string apex_dir = td.path + "/apex/"s;
-  const std::string info_file = apex_dir + ::android::apex::kApexInfoFileName;
+  const std::string info_file =
+      apex_dir + ::android::apex::info::kApexInfoFileName;
 
   ASSERT_EQ(mkdir(apex_dir.c_str(), 0755), 0)
       << "Failed to create apex directory" << apex_dir;
 
-  ApexInfoCache m(apex_dir, info_file);
+  ApexInfoCache m(info_file);
+  m.SetApexReady();
   auto ASSERT_NEW_DATA = [&m](bool bExp) {
     auto ret = m.HasNewData();
     ASSERT_EQ(ret.ok(), true);
