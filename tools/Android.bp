@@ -35,6 +35,7 @@ python_binary_host {
     ],
     required: [
         "debugfs_static",
+        "fsck.erofs",
     ],
 }
 
