@@ -16,23 +16,39 @@
 
 #include "apex_info_cache.h"
 
+#include <android-base/properties.h>
+
 namespace android {
 namespace apex {
-namespace util {
+namespace info {
+
+// Check apexd.all.ready property before reading any APEX data, this
+// is only needed on the target.
+#ifdef __ANDROID__
+static const bool CheckStatus = true;
+#else
+static const bool CheckStatus = false;
+#endif
 
 using ::android::base::ErrnoError;
 using ::android::base::Error;
+using ::android::base::GetProperty;
 using ::android::base::Result;
 using namespace std::literals;
 
-ApexInfoCache::ApexInfoCache(const std::string &apex_dir,
-                             const std::string &info_file)
-    : dir_(apex_dir), info_file_(info_file) {
+ApexInfoCache::ApexInfoCache(const std::string &info_file)
+    : info_file_(info_file), apex_ready_(!CheckStatus) {
   memset(&mtim_, 0, sizeof(mtim_));
 }
 
 // Read the current modify time of the file, check if any update to stored time
 Result<std::pair<struct timespec, bool>> ApexInfoCache::ModifyTime() const {
+
+  // Check if apex is ready prior to attempting to read data
+  if (!apex_ready_ &&
+      !(apex_ready_ = ("true" == GetProperty("apex.all.ready", "")))) {
+    return Error() << "apex not ready";
+  }
   struct stat cur;
   auto ret = stat(info_file_.c_str(), &cur);
   if (ret != 0) {
@@ -62,10 +78,10 @@ Result<bool> ApexInfoCache::Update() {
   }
 
   // Get latest
-  auto latest = GetApexes(dir_, info_file_);
+  auto latest = GetApexes(info_file_);
   if (!latest.ok()) {
-    return Error() << "Failed to read apexes from " << dir_ << " " << info_file_
-                   << " " << latest.error();
+    return Error() << "Failed to read apexes from " << info_file_ << " "
+                   << latest.error();
   }
 
   // stat timestamp could have changed between check and
@@ -75,6 +91,6 @@ Result<bool> ApexInfoCache::Update() {
   return true;
 }
 
-} // namespace util
+} // namespace info
 } // namespace apex
 } // namespace android
