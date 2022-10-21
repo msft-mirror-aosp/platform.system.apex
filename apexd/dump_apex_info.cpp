@@ -23,12 +23,21 @@
 
 #include "apex_constants.h"
 #include "apex_file_repository.h"
+#include "apexd_utils.h"
 #include "com_android_apex.h"
+
+using android::apex::kManifestFilenamePb;
+using android::apex::PathExists;
+using android::apex::ReadDir;
+using android::apex::ReadManifest;
+using com::android::apex::ApexInfo;
 
 void usage(const char* cmd) {
   std::cout << "Usage: " << cmd << " --root_dir=<dir> --out_file=<file.xsd>"
             << std::endl;
 }
+
+std::vector<ApexInfo> LoadFlattenedApexes(const std::string& root_dir);
 
 // Create apex-info-list based on pre installed apexes
 int main(int argc, char** argv) {
@@ -94,13 +103,15 @@ int main(int argc, char** argv) {
   for (auto& dir : prebuilt_dirs) {
     dir.insert(0, root_dir);
   }
+
+  // Load .apex/.capex files first
   auto ret = repo.AddPreInstalledApex(prebuilt_dirs);
   if (!ret.ok()) {
     LOG(ERROR) << "Failed to add pre-installed apex directories";
     return -1;
   }
 
-  std::vector<com::android::apex::ApexInfo> apex_infos;
+  std::vector<ApexInfo> apex_infos;
   for (const auto& [name, files] : repo.AllApexFilesByName()) {
     if (files.size() != 1) {
       LOG(ERROR) << "Multiple APEXs found for " << name;
@@ -108,25 +119,21 @@ int main(int argc, char** argv) {
     }
 
     const android::apex::ApexFile& apex = files[0];
-
-    // Remove leading path from module names
-    std::optional<std::string> preinstalled_module_path;
-    {
-      auto preinstalled_path = repo.GetPreinstalledPath(name);
-      if (preinstalled_path.ok()) {
-        preinstalled_module_path =
-            (*preinstalled_path).substr(root_dir.length());
-      }
-    }
-    auto path = apex.GetPath().substr(root_dir.length());
-    const bool is_active = true;
-    const std::optional<int64_t> mtime;
-    com::android::apex::ApexInfo apex_info(
-        apex.GetManifest().name(), path, preinstalled_module_path,
-        apex.GetManifest().version(), apex.GetManifest().versionname(),
-        repo.IsPreInstalledApex(apex), is_active, mtime,
-        apex.GetManifest().providesharedapexlibs());
+    // Remove leading path (root_dir)
+    const auto& path = apex.GetPath().substr(root_dir.length());
+    const auto& manifest = apex.GetManifest();
+    ApexInfo apex_info(manifest.name(), /* modulePath= */ path,
+                       /* preinstalledModulePath= */ path, manifest.version(),
+                       manifest.versionname(),
+                       /* isFactory= */ true, /* isActive= */ true,
+                       /*l astUpdateMillis= */ std::nullopt,
+                       manifest.providesharedapexlibs());
     apex_infos.emplace_back(std::move(apex_info));
+  }
+
+  // As a second guess, try to load "flattened" apexes
+  if (apex_infos.empty()) {
+    apex_infos = LoadFlattenedApexes(root_dir);
   }
 
   std::stringstream xml;
@@ -148,4 +155,55 @@ int main(int argc, char** argv) {
   }
 
   return 0;
+}
+
+std::vector<ApexInfo> LoadFlattenedApexes(const std::string& root_dir) {
+  std::vector<ApexInfo> apex_infos;
+
+  for (const std::string& dir : ::android::apex::kApexPackageBuiltinDirs) {
+    if (auto res = PathExists(root_dir + dir); !res.ok() || !*res) {
+      continue;
+    }
+
+    auto dir_content = ReadDir(root_dir + dir, [](const auto& entry) {
+      std::error_code ec;
+      return entry.is_directory(ec);
+    });
+
+    if (!dir_content.ok()) {
+      LOG(ERROR) << "Failed to scan " << dir << " : " << dir_content.error();
+      continue;
+    }
+
+    // Sort to make sure that /apex/apex-info-list.xml generation doesn't depend
+    // on the unstable directory scan.
+    std::vector<std::string> entries = std::move(*dir_content);
+    std::sort(entries.begin(), entries.end());
+
+    for (const std::string& apex_dir : entries) {
+      std::string manifest_file = apex_dir + "/" + kManifestFilenamePb;
+      if (access(manifest_file.c_str(), F_OK) != 0) {
+        PLOG(ERROR) << "Failed to access " << manifest_file;
+        continue;
+      }
+
+      auto manifest = ReadManifest(manifest_file);
+      if (!manifest.ok()) {
+        LOG(ERROR) << "Failed to read apex manifest from " << manifest_file
+                   << " : " << manifest.error();
+        continue;
+      }
+
+      // Remove leading path (root_dir)
+      const auto& path = apex_dir.substr(root_dir.length());
+      apex_infos.emplace_back(manifest->name(), /* modulePath= */ path,
+                              /* preinstalledModulePath= */ path,
+                              /* versionCode= */ manifest->version(),
+                              /* versionName= */ manifest->versionname(),
+                              /* isFactory= */ true, /* isActive= */ true,
+                              /* lastUpdateMillis= */ 0,
+                              /* provideSharedApexLibs= */ false);
+    }
+  }
+  return apex_infos;
 }
