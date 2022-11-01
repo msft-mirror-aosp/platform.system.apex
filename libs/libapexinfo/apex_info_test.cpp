@@ -44,8 +44,9 @@ CreateApex(const std::string &name, const std::string &pre_path, int version) {
 }
 
 // Write info file
-void UpdateApexInfoList(const std::string &info_file,
-                        std::vector<com::android::apex::ApexInfo> &apex_infos) {
+void UpdateApexInfoList(
+    const std::string &info_file,
+    const std::vector<com::android::apex::ApexInfo> &apex_infos) {
   com::android::apex::ApexInfoList apex_info_list(apex_infos);
   std::stringstream xml;
   com::android::apex::write(xml, apex_info_list);
@@ -184,4 +185,36 @@ TEST(ApexInfo, ApexInfoCache) {
   UpdateApexInfoList(info_file, apex_infos);
   ASSERT_UPDATE(true);
   ASSERT_NEW_DATA(false); // new data should be consumed by above call
+}
+
+struct ResetValueForTesting {
+  std::string *var;
+  std::string old_value;
+  ResetValueForTesting(std::string *var, const std::string &value_for_testing)
+      : var(var), old_value(*var) {
+    *var = value_for_testing;
+  }
+  ~ResetValueForTesting() { *var = old_value; }
+};
+
+TEST(ApexInfo, ApexInfoSymlinkedPartitions) {
+  using namespace android::apex::info::details;
+  ResetValueForTesting set_real_path_for_vendor{&kVendorRealPath,
+                                                "/system/vendor"};
+  ResetValueForTesting set_real_path_for_system_ext{&kSystemExtRealPath,
+                                                    "/system/system_ext"};
+  std::vector<com::android::apex::ApexInfo> apex_infos{
+      CreateApex("com.android.foo",
+                 "/system/system_ext/apex/com.android.foo.apex", 1),
+      CreateApex("com.android.vendor",
+                 "/system/vendor/apex/com.android.vendor.apex", 1),
+  };
+  TemporaryFile tf;
+  UpdateApexInfoList(tf.path, apex_infos);
+
+  auto apex = android::apex::info::GetApexes(tf.path);
+  ASSERT_TRUE(apex.ok()) << apex.error();
+  ASSERT_EQ(apex_infos.size(), apex->size());
+  ASSERT_EQ(::android::apex::info::ApexType::kSystem, apex->at(0).Type());
+  ASSERT_EQ(::android::apex::info::ApexType::kVendor, apex->at(1).Type());
 }
