@@ -24,6 +24,15 @@ namespace android {
 namespace apex {
 namespace info {
 
+// Exposing these in a nested namespace for testing
+namespace details {
+// These partitions can be symlinked to subdirs of /system.
+extern std::string kOdmRealPath;
+extern std::string kProductRealPath;
+extern std::string kSystemExtRealPath;
+extern std::string kVendorRealPath;
+}  // namespace details
+
 // APEX types
 enum class ApexType {
   kSystem,
