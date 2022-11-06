@@ -83,6 +83,8 @@ using ::testing::Not;
 using ::testing::StartsWith;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
+using ::testing::internal::CaptureStderr;
+using ::testing::internal::GetCapturedStderr;
 
 static std::string GetTestDataDir() { return GetExecutableDirectory(); }
 static std::string GetTestFile(const std::string& name) {
@@ -3048,29 +3050,25 @@ TEST_F(ApexdMountTest,
                                    ApexInfoXmlEq(apex_info_xml_2)));
 }
 
+void PrepareFlattenedApex(const std::string& apex_dir,
+                          const std::string& apex_name, int version) {
+  ASSERT_EQ(mkdir(apex_dir.c_str(), 0755), 0);
+
+  ::apex::proto::ApexManifest manifest;
+  manifest.set_name(apex_name);
+  manifest.set_version(version);
+  manifest.set_versionname(std::to_string(version));
+
+  std::string out;
+  manifest.SerializeToString(&out);
+  ASSERT_TRUE(WriteStringToFile(out, apex_dir + "/apex_manifest.pb"));
+}
+
 TEST_F(ApexdMountTest, ActivateFlattenedApex) {
   std::string apex_dir_1 = GetBuiltInDir() + "/com.android.apex.test_package";
   std::string apex_dir_2 = GetBuiltInDir() + "/com.android.apex.test_package_2";
-
-  ASSERT_EQ(mkdir(apex_dir_1.c_str(), 0755), 0);
-  ASSERT_EQ(mkdir(apex_dir_2.c_str(), 0755), 0);
-
-  auto write_manifest_fn = [&](const std::string& apex_dir,
-                               const std::string& module_name, int version) {
-    using ::apex::proto::ApexManifest;
-
-    ApexManifest manifest;
-    manifest.set_name(module_name);
-    manifest.set_version(version);
-    manifest.set_versionname(std::to_string(version));
-
-    std::string out;
-    manifest.SerializeToString(&out);
-    ASSERT_TRUE(WriteStringToFile(out, apex_dir + "/apex_manifest.pb"));
-  };
-
-  write_manifest_fn(apex_dir_1, "com.android.apex.test_package", 2);
-  write_manifest_fn(apex_dir_2, "com.android.apex.test_package_2", 1);
+  PrepareFlattenedApex(apex_dir_1, "com.android.apex.test_package", 2);
+  PrepareFlattenedApex(apex_dir_2, "com.android.apex.test_package_2", 1);
 
   ASSERT_EQ(ActivateFlattenedApex(), 0);
 
@@ -3106,6 +3104,20 @@ TEST_F(ApexdMountTest, ActivateFlattenedApex) {
   ASSERT_THAT(info_list->getApexInfo(),
               UnorderedElementsAre(ApexInfoXmlEq(apex_info_xml_1),
                                    ApexInfoXmlEq(apex_info_xml_2)));
+}
+
+TEST_F(ApexdMountTest, ActivateFlattenedApexShouldFailWithDuplicate) {
+  // Two flattened APEXes with the same name
+  PrepareFlattenedApex(GetBuiltInDir() + "/com.android.apex.test_package",
+                       "com.android.apex.test_package", 1);
+  PrepareFlattenedApex(GetBuiltInDir() + "/com.android.apex.test_package_2",
+                       "com.android.apex.test_package", 1);
+
+  CaptureStderr();
+  ASSERT_EQ(ActivateFlattenedApex(), 1);
+  std::string error = GetCapturedStderr();
+  ASSERT_THAT(error,
+              HasSubstr("duplicate of com.android.apex.test_package found"));
 }
 
 TEST_F(ApexdMountTest, OnStartOnlyPreInstalledApexes) {
