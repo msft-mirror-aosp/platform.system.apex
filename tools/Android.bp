@@ -30,6 +30,7 @@ python_binary_host {
         "apex_manifest",
     ],
     required: [
+        "blkid",
         "debugfs_static",
         "fsck.erofs",
     ],

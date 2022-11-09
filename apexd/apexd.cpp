@@ -3726,6 +3726,7 @@ int ActivateFlattenedApex() {
   LOG(INFO) << "ActivateFlattenedApex";
 
   std::vector<com::android::apex::ApexInfo> apex_infos;
+  std::unordered_map<std::string, std::string> apex_names;
 
   for (const std::string& dir : gConfig->apex_built_in_dirs) {
     LOG(INFO) << "Scanning " << dir;
@@ -3758,6 +3759,13 @@ int ActivateFlattenedApex() {
         continue;
       }
 
+      if (auto it = apex_names.find(manifest->name()); it != apex_names.end()) {
+        LOG(ERROR) << "Failed to activate apex from " << apex_dir
+                   << " : duplicate of " << manifest->name() << " found in "
+                   << it->second;
+        return 1;
+      }
+
       std::string mount_point = std::string(kApexRoot) + "/" + manifest->name();
       if (mkdir(mount_point.c_str(), 0755) != 0) {
         PLOG(ERROR) << "Failed to mkdir " << mount_point;
@@ -3779,6 +3787,7 @@ int ActivateFlattenedApex() {
                               /* isFactory= */ true, /* isActive= */ true,
                               /* lastUpdateMillis= */ 0,
                               /* provideSharedApexLibs= */ false);
+      apex_names.emplace(manifest->name(), apex_dir);
     }
   }
 
