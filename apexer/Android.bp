@@ -142,6 +142,8 @@ python_test_host {
 apexer_deps_minus_go_tools = apexer_tools + [
     "deapexer",
     "debugfs_static",
+    "blkid",
+    "fsck.erofs",
 ]
 
 apexer_deps_tools = apexer_deps_minus_go_tools + apexer_go_tools
@@ -188,6 +190,8 @@ genrule {
         "cp $(location fec) $$BIN && " +
         "cp $(location zipalign) $$BIN && " +
         "cp $(location debugfs_static) $$BIN && " +
+        "cp $(location blkid) $$BIN && " +
+        "cp $(location fsck.erofs) $$BIN && " +
         "cp $$SIGNAPK_JAR $$BIN && " +
         "cp $$LIBCPLUSPLUS $$LIB && " +
         "cp $$LIBCONSCRYPT_OPENJDK_JNI $$LIB && " +
