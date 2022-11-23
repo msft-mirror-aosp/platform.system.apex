@@ -390,8 +390,26 @@ def main(argv):
           file=sys.stderr)
     sys.exit(1)
 
-  if args.cmd == 'extract' and not args.blkid_path:
-    args.blkid_path = shutil.which('blkid')
+  if args.cmd == 'extract':
+    if not args.blkid_path:
+      print('ANDROID_HOST_OUT environment variable is not defined, --blkid_path must be set',
+            file=sys.stderr)
+      sys.exit(1)
+
+    if not os.path.isfile(args.blkid_path):
+      print(f'Cannot find blkid specified at {args.blkid_path}',
+            file=sys.stderr)
+      sys.exit(1)
+
+    if not args.fsckerofs_path:
+      print('ANDROID_HOST_OUT environment variable is not defined, --fsckerofs_path must be set',
+            file=sys.stderr)
+      sys.exit(1)
+
+    if not os.path.isfile(args.fsckerofs_path):
+      print(f'Cannot find fsck.erofs specified at {args.fsckerofs_path}',
+            file=sys.stderr)
+      sys.exit(1)
 
   args.func(args)
 
