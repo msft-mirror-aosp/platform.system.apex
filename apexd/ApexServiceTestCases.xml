@@ -13,14 +13,14 @@
      See the License for the specific language governing permissions and
      limitations under the License.
 -->
-<configuration description="Runs ApexTestCases">
+<configuration description="Runs ApexServiceTestCases">
     <option name="test-suite-tag" value="apct" />
     <option name="test-suite-tag" value="apct-native" />
     <target_preparer class="com.android.tradefed.targetprep.PushFilePreparer">
         <option name="cleanup" value="true" />
         <!-- Note: despite how this line reads, it will push the complete testcase directory, thus
                    all apexes that are required by the blueprint's data[] tag. -->
-        <option name="push" value="ApexTestCases->/data/local/tmp/ApexTestCases" />
+        <option name="push" value="ApexServiceTestCases->/data/local/tmp/ApexServiceTestCases" />
     </target_preparer>
 
     <!-- The test runs as root to prepare the temporary directory, make selinux adjustments
@@ -48,6 +48,6 @@
         <!-- Note: despite how these lines read, the test will run nicely separated out
                    of a subfolder. -->
         <option name="native-test-device-path" value="/data/local/tmp" />
-        <option name="module-name" value="ApexTestCases" />
+        <option name="module-name" value="ApexServiceTestCases" />
     </test>
 </configuration>

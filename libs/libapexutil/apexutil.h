@@ -32,8 +32,6 @@ std::map<std::string, ::apex::proto::ApexManifest>
 GetActivePackages(const std::string &apex_root);
 
 constexpr const char *const kApexRoot = "/apex";
-constexpr const char *const kApexInfoFileName = "apex-info-list.xml";
-constexpr const char *const kApexInfoFile = "/apex/apex-info-list.xml";
 
 } // namespace apex
 } // namespace android

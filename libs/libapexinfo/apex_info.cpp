@@ -16,13 +16,17 @@
 
 #include "apex_info.h"
 
+#include <android-base/file.h>
+#include <android-base/logging.h>
 #include <android-base/strings.h>
+
+#include <cstdlib>
 
 #include "com_android_apex.h"
 
 namespace android {
 namespace apex {
-namespace util {
+namespace info {
 
 using android::base::Error;
 using android::base::Result;
@@ -31,23 +35,34 @@ using namespace std::literals;
 
 namespace {
 
+using namespace details;
+
+std::string GetRealPath(const char *path) {
+  std::string resolved;
+  if (android::base::Realpath(path, &resolved)) {
+    return resolved;
+  }
+  // fallback to the original path
+  return path;
+}
+
 bool InSystem(const std::string &original_path) {
   return StartsWith(original_path, "/system/apex/") ||
-         StartsWith(original_path, "/system_ext/apex/") ||
+         StartsWith(original_path, kSystemExtRealPath + "/apex/") ||
          // Guest mode Android may have system APEXes from host via block APEXes
          StartsWith(original_path, "/dev/block/vd");
 }
 
 bool InProduct(const std::string &original_path) {
-  return StartsWith(original_path, "/product/apex/");
+  return StartsWith(original_path, kProductRealPath + "/apex/");
 }
 
 bool InVendor(const std::string &original_path) {
-  return StartsWith(original_path, "/vendor/apex/");
+  return StartsWith(original_path, kVendorRealPath + "/apex/");
 }
 
 bool InOdm(const std::string &original_path) {
-  return StartsWith(original_path, "/odm/apex/");
+  return StartsWith(original_path, kOdmRealPath + "/apex/");
 }
 
 Result<ApexType> GetType(const std::string &original_path) {
@@ -66,16 +81,24 @@ Result<ApexType> GetType(const std::string &original_path) {
 
 } // namespace
 
-ApexInfo::ApexInfo(const std::string &manifest_name, const std::string &path,
-                   ApexType type)
-    : manifest_name_(manifest_name), path_(path), type_(type) {}
+namespace details {
+std::string kOdmRealPath = GetRealPath("/odm");
+std::string kProductRealPath = GetRealPath("/product");
+std::string kSystemExtRealPath = GetRealPath("/system_ext");
+std::string kVendorRealPath = GetRealPath("/vendor");
+}  // namespace details
 
-Result<ApexInfoData> GetApexes(const std::string &apex_root,
-                               const std::string &info_list_file) {
-  ApexInfoData info;
+ApexInfo::ApexInfo(const std::string &manifest_name, ApexType type)
+    : manifest_name_(manifest_name), type_(type) {}
+
+std::string ApexInfo::Path() const {
   // To avoid the overhead of parsing the apex data via GetActivePackages
-  // we will form the /apex path directly here and rely on the getIsActive
-  // in the info list.
+  // we will form the /apex path directly here.
+  return (std::string("/apex/").append(manifest_name_));
+}
+Result<ApexInfoData> GetApexes(const std::string &info_list_file) {
+
+  ApexInfoData info;
 
   auto info_list =
       ::com::android::apex::readApexInfoList(info_list_file.c_str());
@@ -110,14 +133,12 @@ Result<ApexInfoData> GetApexes(const std::string &apex_root,
       if (!type.ok()) {
         return type.error();
       }
-      info.emplace_back(ApexInfo(apex_info.getModuleName(),
-                                 apex_root + "/"s + apex_info.getModuleName(),
-                                 *type));
+      info.emplace_back(ApexInfo(apex_info.getModuleName(), *type));
     }
   }
   return info;
 }
 
-} // namespace util
+} // namespace info
 } // namespace apex
 } // namespace android

@@ -20,6 +20,7 @@
 #include <android-base/macros.h>
 #include <android-base/result.h>
 
+#include <future>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -180,6 +181,12 @@ void OnBootCompleted();
 void RemoveInactiveDataApex();
 void BootCompletedCleanup();
 int SnapshotOrRestoreDeUserData();
+
+// Asyncrhonously finishes configuring scheduler and queue depth of loop
+// devices. This function should only be called during boot sequence after the
+// OnAllPackagesActivated (i.e. after all APEXes have been mounted and boot
+// sequence continues).
+std::future<void> FinishLoopConfiguration();
 
 int UnmountAll();
 

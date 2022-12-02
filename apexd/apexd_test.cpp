@@ -71,6 +71,8 @@ using android::base::testing::HasValue;
 using android::base::testing::Ok;
 using android::base::testing::WithMessage;
 using android::dm::DeviceMapper;
+using android::fs_mgr::Fstab;
+using android::fs_mgr::ReadFstabFromFile;
 using ::apex::proto::SessionState;
 using com::android::apex::testing::ApexInfoXmlEq;
 using ::testing::ByRef;
@@ -81,6 +83,8 @@ using ::testing::Not;
 using ::testing::StartsWith;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
+using ::testing::internal::CaptureStderr;
+using ::testing::internal::GetCapturedStderr;
 
 static std::string GetTestDataDir() { return GetExecutableDirectory(); }
 static std::string GetTestFile(const std::string& name) {
@@ -211,10 +215,11 @@ class ApexdUnitTest : public ::testing::Test {
 
   std::string AddBlockApex(const std::string& apex_name,
                            const std::string& public_key = "",
-                           const std::string& root_digest = "") {
-    auto apex_path = vm_payload_disk_ + "2";  // second partition
+                           const std::string& root_digest = "",
+                           bool is_factory = true) {
+    auto apex_path = vm_payload_disk_ + std::to_string(block_device_index_++);
     auto apex_file = GetTestFile(apex_name);
-    WriteMetadata(apex_file, public_key, root_digest);
+    AddToMetadata(apex_name, public_key, root_digest, is_factory);
     // loop_devices_ will be disposed after each test
     loop_devices_.push_back(*WriteBlockApex(apex_file, apex_path));
     return apex_path;
@@ -267,24 +272,23 @@ class ApexdUnitTest : public ::testing::Test {
 
     DeleteDirContent(ApexSession::GetSessionsDir());
   }
-  void WriteMetadata(const std::string& apex_file,
+  void AddToMetadata(const std::string& apex_name,
                      const std::string& public_key,
-                     const std::string& root_digest) {
+                     const std::string& root_digest, bool is_factory) {
     android::microdroid::Metadata metadata;
-
-    auto apex = metadata.add_apexes();
-    apex->set_name("apex");
-    apex->set_public_key(public_key);
-    apex->set_root_digest(root_digest);
-    // In this test, block apeses are assumed as "factory".
-    // ApexFileRepositoryTestAddBlockApex tests non-factory cases.
-    apex->set_is_factory(true);
-
     // The first partition is metadata partition
     auto metadata_partition = vm_payload_disk_ + "1";
-    LOG(INFO) << "Writing metadata to " << metadata_partition;
-    std::ofstream out(metadata_partition);
+    if (access(metadata_partition.c_str(), F_OK) == 0) {
+      metadata = *android::microdroid::ReadMetadata(metadata_partition);
+    }
 
+    auto apex = metadata.add_apexes();
+    apex->set_name(apex_name);
+    apex->set_public_key(public_key);
+    apex->set_root_digest(root_digest);
+    apex->set_is_factory(is_factory);
+
+    std::ofstream out(metadata_partition);
     android::microdroid::WriteMetadata(metadata, out);
   }
 
@@ -306,6 +310,7 @@ class ApexdUnitTest : public ::testing::Test {
   std::string metadata_sepolicy_staged_dir_;
   ApexdConfig config_;
   std::vector<loop::LoopbackDeviceUniqueFd> loop_devices_;  // to be cleaned up
+  int block_device_index_ = 2;  // "1" is reserved for metadata;
 };
 
 // Apex that does not have pre-installed version, does not get selected
@@ -427,7 +432,7 @@ TEST_F(ApexdUnitTest, SharedLibsDataVersionDeletedIfLower) {
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*shared_lib_v2))));
 }
 
-TEST_F(ApexdUnitTest, DISABLED_ProcessCompressedApex) {
+TEST_F(ApexdUnitTest, ProcessCompressedApex) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
 
@@ -442,13 +447,6 @@ TEST_F(ApexdUnitTest, DISABLED_ProcessCompressedApex) {
   // Assert output path is not empty
   auto exists = PathExists(decompressed_file_path);
   ASSERT_THAT(exists, HasValue(true));
-
-  // Assert that decompressed apex is same as original apex
-  const std::string original_apex_file_path =
-      GetTestFile("com.android.apex.compressed.v1_original.apex");
-  auto comparison_result =
-      CompareFiles(original_apex_file_path, decompressed_file_path);
-  ASSERT_THAT(comparison_result, HasValue(true));
 
   // Assert that return value contains decompressed APEX
   auto decompressed_apex = ApexFile::Open(decompressed_file_path);
@@ -542,7 +540,7 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexCanBeCalledMultipleTimes) {
 }
 
 // Test behavior of ProcessCompressedApex when is_ota_chroot is true
-TEST_F(ApexdUnitTest, DISABLED_ProcessCompressedApexOnOtaChroot) {
+TEST_F(ApexdUnitTest, ProcessCompressedApexOnOtaChroot) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
 
@@ -560,13 +558,6 @@ TEST_F(ApexdUnitTest, DISABLED_ProcessCompressedApexOnOtaChroot) {
   auto exists = PathExists(decompressed_file_path);
   ASSERT_THAT(exists, HasValue(true))
       << decompressed_file_path << " does not exist";
-
-  // Assert that decompressed apex is same as original apex
-  const std::string original_apex_file_path =
-      GetTestFile("com.android.apex.compressed.v1_original.apex");
-  auto comparison_result =
-      CompareFiles(original_apex_file_path, decompressed_file_path);
-  ASSERT_THAT(comparison_result, HasValue(true));
 
   // Assert that return value contains the decompressed APEX
   auto apex_file = ApexFile::Open(decompressed_file_path);
@@ -2350,7 +2341,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSharedLibsApexBothVersions) {
       "/apex/sharedlibs/lib/libsharedlibtest.so->"
       "/apex/com.android.apex.test.sharedlibs@1/lib/libsharedlibtest.so",
       "/apex/sharedlibs/lib/libc++.so->"
-      "/apex/com.android.apex.test.sharedlibs@1/lib/libc++.so",
+      "/apex/com.android.apex.test.sharedlibs@2/lib/libc++.so",
   };
   // On 64bit devices we also have lib64.
   if (!GetProperty("ro.product.cpu.abilist64", "").empty()) {
@@ -2362,7 +2353,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSharedLibsApexBothVersions) {
         "/apex/com.android.apex.test.sharedlibs@1/lib64/libsharedlibtest.so");
     expected.push_back(
         "/apex/sharedlibs/lib64/libc++.so->"
-        "/apex/com.android.apex.test.sharedlibs@1/lib64/libc++.so");
+        "/apex/com.android.apex.test.sharedlibs@2/lib64/libc++.so");
   }
 
   ASSERT_THAT(sharedlibs, UnorderedElementsAreArray(expected));
@@ -3059,29 +3050,25 @@ TEST_F(ApexdMountTest,
                                    ApexInfoXmlEq(apex_info_xml_2)));
 }
 
+void PrepareFlattenedApex(const std::string& apex_dir,
+                          const std::string& apex_name, int version) {
+  ASSERT_EQ(mkdir(apex_dir.c_str(), 0755), 0);
+
+  ::apex::proto::ApexManifest manifest;
+  manifest.set_name(apex_name);
+  manifest.set_version(version);
+  manifest.set_versionname(std::to_string(version));
+
+  std::string out;
+  manifest.SerializeToString(&out);
+  ASSERT_TRUE(WriteStringToFile(out, apex_dir + "/apex_manifest.pb"));
+}
+
 TEST_F(ApexdMountTest, ActivateFlattenedApex) {
   std::string apex_dir_1 = GetBuiltInDir() + "/com.android.apex.test_package";
   std::string apex_dir_2 = GetBuiltInDir() + "/com.android.apex.test_package_2";
-
-  ASSERT_EQ(mkdir(apex_dir_1.c_str(), 0755), 0);
-  ASSERT_EQ(mkdir(apex_dir_2.c_str(), 0755), 0);
-
-  auto write_manifest_fn = [&](const std::string& apex_dir,
-                               const std::string& module_name, int version) {
-    using ::apex::proto::ApexManifest;
-
-    ApexManifest manifest;
-    manifest.set_name(module_name);
-    manifest.set_version(version);
-    manifest.set_versionname(std::to_string(version));
-
-    std::string out;
-    manifest.SerializeToString(&out);
-    ASSERT_TRUE(WriteStringToFile(out, apex_dir + "/apex_manifest.pb"));
-  };
-
-  write_manifest_fn(apex_dir_1, "com.android.apex.test_package", 2);
-  write_manifest_fn(apex_dir_2, "com.android.apex.test_package_2", 1);
+  PrepareFlattenedApex(apex_dir_1, "com.android.apex.test_package", 2);
+  PrepareFlattenedApex(apex_dir_2, "com.android.apex.test_package_2", 1);
 
   ASSERT_EQ(ActivateFlattenedApex(), 0);
 
@@ -3117,6 +3104,20 @@ TEST_F(ApexdMountTest, ActivateFlattenedApex) {
   ASSERT_THAT(info_list->getApexInfo(),
               UnorderedElementsAre(ApexInfoXmlEq(apex_info_xml_1),
                                    ApexInfoXmlEq(apex_info_xml_2)));
+}
+
+TEST_F(ApexdMountTest, ActivateFlattenedApexShouldFailWithDuplicate) {
+  // Two flattened APEXes with the same name
+  PrepareFlattenedApex(GetBuiltInDir() + "/com.android.apex.test_package",
+                       "com.android.apex.test_package", 1);
+  PrepareFlattenedApex(GetBuiltInDir() + "/com.android.apex.test_package_2",
+                       "com.android.apex.test_package", 1);
+
+  CaptureStderr();
+  ASSERT_EQ(ActivateFlattenedApex(), 1);
+  std::string error = GetCapturedStderr();
+  ASSERT_THAT(error,
+              HasSubstr("duplicate of com.android.apex.test_package found"));
 }
 
 TEST_F(ApexdMountTest, OnStartOnlyPreInstalledApexes) {
@@ -4091,6 +4092,65 @@ TEST_F(ApexdMountTest, OnStartInVmModeFailsWithDuplicateNames) {
   ASSERT_EQ(1, OnStartInVmMode());
 }
 
+TEST_F(ApexdMountTest, OnStartInVmSupportsMultipleSharedLibsApexes) {
+  MockCheckpointInterface checkpoint_interface;
+  InitializeVold(&checkpoint_interface);
+  SetBlockApexEnabled(true);
+
+  auto path1 =
+      AddBlockApex("com.android.apex.test.sharedlibs_generated.v1.libvX.apex",
+                   /*public_key=*/"", /*root_digest=*/"", /*is_factory=*/true);
+  auto path2 =
+      AddBlockApex("com.android.apex.test.sharedlibs_generated.v2.libvY.apex",
+                   /*public_key=*/"", /*root_digest=*/"", /*is_factory=*/false);
+
+  ASSERT_EQ(0, OnStartInVmMode());
+  UnmountOnTearDown(path1);
+  UnmountOnTearDown(path2);
+
+  // Btw, in case duplicates are sharedlibs apexes, both should be activated
+  auto apex_mounts = GetApexMounts();
+  ASSERT_THAT(apex_mounts,
+              UnorderedElementsAre("/apex/com.android.apex.test.sharedlibs@1",
+                                   "/apex/com.android.apex.test.sharedlibs@2",
+                                   // Emits apex-info-list as well
+                                   "/apex/apex-info-list.xml"));
+}
+
+TEST_F(ApexdMountTest, OnStartInVmShouldRejectInDuplicateFactoryApexes) {
+  MockCheckpointInterface checkpoint_interface;
+  InitializeVold(&checkpoint_interface);
+  SetBlockApexEnabled(true);
+
+  auto path1 =
+      AddBlockApex("com.android.apex.test.sharedlibs_generated.v1.libvX.apex",
+                   /*public_key=*/"", /*root_digest=*/"", /*is_factory=*/true);
+  auto path2 =
+      AddBlockApex("com.android.apex.test.sharedlibs_generated.v2.libvY.apex",
+                   /*public_key=*/"", /*root_digest=*/"", /*is_factory=*/true);
+
+  ASSERT_EQ(1, OnStartInVmMode());
+  UnmountOnTearDown(path1);
+  UnmountOnTearDown(path2);
+}
+
+TEST_F(ApexdMountTest, OnStartInVmShouldRejectInDuplicateNonFactoryApexes) {
+  MockCheckpointInterface checkpoint_interface;
+  InitializeVold(&checkpoint_interface);
+  SetBlockApexEnabled(true);
+
+  auto path1 =
+      AddBlockApex("com.android.apex.test.sharedlibs_generated.v1.libvX.apex",
+                   /*public_key=*/"", /*root_digest=*/"", /*is_factory=*/false);
+  auto path2 =
+      AddBlockApex("com.android.apex.test.sharedlibs_generated.v2.libvY.apex",
+                   /*public_key=*/"", /*root_digest=*/"", /*is_factory=*/false);
+
+  ASSERT_EQ(1, OnStartInVmMode());
+  UnmountOnTearDown(path1);
+  UnmountOnTearDown(path2);
+}
+
 TEST_F(ApexdMountTest, OnStartInVmModeFailsWithWrongPubkey) {
   MockCheckpointInterface checkpoint_interface;
   // Need to call InitializeVold before calling OnStart
@@ -4892,5 +4952,80 @@ TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
   ASSERT_TRUE(IsActiveApexChanged(*apex_file));
 }
 
+TEST_F(ApexdMountTest, FinishLoopConfiguration) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
+  std::string apex_path_2 =
+      AddPreInstalledApex("apex.apexd_test_different_app.apex");
+  std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
+  std::string apex_path_4 = AddPreInstalledApex(
+      "com.android.apex.test.sharedlibs_generated.v1.libvX.apex");
+  std::string apex_path_5 =
+      AddDataApex("com.android.apex.test.sharedlibs_generated.v2.libvY.apex");
+
+  ASSERT_THAT(
+      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
+      Ok());
+
+  OnStart();
+
+  UnmountOnTearDown(apex_path_1);
+  UnmountOnTearDown(apex_path_2);
+  UnmountOnTearDown(apex_path_3);
+  UnmountOnTearDown(apex_path_4);
+  UnmountOnTearDown(apex_path_5);
+
+  // Just make sure that FinisLoopConfiguration() doesn't crash. Ideally we want
+  // to check the value of the queue depth and the scheduler, but for the time
+  // being this should do.
+  std::future<void> result = FinishLoopConfiguration();
+  result.get();
+
+  Fstab proc_mounts;
+  ASSERT_TRUE(ReadFstabFromFile("/proc/mounts", &proc_mounts));
+  std::vector<std::string> apex_block_devices;
+  for (const auto& entry : proc_mounts) {
+    if (!android::base::StartsWith(entry.mount_point, "/apex/")) {
+      continue;
+    }
+    // Skip bind mounts
+    if (entry.mount_point.find('@') == std::string::npos) {
+      continue;
+    }
+    apex_block_devices.emplace_back(entry.blk_device);
+  }
+  ASSERT_EQ(4u, apex_block_devices.size());
+}
+
+class LogTestToLogcat : public ::testing::EmptyTestEventListener {
+  void OnTestStart(const ::testing::TestInfo& test_info) override {
+#ifdef __ANDROID__
+    using base::LogId;
+    using base::LogSeverity;
+    using base::StringPrintf;
+    base::LogdLogger l;
+    std::string msg =
+        StringPrintf("=== %s::%s (%s:%d)", test_info.test_suite_name(),
+                     test_info.name(), test_info.file(), test_info.line());
+    l(LogId::MAIN, LogSeverity::INFO, "ApexTestCases", __FILE__, __LINE__,
+      msg.c_str());
+#else
+    UNUSED(test_info);
+#endif
+  }
+};
+
 }  // namespace apex
 }  // namespace android
+
+int main(int argc, char** argv) {
+  android::base::InitLogging(argv, &android::base::StderrLogger);
+  android::base::SetMinimumLogSeverity(android::base::VERBOSE);
+  ::testing::InitGoogleTest(&argc, argv);
+  ::testing::UnitTest::GetInstance()->listeners().Append(
+      new android::apex::LogTestToLogcat());
+  return RUN_ALL_TESTS();
+}

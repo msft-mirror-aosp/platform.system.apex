@@ -57,15 +57,15 @@ struct LoopbackDeviceUniqueFd {
 
 android::base::Result<LoopbackDeviceUniqueFd> WaitForDevice(int num);
 
-android::base::Result<void> ConfigureQueueDepth(
-    const std::string& loop_device_path, const std::string& file_path);
-
 android::base::Result<void> ConfigureReadAhead(const std::string& device_path);
 
 android::base::Result<void> PreAllocateLoopDevices(size_t num);
 
 android::base::Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
     const std::string& target, uint32_t image_offset, size_t image_size);
+
+void FinishConfiguring(const std::string& loop_device,
+                       const std::string& backing_file);
 
 using DestroyLoopFn =
     std::function<void(const std::string&, const std::string&)>;
