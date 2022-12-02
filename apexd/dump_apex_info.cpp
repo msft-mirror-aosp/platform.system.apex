@@ -26,6 +26,7 @@
 #include "apexd_utils.h"
 #include "com_android_apex.h"
 
+using android::apex::kApexInfoList;
 using android::apex::kManifestFilenamePb;
 using android::apex::PathExists;
 using android::apex::ReadDir;
@@ -33,8 +34,7 @@ using android::apex::ReadManifest;
 using com::android::apex::ApexInfo;
 
 void usage(const char* cmd) {
-  std::cout << "Usage: " << cmd << " --root_dir=<dir> --out_file=<file.xsd>"
-            << std::endl;
+  std::cout << "Usage: " << cmd << " --root_dir=<dir>" << std::endl;
 }
 
 std::vector<ApexInfo> LoadFlattenedApexes(const std::string& root_dir);
@@ -44,10 +44,8 @@ int main(int argc, char** argv) {
   android::base::InitLogging(argv, android::base::StdioLogger);
   auto severity = android::base::ERROR;
   static constexpr const char* kRootDir = "root_dir";
-  static constexpr const char* kOutFile = "out_file";
 
   static struct option long_options[] = {{kRootDir, required_argument, 0, 0},
-                                         {kOutFile, required_argument, 0, 0},
                                          {0, 0, 0, 0}};
 
   std::map<std::string, std::string> opts;
@@ -75,7 +73,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (opts.size() != 2) {
+  if (opts.size() != 1) {
     usage(argv[0]);
     return -1;
   }
@@ -140,7 +138,7 @@ int main(int argc, char** argv) {
   com::android::apex::ApexInfoList apex_info_list(apex_infos);
   com::android::apex::write(xml, apex_info_list);
 
-  const std::string file_name = opts[kOutFile];
+  const std::string file_name = apex_root + "/" + kApexInfoList;
   android::base::unique_fd fd(TEMP_FAILURE_RETRY(
       open(file_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)));
 
