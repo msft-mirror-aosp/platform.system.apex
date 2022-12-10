@@ -82,4 +82,7 @@ message ApexManifest {
 
   // Indicates that this APEX can be updated without rebooting device.
   bool supportsRebootlessUpdate = 13;
+
+  // VNDK version for apexes depending on a specific version of VNDK libs.
+  string vndkVersion = 14;
 }

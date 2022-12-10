@@ -217,6 +217,7 @@ android_test_helper_app {
         ":com.android.apex.vendor.foo.v2",
         ":com.android.apex.vendor.foo.v2_with_requireNativeLibs",
         ":com.android.apex.vendor.foo.v2_with_service",
+        ":com.android.apex.vendor.foo.v2_with_wrong_vndk_version",
     ],
     test_suites: [
         "general-tests",

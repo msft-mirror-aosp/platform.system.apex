@@ -59,6 +59,9 @@ public class VendorApexTests {
     private static final TestApp Apex2Service = new TestApp(
             "com.android.apex.vendor.foo.v2_with_service", APEX_PACKAGE_NAME, 2,
             /*isApex*/true, "com.android.apex.vendor.foo.v2_with_service.apex");
+    private static final TestApp Apex2WrongVndkVersion = new TestApp(
+            "com.android.apex.vendor.foo.v2_with_wrong_vndk_version", APEX_PACKAGE_NAME, 2,
+            /*isApex*/true, "com.android.apex.vendor.foo.v2_with_wrong_vndk_version.apex");
 
     @Test
     public void testRebootlessUpdate() throws Exception {
@@ -129,6 +132,28 @@ public class VendorApexTests {
                 () -> SystemProperties.get("init.svc.apex_vendor_foo_v2", "").equals("running"),
                 5000,
                 "v2 not started");
+    }
+
+    @Test
+    public void testInstallAbortsWhenVndkVersionMismatches() throws Exception {
+        InstallUtils.dropShellPermissionIdentity();
+        InstallUtils.adoptShellPermissionIdentity(Manifest.permission.INSTALL_PACKAGE_UPDATES);
+
+        InstallUtils.commitExpectingFailure(
+                AssertionError.class,
+                "vndkVersion\\(WrongVndkVersion\\) doesn't match with device VNDK version",
+                Install.single(Apex2WrongVndkVersion));
+    }
+
+    @Test
+    public void testInstallAbortsWhenVndkVersionMismatches_Staged() throws Exception {
+        InstallUtils.dropShellPermissionIdentity();
+        InstallUtils.adoptShellPermissionIdentity(Manifest.permission.INSTALL_PACKAGE_UPDATES);
+
+        InstallUtils.commitExpectingFailure(
+                AssertionError.class,
+                "vndkVersion\\(WrongVndkVersion\\) doesn't match with device VNDK version",
+                Install.single(Apex2WrongVndkVersion).setStaged());
     }
 
     private static void assertAwait(Supplier<Boolean> test, long millis, String failMessage)

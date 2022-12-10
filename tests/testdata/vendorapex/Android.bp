@@ -138,3 +138,19 @@ apex {
         "apex_vendor_foo_v2.rc",
     ],
 }
+
+apex {
+    name: "com.android.apex.vendor.foo.v2_with_wrong_vndk_version",
+    defaults: [
+        "com.android.apex.vendor.foo.defaults",
+    ],
+    manifest: ":manifest_v2_with_wrong_vndk_version.json",
+}
+
+genrule {
+    name: "manifest_v2_with_wrong_vndk_version.json",
+    out: ["manifest_v2_with_wrong_vndk_version.json"],
+    srcs: ["manifest_v2.json"],
+    tools: ["jsonmodify"],
+    cmd: "$(location jsonmodify) -v vndkVersion WrongVndkVersion $(in) -o $(out)",
+}

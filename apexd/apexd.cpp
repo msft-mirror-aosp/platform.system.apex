@@ -856,6 +856,41 @@ Result<void> ValidateStagingShimApex(const ApexFile& to) {
   return RunVerifyFnInsideTempMount(*system_shim, verify_fn, true);
 }
 
+Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
+  const std::string& vndk_version = apex_file.GetManifest().vndkversion();
+  if (vndk_version.empty()) {
+    return {};
+  }
+
+  static std::string vendor_vndk_version = GetProperty("ro.vndk.version", "");
+  static std::string product_vndk_version =
+      GetProperty("ro.product.vndk.version", "");
+
+  const auto& instance = ApexFileRepository::GetInstance();
+  const auto& preinstalled =
+      instance.GetPreInstalledApex(apex_file.GetManifest().name());
+  const auto& preinstalled_path = preinstalled.get().GetPath();
+  if (StartsWith(preinstalled_path, "/vendor/apex/") ||
+      StartsWith(preinstalled_path, "/system/vendor/apex/")) {
+    if (vndk_version != vendor_vndk_version) {
+      return Error() << "vndkVersion(" << vndk_version
+                     << ") doesn't match with device VNDK version("
+                     << vendor_vndk_version << ")";
+    }
+    return {};
+  }
+  if (StartsWith(preinstalled_path, "/product/apex/") ||
+      StartsWith(preinstalled_path, "/system/product/apex/")) {
+    if (vndk_version != product_vndk_version) {
+      return Error() << "vndkVersion(" << vndk_version
+                     << ") doesn't match with device VNDK version("
+                     << product_vndk_version << ")";
+    }
+    return {};
+  }
+  return Error() << "vndkVersion(" << vndk_version << ") is set";
+}
+
 // A version of apex verification that happens during boot.
 // This function should only verification checks that are necessary to run on
 // each boot. Try to avoid putting expensive checks inside this function.
@@ -880,6 +915,11 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
       return result;
     }
   }
+
+  if (auto result = VerifyVndkVersion(apex_file); !result.ok()) {
+    return result;
+  }
+
   return {};
 }
 
