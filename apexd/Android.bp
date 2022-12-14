@@ -78,7 +78,6 @@ cc_defaults {
   name: "libapexd-deps",
   defaults: ["libapex-deps"],
   shared_libs: [
-    "libbinder",
     "liblog",
     "liblogwrap",
   ],
@@ -140,6 +139,30 @@ cc_binary {
   // any APEX activated. To do so, it uses the bootstrap linker
   // and the bootstrap bionic libraries.
   bootstrap: true,
+}
+
+cc_binary {
+  name: "apexd.microdroid",
+  defaults: [
+    "apex_flags_defaults",
+    "libapex-deps",
+    "libapexd-deps",
+  ],
+  srcs: [
+    "apexd_microdroid.cpp",
+  ],
+  static_libs: [
+    "libapex",
+    "libapexd",
+  ],
+  // Just like the init, apexd should be able to run without
+  // any APEX activated. To do so, it uses the bootstrap linker
+  // and the bootstrap bionic libraries.
+  bootstrap: true,
+  // This variant is for microdroid.
+  installable: false,
+  // init depends on the name "apexd".
+  stem: "apexd",
 }
 
 cc_library_static {
