@@ -154,6 +154,13 @@ cc_binary {
   static_libs: [
     "libapex",
     "libapexd",
+    // Prefer static-link as, in microdroid, apexd is the only client.
+    // Using the -ndk variant since libprotobuf-cpp-full is supposed to be
+    // used as a shared lib in general in Android.
+    "libprotobuf-cpp-full-ndk",
+  ],
+  exclude_shared_libs: [
+    "libprotobuf-cpp-full",
   ],
   // Just like the init, apexd should be able to run without
   // any APEX activated. To do so, it uses the bootstrap linker
