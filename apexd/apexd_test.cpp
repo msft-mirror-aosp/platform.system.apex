@@ -4408,7 +4408,6 @@ TEST_F(ApexdMountTest, CopySepolicyToMetadata) {
   auto staged_dir = GetMetadataSepolicyStagedDir();
   ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip"), HasValue(true));
   ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip.sig"), HasValue(true));
-  ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip.fsv_sig"), HasValue(true));
 }
 
 TEST_F(ApexdMountTest, AbortSepolicyApexInstall) {
