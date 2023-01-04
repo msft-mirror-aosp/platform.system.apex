@@ -344,7 +344,7 @@ def main(argv):
   if 'ANDROID_HOST_OUT' in os.environ:
     debugfs_default = '%s/bin/debugfs_static' % os.environ['ANDROID_HOST_OUT']
     fsckerofs_default = '%s/bin/fsck.erofs' % os.environ['ANDROID_HOST_OUT']
-    blkid_default = '%s/bin/blkid' % os.environ['ANDROID_HOST_OUT']
+    blkid_default = '%s/bin/blkid_static' % os.environ['ANDROID_HOST_OUT']
   parser.add_argument('--debugfs_path', help='The path to debugfs binary', default=debugfs_default)
   parser.add_argument('--fsckerofs_path', help='The path to fsck.erofs binary', default=fsckerofs_default)
   parser.add_argument('--blkid_path', help='The path to blkid binary', default=blkid_default)
