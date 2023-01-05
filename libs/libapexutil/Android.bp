@@ -20,8 +20,10 @@ package {
 
 cc_defaults {
     name: "libapexutil-deps",
-    static_libs: [
+    shared_libs: [
         "libbase",
+    ],
+    static_libs: [
         "liblog_for_runtime_apex",
         "libprotobuf-cpp-lite",
         "lib_apex_manifest_proto_lite",
@@ -38,6 +40,7 @@ cc_library_static {
         "//apex_available:platform",
         "com.android.runtime",
     ],
+    visibility: ["//system/linkerconfig"],
 }
 
 cc_test {
