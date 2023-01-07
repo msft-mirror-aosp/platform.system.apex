@@ -184,7 +184,7 @@ class ApexerRebuildTest(unittest.TestCase):
         files = {}
         for i in ["apexer", "deapexer", "avbtool", "mke2fs", "sefcontext_compile", "e2fsdroid",
             "resize2fs", "soong_zip", "aapt2", "merge_zips", "zipalign", "debugfs_static",
-            "signapk.jar", "android.jar"]:
+                  "signapk.jar", "android.jar", "blkid", "fsck.erofs"]:
             file_path = os.path.join(dir_name, "bin", i)
             if os.path.exists(file_path):
                 os.chmod(file_path, stat.S_IRUSR | stat.S_IXUSR);
@@ -249,7 +249,8 @@ class ApexerRebuildTest(unittest.TestCase):
         dir_name = tempfile.mkdtemp(prefix=self._testMethodName+"_extracted_payload_")
         self._to_cleanup.append(dir_name)
         cmd = ["deapexer", "--debugfs_path", self.host_tools["debugfs_static"],
-            "extract", apex_file_path, dir_name]
+               "--blkid_path",self.host_tools["blkid"], "--fsckerofs_path",
+               self.host_tools["fsck.erofs"], "extract", apex_file_path, dir_name]
         run_host_command(cmd)
 
         # Remove payload files added by apexer and e2fs tools.

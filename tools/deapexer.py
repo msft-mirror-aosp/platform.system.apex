@@ -133,6 +133,7 @@ class Apex(object):
   def __init__(self, args):
     self._debugfs = args.debugfs_path
     self._fsckerofs = args.fsckerofs_path
+    self._blkid = args.blkid_path
     self._apex = args.apex
     self._tempdir = tempfile.mkdtemp()
     # TODO(b/139125405): support flattened APEXes.
@@ -208,7 +209,7 @@ class Apex(object):
 
   def _extract(self, path, dest):
     # get filesystem type
-    process = subprocess.Popen(['blkid', '-o', 'value', '-s', 'TYPE', self._payload],
+    process = subprocess.Popen([self._blkid, '-o', 'value', '-s', 'TYPE', self._payload],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                universal_newlines=True)
     output, stderr = process.communicate()
@@ -339,11 +340,14 @@ def main(argv):
 
   debugfs_default = None
   fsckerofs_default = None
+  blkid_default = None
   if 'ANDROID_HOST_OUT' in os.environ:
     debugfs_default = '%s/bin/debugfs_static' % os.environ['ANDROID_HOST_OUT']
     fsckerofs_default = '%s/bin/fsck.erofs' % os.environ['ANDROID_HOST_OUT']
+    blkid_default = '%s/bin/blkid_static' % os.environ['ANDROID_HOST_OUT']
   parser.add_argument('--debugfs_path', help='The path to debugfs binary', default=debugfs_default)
   parser.add_argument('--fsckerofs_path', help='The path to fsck.erofs binary', default=fsckerofs_default)
+  parser.add_argument('--blkid_path', help='The path to blkid binary', default=blkid_default)
 
   subparsers = parser.add_subparsers(required=True, dest='cmd')
 
@@ -385,6 +389,27 @@ def main(argv):
     print('ANDROID_HOST_OUT environment variable is not defined, --debugfs_path must be set',
           file=sys.stderr)
     sys.exit(1)
+
+  if args.cmd == 'extract':
+    if not args.blkid_path:
+      print('ANDROID_HOST_OUT environment variable is not defined, --blkid_path must be set',
+            file=sys.stderr)
+      sys.exit(1)
+
+    if not os.path.isfile(args.blkid_path):
+      print(f'Cannot find blkid specified at {args.blkid_path}',
+            file=sys.stderr)
+      sys.exit(1)
+
+    if not args.fsckerofs_path:
+      print('ANDROID_HOST_OUT environment variable is not defined, --fsckerofs_path must be set',
+            file=sys.stderr)
+      sys.exit(1)
+
+    if not os.path.isfile(args.fsckerofs_path):
+      print(f'Cannot find fsck.erofs specified at {args.fsckerofs_path}',
+            file=sys.stderr)
+      sys.exit(1)
 
   args.func(args)
 
