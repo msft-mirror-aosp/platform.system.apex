@@ -71,8 +71,6 @@ using android::base::testing::HasValue;
 using android::base::testing::Ok;
 using android::base::testing::WithMessage;
 using android::dm::DeviceMapper;
-using android::fs_mgr::Fstab;
-using android::fs_mgr::ReadFstabFromFile;
 using ::apex::proto::SessionState;
 using com::android::apex::testing::ApexInfoXmlEq;
 using ::testing::ByRef;
@@ -4949,54 +4947,6 @@ TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
   auto apex_file = ApexFile::Open(preinstalled_apex);
   ASSERT_THAT(apex_file, Ok());
   ASSERT_TRUE(IsActiveApexChanged(*apex_file));
-}
-
-TEST_F(ApexdMountTest, FinishLoopConfiguration) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
-  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
-  std::string apex_path_2 =
-      AddPreInstalledApex("apex.apexd_test_different_app.apex");
-  std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
-  std::string apex_path_4 = AddPreInstalledApex(
-      "com.android.apex.test.sharedlibs_generated.v1.libvX.apex");
-  std::string apex_path_5 =
-      AddDataApex("com.android.apex.test.sharedlibs_generated.v2.libvY.apex");
-
-  ASSERT_THAT(
-      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
-      Ok());
-
-  OnStart();
-
-  UnmountOnTearDown(apex_path_1);
-  UnmountOnTearDown(apex_path_2);
-  UnmountOnTearDown(apex_path_3);
-  UnmountOnTearDown(apex_path_4);
-  UnmountOnTearDown(apex_path_5);
-
-  // Just make sure that FinisLoopConfiguration() doesn't crash. Ideally we want
-  // to check the value of the queue depth and the scheduler, but for the time
-  // being this should do.
-  std::future<void> result = FinishLoopConfiguration();
-  result.get();
-
-  Fstab proc_mounts;
-  ASSERT_TRUE(ReadFstabFromFile("/proc/mounts", &proc_mounts));
-  std::vector<std::string> apex_block_devices;
-  for (const auto& entry : proc_mounts) {
-    if (!android::base::StartsWith(entry.mount_point, "/apex/")) {
-      continue;
-    }
-    // Skip bind mounts
-    if (entry.mount_point.find('@') == std::string::npos) {
-      continue;
-    }
-    apex_block_devices.emplace_back(entry.blk_device);
-  }
-  ASSERT_EQ(4u, apex_block_devices.size());
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {

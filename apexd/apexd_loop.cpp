@@ -508,6 +508,17 @@ Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
     return loop_device.error();
   }
 
+  Result<void> sched_status = ConfigureScheduler(loop_device->name);
+  if (!sched_status.ok()) {
+    LOG(WARNING) << "Configuring I/O scheduler failed: "
+                 << sched_status.error();
+  }
+
+  Result<void> qd_status = ConfigureQueueDepth(loop_device->name, target);
+  if (!qd_status.ok()) {
+    LOG(WARNING) << qd_status.error();
+  }
+
   Result<void> read_ahead_status = ConfigureReadAhead(loop_device->name);
   if (!read_ahead_status.ok()) {
     return read_ahead_status.error();
@@ -540,24 +551,6 @@ void DestroyLoopDevice(const std::string& path, const DestroyLoopFn& extra) {
     if (ioctl(fd.get(), LOOP_CLR_FD, 0) < 0) {
       PLOG(WARNING) << "Failed to LOOP_CLR_FD " << path;
     }
-  }
-}
-
-void FinishConfiguring(const std::string& loop_device,
-                       const std::string& backing_file) {
-  ATRACE_NAME("FinishConfiguring");
-  LOG(DEBUG) << "Finish configuring " << loop_device << " backed by "
-             << backing_file;
-
-  Result<void> sched_status = ConfigureScheduler(loop_device);
-  if (!sched_status.ok()) {
-    LOG(WARNING) << "Configuring I/O scheduler failed: "
-                 << sched_status.error();
-  }
-
-  Result<void> qd_status = ConfigureQueueDepth(loop_device, backing_file);
-  if (!qd_status.ok()) {
-    LOG(WARNING) << qd_status.error();
   }
 }
 
