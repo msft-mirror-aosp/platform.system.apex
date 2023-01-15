@@ -3788,8 +3788,17 @@ int ActivateFlattenedApex() {
         continue;
       }
 
-      apex_infos.emplace_back(manifest->name(), /* modulePath= */ apex_dir,
-                              /* preinstalledModulePath= */ apex_dir,
+      // b/179211712 the stored path should be the realpath, otherwise the path
+      // we get by scanning the directory would be different from the path we
+      // get by reading /proc/mounts, if the apex file is on a symlink dir.
+      std::string realpath;
+      if (!android::base::Realpath(apex_dir, &realpath)) {
+        PLOG(ERROR) << "can't get realpath of " << apex_dir;
+        continue;
+      }
+
+      apex_infos.emplace_back(manifest->name(), /* modulePath= */ realpath,
+                              /* preinstalledModulePath= */ realpath,
                               /* versionCode= */ manifest->version(),
                               /* versionName= */ manifest->versionname(),
                               /* isFactory= */ true, /* isActive= */ true,
