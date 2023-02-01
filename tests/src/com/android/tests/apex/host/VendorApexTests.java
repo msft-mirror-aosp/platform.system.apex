@@ -75,8 +75,29 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     @LargeTest
     public void testGenerateLinkerConfigurationOnUpdate() throws Exception {
         pushPreinstalledApex("com.android.apex.vendor.foo.apex");
-
         runPhase("testGenerateLinkerConfigurationOnUpdate");
+    }
+
+    @Test
+    @LargeTest
+    public void testInstallAbortsWhenVndkVersionMismatches() throws Exception {
+        pushPreinstalledApex("com.android.apex.vendor.foo.apex");
+        runPhase("testInstallAbortsWhenVndkVersionMismatches");
+        runPhase("testInstallAbortsWhenVndkVersionMismatches_Staged");
+    }
+
+    @Test
+    @LargeTest
+    public void testApexAllReady() throws Exception {
+        pushPreinstalledApex("com.android.apex.vendor.foo.apex.all.ready.apex");
+        assertThat(getDevice().getProperty("vendor.test.apex.all.ready")).isEqualTo("triggered");
+    }
+
+    @Test
+    @LargeTest
+    public void testRestartServiceAfterRebootlessUpdate() throws Exception {
+        pushPreinstalledApex("com.android.apex.vendor.foo.v1_with_service.apex");
+        runPhase("testRestartServiceAfterRebootlessUpdate");
     }
 
     private void pushPreinstalledApex(String fileName) throws Exception {

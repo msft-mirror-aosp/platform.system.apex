@@ -16,7 +16,6 @@
 #pragma once
 
 #include "apex_info.h"
-#include "apexutil.h"
 
 #include <string>
 #include <sys/stat.h>
@@ -25,15 +24,14 @@
 
 namespace android {
 namespace apex {
-namespace util {
+namespace info {
 
 //
 // Cache current apex information
 //
 class ApexInfoCache {
 public:
-  ApexInfoCache(const std::string &apex_dir = kApexRoot,
-                const std::string &info_file = kApexInfoFile);
+  ApexInfoCache(const std::string &info_file = kApexInfoFile);
 
   // Check if new data is available
   android::base::Result<bool> HasNewData() const;
@@ -45,6 +43,9 @@ public:
   // Get copy of stored information
   const ApexInfoData &Info() const { return apex_info_; }
 
+  // Allow test function to override apex_ready
+  void SetApexReady() { apex_ready_ = true; }
+
 protected:
   // Get the modify time, return true if update detected
   android::base::Result<std::pair<struct timespec, bool>> ModifyTime() const;
@@ -54,8 +55,9 @@ protected:
   std::string info_file_;
   struct timespec mtim_; // last modified time of the file
   ApexInfoData apex_info_;
+  mutable bool apex_ready_;
 };
 
-} // namespace util
+} // namespace info
 } // namespace apex
 } // namespace android

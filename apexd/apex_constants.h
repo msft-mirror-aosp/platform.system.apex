@@ -75,10 +75,9 @@ static constexpr const char* kVmPayloadMetadataPartitionProp =
     "apexd.payload_metadata.path";
 static constexpr const std::chrono::seconds kBlockApexWaitTime(10);
 
+static constexpr const char* kApexAllReadyProp = "apex.all.ready";
 static constexpr const char* kCtlApexLoadSysprop = "ctl.apex_load";
 static constexpr const char* kCtlApexUnloadSysprop = "ctl.apex_unload";
-static constexpr const char* kInitApexLoaded = "loaded";
-static constexpr const char* kInitApexUnloaded = "unloaded";
 
 static constexpr const char* kMetadataSepolicyStagedDir =
     "/metadata/sepolicy/staged";
