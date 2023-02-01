@@ -49,6 +49,15 @@ python_library_host {
     ],
 }
 
+// This is a hack to move mke2fs_conf into the current folder for bazel builds.
+// Normally bazel would keep it under a system/extras/ext4_utils/ folder.
+genrule {
+    name: "mke2fs_conf_for_apexer",
+    srcs: [":mke2fs_conf"],
+    out: ["mke2fs.conf"],
+    cmd: "cp $(in) $(out)"
+}
+
 python_binary_host {
     name: "apexer",
     srcs: [
@@ -56,7 +65,7 @@ python_binary_host {
     ],
     // TODO(b/157625953) mke2fs.conf can't embedded directly.
     data: [
-        ":mke2fs_conf",
+        ":mke2fs_conf_for_apexer",
     ],
     version: {
         py3: {
@@ -172,6 +181,7 @@ genrule {
         "cp $(location avbtool) $$BIN && " +
         "cp $(location aapt2) $$BIN && " +
         "cp $(location e2fsdroid) $$BIN && " +
+        "cp $(location make_erofs) $$BIN && " +
         "cp $(location merge_zips) $$BIN && " +
         "cp $(location mke2fs) $$BIN && " +
         "cp $(location resize2fs) $$BIN && " +
