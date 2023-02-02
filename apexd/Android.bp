@@ -692,6 +692,7 @@ xsd_config {
   package_name: "com.android.apex",
   api_dir: "apex-info-list-api",
   gen_writer: true,
+  root_elements: ["apex-info-list"],
 }
 
 xsd_config {
@@ -701,4 +702,5 @@ xsd_config {
   api_dir: "apex-info-list-api",
   gen_writer: true,
   tinyxml: true,
+  root_elements: ["apex-info-list"],
 }
