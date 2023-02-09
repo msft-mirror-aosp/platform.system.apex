@@ -155,6 +155,11 @@ def ParseArgs(argv):
       required=False,
       help='Default Min SDK version to use for AndroidManifest.xml')
   parser.add_argument(
+      '--do_not_check_keyname',
+      required=False,
+      action='store_true',
+      help='Do not check key name. Use the name of apex instead of the basename of --key.')
+  parser.add_argument(
       '--include_build_info',
       required=False,
       action='store_true',
@@ -658,7 +663,10 @@ def SignImage(args, manifest_apex, img_file):
     img_file: unsigned payload image file
   """
 
-  key_name = os.path.basename(os.path.splitext(args.key)[0])
+  if args.do_not_check_keyname or args.unsigned_payload:
+    key_name = manifest_apex.name
+  else:
+    key_name = os.path.basename(os.path.splitext(args.key)[0])
 
   cmd = ['avbtool']
   cmd.append('add_hashtree_footer')

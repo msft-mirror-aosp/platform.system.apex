@@ -173,7 +173,7 @@ def extract_payload_from_img(img_file_path, tmpdir):
 def run_apexer(container_files, payload_dir, key_path, pubkey_path, tmpdir):
   apexer_cmd = _get_host_tools_path('apexer')
   cmd = [
-      apexer_cmd, '--force', '--include_build_info'
+      apexer_cmd, '--force', '--include_build_info', '--do_not_check_keyname'
   ]
   cmd.extend([
       '--apexer_tool_path',

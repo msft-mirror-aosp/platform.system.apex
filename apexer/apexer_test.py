@@ -271,7 +271,7 @@ class ApexerRebuildTest(unittest.TestCase):
 
         os.environ["APEXER_TOOL_PATH"] = (self.host_tools_path +
             ":out/host/linux-x86/bin:prebuilts/sdk/tools/linux/bin")
-        cmd = ["apexer", "--force", "--include_build_info"]
+        cmd = ["apexer", "--force", "--include_build_info", "--do_not_check_keyname"]
         if DEBUG_TEST:
             cmd.append('-v')
         cmd.extend(["--apexer_tool_path", os.environ["APEXER_TOOL_PATH"]])
