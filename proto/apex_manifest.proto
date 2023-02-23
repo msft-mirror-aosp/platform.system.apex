@@ -23,7 +23,8 @@ option java_outer_classname = "Protos";
 
 message ApexManifest {
 
-  // Package Name
+  // APEX Name. Note that this can be different from what PackageManager sees.
+  // This is used to identify an APEX and to mount under /apex directory.
   string name = 1;
 
   // Version Number

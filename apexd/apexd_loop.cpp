@@ -466,7 +466,7 @@ Result<LoopbackDeviceUniqueFd> WaitForDevice(int num) {
     }
   }
 
-  return Error() << "Faled to open loopback device " << num;
+  return Error() << "Failed to open loopback device " << num;
 }
 
 Result<LoopbackDeviceUniqueFd> CreateLoopDevice(const std::string& target,
