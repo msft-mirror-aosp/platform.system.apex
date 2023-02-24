@@ -78,7 +78,6 @@ cc_defaults {
   name: "libapexd-deps",
   defaults: ["libapex-deps"],
   shared_libs: [
-    "libbinder",
     "liblog",
     "liblogwrap",
   ],
@@ -88,9 +87,9 @@ cc_defaults {
     "libdm",
     "libext2_uuid",
     "libsigningutils",
+    "libtinyxml2",
     "libverity_tree",
     "libvold_binder",
-    "libxml2",
   ],
   whole_static_libs: ["libcom.android.sysprop.apex"],
 }
@@ -142,6 +141,37 @@ cc_binary {
   bootstrap: true,
 }
 
+cc_binary {
+  name: "apexd.microdroid",
+  defaults: [
+    "apex_flags_defaults",
+    "libapex-deps",
+    "libapexd-deps",
+  ],
+  srcs: [
+    "apexd_microdroid.cpp",
+  ],
+  static_libs: [
+    "libapex",
+    "libapexd",
+    // Prefer static-link as, in microdroid, apexd is the only client.
+    // Using the -ndk variant since libprotobuf-cpp-full is supposed to be
+    // used as a shared lib in general in Android.
+    "libprotobuf-cpp-full-ndk",
+  ],
+  exclude_shared_libs: [
+    "libprotobuf-cpp-full",
+  ],
+  // Just like the init, apexd should be able to run without
+  // any APEX activated. To do so, it uses the bootstrap linker
+  // and the bootstrap bionic libraries.
+  bootstrap: true,
+  // This variant is for microdroid.
+  installable: false,
+  // init depends on the name "apexd".
+  stem: "apexd",
+}
+
 cc_library_static {
   name: "libapexd",
   defaults: [
@@ -159,7 +189,7 @@ cc_library_static {
     "apexd_verity.cpp",
   ],
   export_include_dirs: ["."],
-  generated_sources: ["apex-info-list"],
+  generated_sources: ["apex-info-list-tinyxml"],
   // Don't add shared/static libs here; add to libapexd_defaults instead.
 }
 
@@ -535,7 +565,7 @@ cc_test {
     "libfs_mgr",
     "libutils",
   ],
-  generated_sources: ["apex-info-list"],
+  generated_sources: ["apex-info-list-tinyxml"],
   test_suites: ["device-tests"],
   test_config: "ApexTestCases.xml",
 }
@@ -633,7 +663,7 @@ cc_test {
     "libfs_mgr",
     "libutils",
   ],
-  generated_sources: ["apex-info-list"],
+  generated_sources: ["apex-info-list-tinyxml"],
   test_suites: ["device-tests"],
   test_config: "ApexServiceTestCases.xml",
 }
@@ -662,6 +692,7 @@ xsd_config {
   package_name: "com.android.apex",
   api_dir: "apex-info-list-api",
   gen_writer: true,
+  root_elements: ["apex-info-list"],
 }
 
 xsd_config {
@@ -671,4 +702,5 @@ xsd_config {
   api_dir: "apex-info-list-api",
   gen_writer: true,
   tinyxml: true,
+  root_elements: ["apex-info-list"],
 }

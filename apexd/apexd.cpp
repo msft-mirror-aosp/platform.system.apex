@@ -706,7 +706,6 @@ const auto kVersionedSepolicyFsv =
 
 const auto kSepolicyZip = "SEPolicy.zip";
 const auto kSepolicySig = "SEPolicy.zip.sig";
-const auto kSepolicyFsv = "SEPolicy.zip.fsv_sig";
 
 Result<void> CopySepolicyToMetadata(const std::string& mount_point) {
   LOG(DEBUG) << "Copying SEPolicy files to /metadata/sepolicy/staged.";
@@ -759,11 +758,9 @@ Result<void> CopySepolicyToMetadata(const std::string& mount_point) {
 
   // Copy files to staged folder.
   const auto stagedSepolicyZip = staged_dir + kSepolicyZip;
-  const auto stagedSepolicyFsv = staged_dir + kSepolicyFsv;
   std::map<std::string, std::string> from_to = {
       {*sepolicy_zip, stagedSepolicyZip},
-      {*sepolicy_sig, staged_dir + kSepolicySig},
-      {*sepolicy_fsv, stagedSepolicyFsv}};
+      {*sepolicy_sig, staged_dir + kSepolicySig}};
   for (const auto& [from, to] : from_to) {
     std::filesystem::copy_file(
         from, to, std::filesystem::copy_options::update_existing, ec);
@@ -773,7 +770,7 @@ Result<void> CopySepolicyToMetadata(const std::string& mount_point) {
     }
   }
 
-  status = enableFsVerity(stagedSepolicyZip, stagedSepolicyFsv);
+  status = enableFsVerity(stagedSepolicyZip);
   if (!status.ok()) {
     // TODO(b/218672709): once we have a release certificate available, return
     // an error and make the ApexdMountTest#CopySepolicyToMetadata test pass.
@@ -856,6 +853,41 @@ Result<void> ValidateStagingShimApex(const ApexFile& to) {
   return RunVerifyFnInsideTempMount(*system_shim, verify_fn, true);
 }
 
+Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
+  const std::string& vndk_version = apex_file.GetManifest().vndkversion();
+  if (vndk_version.empty()) {
+    return {};
+  }
+
+  static std::string vendor_vndk_version = GetProperty("ro.vndk.version", "");
+  static std::string product_vndk_version =
+      GetProperty("ro.product.vndk.version", "");
+
+  const auto& instance = ApexFileRepository::GetInstance();
+  const auto& preinstalled =
+      instance.GetPreInstalledApex(apex_file.GetManifest().name());
+  const auto& preinstalled_path = preinstalled.get().GetPath();
+  if (StartsWith(preinstalled_path, "/vendor/apex/") ||
+      StartsWith(preinstalled_path, "/system/vendor/apex/")) {
+    if (vndk_version != vendor_vndk_version) {
+      return Error() << "vndkVersion(" << vndk_version
+                     << ") doesn't match with device VNDK version("
+                     << vendor_vndk_version << ")";
+    }
+    return {};
+  }
+  if (StartsWith(preinstalled_path, "/product/apex/") ||
+      StartsWith(preinstalled_path, "/system/product/apex/")) {
+    if (vndk_version != product_vndk_version) {
+      return Error() << "vndkVersion(" << vndk_version
+                     << ") doesn't match with device VNDK version("
+                     << product_vndk_version << ")";
+    }
+    return {};
+  }
+  return Error() << "vndkVersion(" << vndk_version << ") is set";
+}
+
 // A version of apex verification that happens during boot.
 // This function should only verification checks that are necessary to run on
 // each boot. Try to avoid putting expensive checks inside this function.
@@ -880,6 +912,11 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
       return result;
     }
   }
+
+  if (auto result = VerifyVndkVersion(apex_file); !result.ok()) {
+    return result;
+  }
+
   return {};
 }
 
@@ -3094,34 +3131,6 @@ void OnAllPackagesActivated(bool is_bootstrap) {
   }
 }
 
-std::future<void> FinishLoopConfiguration() {
-  // Now we can finish configuring loop devices, as it won't block the boot
-  // sequence.
-  std::vector<MountedApexData> mounted_apexes;
-  gMountedApexes.ForallMountedApexes(
-      [&](const std::string& /*package*/, const MountedApexData& data,
-          bool latest) { mounted_apexes.emplace_back(data); });
-  LOG(INFO) << "Finalizing configuration of " << mounted_apexes.size()
-            << " loop devices";
-  // A very basic version of the async IO. We should use the io_uring on
-  // devices that support it.
-  return std::async(
-      std::launch::async,
-      [](std::vector<MountedApexData>&& mounted_apexes) {
-        auto time_started = boot_clock::now();
-        for (const auto& apex : mounted_apexes) {
-          loop::FinishConfiguring(apex.loop_name, apex.full_path);
-        }
-        auto time_elapsed =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                boot_clock::now() - time_started)
-                .count();
-        LOG(INFO) << "Finished confuring " << mounted_apexes.size()
-                  << " loop devices duration=" << time_elapsed;
-      },
-      std::move(mounted_apexes));
-}
-
 void OnAllPackagesReady() {
   // Set a system property to let other components know that APEXs are
   // correctly mounted and ready to be used. Before using any file from APEXs,
@@ -3779,8 +3788,17 @@ int ActivateFlattenedApex() {
         continue;
       }
 
-      apex_infos.emplace_back(manifest->name(), /* modulePath= */ apex_dir,
-                              /* preinstalledModulePath= */ apex_dir,
+      // b/179211712 the stored path should be the realpath, otherwise the path
+      // we get by scanning the directory would be different from the path we
+      // get by reading /proc/mounts, if the apex file is on a symlink dir.
+      std::string realpath;
+      if (!android::base::Realpath(apex_dir, &realpath)) {
+        PLOG(ERROR) << "can't get realpath of " << apex_dir;
+        continue;
+      }
+
+      apex_infos.emplace_back(manifest->name(), /* modulePath= */ realpath,
+                              /* preinstalledModulePath= */ realpath,
                               /* versionCode= */ manifest->version(),
                               /* versionName= */ manifest->versionname(),
                               /* isFactory= */ true, /* isActive= */ true,

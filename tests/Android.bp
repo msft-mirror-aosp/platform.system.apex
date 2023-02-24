@@ -217,6 +217,7 @@ android_test_helper_app {
         ":com.android.apex.vendor.foo.v2",
         ":com.android.apex.vendor.foo.v2_with_requireNativeLibs",
         ":com.android.apex.vendor.foo.v2_with_service",
+        ":com.android.apex.vendor.foo.v2_with_wrong_vndk_version",
     ],
     test_suites: [
         "general-tests",
@@ -353,6 +354,7 @@ android_test_helper_app {
     jni_libs: [
         "libApkInApex_jni",
     ],
+    compile_multilib: "both",
     static_libs: ["androidx.test.rules", "cts-install-lib", "cts-rollback-lib", "testng"],
     test_suites: ["general-tests"],
 }

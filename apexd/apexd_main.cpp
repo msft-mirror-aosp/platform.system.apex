@@ -177,6 +177,8 @@ int main(int /*argc*/, char** argv) {
     //  ApexFileRepository can act as cache and re-scanning is not expensive
     android::apex::InitializeDataApex();
   }
+  // start apexservice before ApexdLifecycle::WaitForBootStatus which waits for
+  // IApexService::markBootComplete().
   android::apex::binder::CreateAndRegisterService();
   android::apex::binder::StartThreadPool();
 
@@ -188,19 +190,13 @@ int main(int /*argc*/, char** argv) {
     // the "--snapshotde" subcommand is received and snapshot/restore is
     // complete.
     android::apex::OnAllPackagesActivated(/*is_bootstrap=*/false);
-    // The boot sequence continues, and we can finish up configuring loop
-    // devices in peace.
-    auto result = android::apex::FinishLoopConfiguration();
     lifecycle.WaitForBootStatus(android::apex::RevertActiveSessionsAndReboot);
-    // Wait for loop devices to be configured before running the boot cleanup
-    // logic to make sure that service_manager won't kill apexd in the middle of
-    // loop configuration.
-    result.wait();
+    // Run cleanup routine on boot complete.
+    // This should run before AllowServiceShutdown() to prevent
+    // service_manager killing apexd in the middle of the cleanup.
+    android::apex::BootCompletedCleanup();
   }
 
-  // Run cleanup routine before AllowServiceShutdown(), to prevent
-  // service_manager killing apexd in the middle of the cleanup.
-  android::apex::BootCompletedCleanup();
   android::apex::binder::AllowServiceShutdown();
 
   android::apex::binder::JoinThreadPool();

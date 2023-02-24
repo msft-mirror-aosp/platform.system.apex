@@ -75,8 +75,15 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     @LargeTest
     public void testGenerateLinkerConfigurationOnUpdate() throws Exception {
         pushPreinstalledApex("com.android.apex.vendor.foo.apex");
-
         runPhase("testGenerateLinkerConfigurationOnUpdate");
+    }
+
+    @Test
+    @LargeTest
+    public void testInstallAbortsWhenVndkVersionMismatches() throws Exception {
+        pushPreinstalledApex("com.android.apex.vendor.foo.apex");
+        runPhase("testInstallAbortsWhenVndkVersionMismatches");
+        runPhase("testInstallAbortsWhenVndkVersionMismatches_Staged");
     }
 
     @Test

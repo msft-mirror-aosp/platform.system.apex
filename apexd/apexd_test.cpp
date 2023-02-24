@@ -71,8 +71,6 @@ using android::base::testing::HasValue;
 using android::base::testing::Ok;
 using android::base::testing::WithMessage;
 using android::dm::DeviceMapper;
-using android::fs_mgr::Fstab;
-using android::fs_mgr::ReadFstabFromFile;
 using ::apex::proto::SessionState;
 using com::android::apex::testing::ApexInfoXmlEq;
 using ::testing::ByRef;
@@ -3120,6 +3118,48 @@ TEST_F(ApexdMountTest, ActivateFlattenedApexShouldFailWithDuplicate) {
               HasSubstr("duplicate of com.android.apex.test_package found"));
 }
 
+TEST_F(ApexdMountTest, ActivateFlattenedApexShouldHaveRealPaths) {
+  // Prepare flattened apexes somewhere else
+  TemporaryDir dir;
+  auto apex_dir_1 = fmt::format("{}/apex1", dir.path);
+  auto apex_dir_2 = fmt::format("{}/apex2", dir.path);
+  PrepareFlattenedApex(apex_dir_1, "com.android.apex.test_package", 2);
+  PrepareFlattenedApex(apex_dir_2, "com.android.apex.test_package_2", 1);
+
+  // Symlink flattened apexes under builtin dir.
+  auto symlink_apex_dir1 = fmt::format("{}/apex1", GetBuiltInDir());
+  auto symlink_apex_dir2 = fmt::format("{}/apex2", GetBuiltInDir());
+  ASSERT_EQ(0, symlink(apex_dir_1.c_str(), symlink_apex_dir1.c_str()));
+  ASSERT_EQ(0, symlink(apex_dir_2.c_str(), symlink_apex_dir2.c_str()));
+
+  ASSERT_EQ(ActivateFlattenedApex(), 0);
+
+  // apex-info-list.xml should have original paths (realpaths) not symlinks
+  auto info_list =
+      com::android::apex::readApexInfoList("/apex/apex-info-list.xml");
+  ASSERT_TRUE(info_list.has_value());
+  auto apex_info_xml_1 = com::android::apex::ApexInfo(
+      /* moduleName= */ "com.android.apex.test_package",
+      /* modulePath= */ apex_dir_1,
+      /* preinstalledModulePath= */ apex_dir_1,
+      /* versionCode= */ 2, /* versionName= */ "2",
+      /* isFactory= */ true, /* isActive= */ true,
+      /* lastUpdateMillis= */ 0,
+      /* provideSharedApexLibs= */ false);
+  auto apex_info_xml_2 = com::android::apex::ApexInfo(
+      /* moduleName= */ "com.android.apex.test_package_2",
+      /* modulePath= */ apex_dir_2,
+      /* preinstalledModulePath= */ apex_dir_2,
+      /* versionCode= */ 1, /* versionName= */ "1",
+      /* isFactory= */ true, /* isActive= */ true,
+      /* lastUpdateMillis= */ 0,
+      /* provideSharedApexLibs= */ false);
+
+  ASSERT_THAT(info_list->getApexInfo(),
+              UnorderedElementsAre(ApexInfoXmlEq(apex_info_xml_1),
+                                   ApexInfoXmlEq(apex_info_xml_2)));
+}
+
 TEST_F(ApexdMountTest, OnStartOnlyPreInstalledApexes) {
   MockCheckpointInterface checkpoint_interface;
   // Need to call InitializeVold before calling OnStart
@@ -4408,7 +4448,6 @@ TEST_F(ApexdMountTest, CopySepolicyToMetadata) {
   auto staged_dir = GetMetadataSepolicyStagedDir();
   ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip"), HasValue(true));
   ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip.sig"), HasValue(true));
-  ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip.fsv_sig"), HasValue(true));
 }
 
 TEST_F(ApexdMountTest, AbortSepolicyApexInstall) {
@@ -4950,54 +4989,6 @@ TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
   auto apex_file = ApexFile::Open(preinstalled_apex);
   ASSERT_THAT(apex_file, Ok());
   ASSERT_TRUE(IsActiveApexChanged(*apex_file));
-}
-
-TEST_F(ApexdMountTest, FinishLoopConfiguration) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
-  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
-  std::string apex_path_2 =
-      AddPreInstalledApex("apex.apexd_test_different_app.apex");
-  std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
-  std::string apex_path_4 = AddPreInstalledApex(
-      "com.android.apex.test.sharedlibs_generated.v1.libvX.apex");
-  std::string apex_path_5 =
-      AddDataApex("com.android.apex.test.sharedlibs_generated.v2.libvY.apex");
-
-  ASSERT_THAT(
-      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
-      Ok());
-
-  OnStart();
-
-  UnmountOnTearDown(apex_path_1);
-  UnmountOnTearDown(apex_path_2);
-  UnmountOnTearDown(apex_path_3);
-  UnmountOnTearDown(apex_path_4);
-  UnmountOnTearDown(apex_path_5);
-
-  // Just make sure that FinisLoopConfiguration() doesn't crash. Ideally we want
-  // to check the value of the queue depth and the scheduler, but for the time
-  // being this should do.
-  std::future<void> result = FinishLoopConfiguration();
-  result.get();
-
-  Fstab proc_mounts;
-  ASSERT_TRUE(ReadFstabFromFile("/proc/mounts", &proc_mounts));
-  std::vector<std::string> apex_block_devices;
-  for (const auto& entry : proc_mounts) {
-    if (!android::base::StartsWith(entry.mount_point, "/apex/")) {
-      continue;
-    }
-    // Skip bind mounts
-    if (entry.mount_point.find('@') == std::string::npos) {
-      continue;
-    }
-    apex_block_devices.emplace_back(entry.blk_device);
-  }
-  ASSERT_EQ(4u, apex_block_devices.size());
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
