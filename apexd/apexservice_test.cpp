@@ -1890,9 +1890,9 @@ class LogTestToLogcat : public ::testing::EmptyTestEventListener {
 }  // namespace android
 
 int main(int argc, char** argv) {
+  ::testing::InitGoogleTest(&argc, argv);
   android::base::InitLogging(argv, &android::base::StderrLogger);
   android::base::SetMinimumLogSeverity(android::base::VERBOSE);
-  ::testing::InitGoogleTest(&argc, argv);
   ::testing::UnitTest::GetInstance()->listeners().Append(
       new android::apex::LogTestToLogcat());
   return RUN_ALL_TESTS();
