@@ -111,6 +111,13 @@ prebuilt_etc {
     src: "apex_vendor_foo_v2.rc",
 }
 
+prebuilt_etc {
+    name: "apex_vendor_foo_v2_vintf",
+    src: "apex_vendor_foo_v2.xml",
+    relative_install_path: "vintf",
+    installable: false,
+}
+
 apex {
     name: "com.android.apex.vendor.foo.v1_with_service",
     defaults: [
@@ -153,4 +160,19 @@ genrule {
     srcs: ["manifest_v2.json"],
     tools: ["jsonmodify"],
     cmd: "$(location jsonmodify) -v vndkVersion WrongVndkVersion $(in) -o $(out)",
+}
+
+apex {
+    name: "com.android.apex.vendor.foo.with_vintf",
+    defaults: [
+        "com.android.apex.vendor.foo.defaults",
+    ],
+    manifest: "manifest_v2.json",
+    binaries: [
+        "apex_vendor_foo",
+    ],
+    prebuilts: [
+        "apex_vendor_foo_v2.rc",
+        "apex_vendor_foo_v2_vintf",
+    ],
 }
