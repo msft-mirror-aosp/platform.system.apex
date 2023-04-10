@@ -87,9 +87,9 @@ cc_defaults {
     "libdm",
     "libext2_uuid",
     "libsigningutils",
+    "libtinyxml2",
     "libverity_tree",
     "libvold_binder",
-    "libxml2",
   ],
   whole_static_libs: ["libcom.android.sysprop.apex"],
 }
@@ -189,7 +189,7 @@ cc_library_static {
     "apexd_verity.cpp",
   ],
   export_include_dirs: ["."],
-  generated_sources: ["apex-info-list"],
+  generated_sources: ["apex-info-list-tinyxml"],
   // Don't add shared/static libs here; add to libapexd_defaults instead.
 }
 
@@ -565,7 +565,7 @@ cc_test {
     "libfs_mgr",
     "libutils",
   ],
-  generated_sources: ["apex-info-list"],
+  generated_sources: ["apex-info-list-tinyxml"],
   test_suites: ["device-tests"],
   test_config: "ApexTestCases.xml",
 }
@@ -663,7 +663,7 @@ cc_test {
     "libfs_mgr",
     "libutils",
   ],
-  generated_sources: ["apex-info-list"],
+  generated_sources: ["apex-info-list-tinyxml"],
   test_suites: ["device-tests"],
   test_config: "ApexServiceTestCases.xml",
 }
@@ -692,6 +692,7 @@ xsd_config {
   package_name: "com.android.apex",
   api_dir: "apex-info-list-api",
   gen_writer: true,
+  root_elements: ["apex-info-list"],
 }
 
 xsd_config {
@@ -701,4 +702,5 @@ xsd_config {
   api_dir: "apex-info-list-api",
   gen_writer: true,
   tinyxml: true,
+  root_elements: ["apex-info-list"],
 }
