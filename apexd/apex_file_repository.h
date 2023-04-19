@@ -181,11 +181,8 @@ class ApexFileRepository final {
 
   // Prefixes used when looking for multi-installed APEX sysprops.
   // Order matters: the first non-empty prop value is returned.
-  std::vector<std::string> multi_install_select_prop_prefixes_ = {
-      // Check persist props first, to allow users to override bootconfig.
-      kMultiApexSelectPersistPrefix,
-      kMultiApexSelectBootconfigPrefix,
-  };
+  std::vector<std::string> multi_install_select_prop_prefixes_ =
+      kMultiApexSelectPrefix;
 
   // Allows multi-install APEXes outside of expected partitions.
   // Only set false in tests.
@@ -216,6 +213,9 @@ class ApexFileRepository final {
   // versions of sharedlibs APEXes.
   std::unordered_map<std::string, BlockApexOverride> block_apex_overrides_;
 };
+
+std::string GetApexSelectFilenameFromProp(
+    const std::vector<std::string>& prefixes, const std::string& apex_name);
 
 }  // namespace apex
 }  // namespace android
