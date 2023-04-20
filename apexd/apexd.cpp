@@ -3730,7 +3730,7 @@ int OnOtaChrootBootstrap() {
   return 0;
 }
 
-int ActivateFlattenedApex() {
+int ActivateFlattenedApex(const std::vector<std::string>& multi_apex_prefixes) {
   LOG(INFO) << "ActivateFlattenedApex";
 
   std::vector<com::android::apex::ApexInfo> apex_infos;
@@ -3765,6 +3765,21 @@ int ActivateFlattenedApex() {
         LOG(ERROR) << "Failed to read apex manifest from " << manifest_file
                    << " : " << manifest.error();
         continue;
+      }
+
+      // Support for multi-install-apex with flattened apexes works with "ro."
+      // property but not with "persist." property because "persist." properties
+      // are not loaded yet.
+      auto selected =
+          GetApexSelectFilenameFromProp(multi_apex_prefixes, manifest->name());
+      if (!selected.empty()) {
+        if (selected != android::base::Basename(apex_dir)) {
+          LOG(INFO) << "Skipping APEX at " << apex_dir << " because "
+                    << selected << " is selected for " << manifest->name();
+          continue;
+        }
+        LOG(INFO) << "Selecting APEX at " << apex_dir << " for "
+                  << manifest->name();
       }
 
       if (auto it = apex_names.find(manifest->name()); it != apex_names.end()) {
@@ -3832,6 +3847,10 @@ int ActivateFlattenedApex() {
   }
 
   return 0;
+}
+
+int ActivateFlattenedApex() {
+  return ActivateFlattenedApex(kMultiApexSelectPrefix);
 }
 
 android::apex::MountedApexDatabase& GetApexDatabaseForTesting() {

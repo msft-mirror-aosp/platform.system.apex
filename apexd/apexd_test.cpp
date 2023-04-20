@@ -75,6 +75,7 @@ using ::apex::proto::SessionState;
 using com::android::apex::testing::ApexInfoXmlEq;
 using ::testing::ByRef;
 using ::testing::Contains;
+using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
 using ::testing::Not;
@@ -3116,6 +3117,38 @@ TEST_F(ApexdMountTest, ActivateFlattenedApexShouldFailWithDuplicate) {
   std::string error = GetCapturedStderr();
   ASSERT_THAT(error,
               HasSubstr("duplicate of com.android.apex.test_package found"));
+}
+
+TEST_F(ApexdMountTest, ActivateFlattenedApexSupportsMultiApex) {
+  auto apex_dir = GetBuiltInDir() + "/com.android.apex.test_package";
+  // Two flattened APEXes with the same name
+  PrepareFlattenedApex(apex_dir, "com.android.apex.test_package", 1);
+  PrepareFlattenedApex(apex_dir + "_something_else",
+                       "com.android.apex.test_package", 1);
+
+  // With sysprop indicating multi-apex
+  std::string property_prefix = "debug.apexd.test.persistprefix.";
+  android::base::SetProperty(property_prefix + "com.android.apex.test_package",
+                             "com.android.apex.test_package");
+
+  ASSERT_EQ(ActivateFlattenedApex({property_prefix}), 0);  // Succeeds
+
+  // apex-info-list.xml should have original paths (realpaths) not symlinks
+  auto info_list =
+      com::android::apex::readApexInfoList("/apex/apex-info-list.xml");
+  ASSERT_TRUE(info_list.has_value());
+  auto apex_info = com::android::apex::ApexInfo(
+      /* moduleName= */ "com.android.apex.test_package",
+      /* modulePath= */ apex_dir,
+      /* preinstalledModulePath= */ apex_dir,
+      /* versionCode= */ 1, /* versionName= */ "1",
+      /* isFactory= */ true, /* isActive= */ true,
+      /* lastUpdateMillis= */ 0,
+      /* provideSharedApexLibs= */ false);
+  ASSERT_THAT(info_list->getApexInfo(), ElementsAre(ApexInfoXmlEq(apex_info)));
+
+  android::base::SetProperty(property_prefix + "com.android.apex.test_package",
+                             "");
 }
 
 TEST_F(ApexdMountTest, ActivateFlattenedApexShouldHaveRealPaths) {
