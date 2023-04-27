@@ -137,10 +137,6 @@ class ApexImageDirectory(object):
   def enter_subdir(self, entry):
     return self._apex._list(self._path + entry.name + '/')
 
-  def extract(self, dest):
-    path = self._path
-    self._apex._extract(self._path, dest)
-
 
 class Apex(object):
 
@@ -159,10 +155,14 @@ class Apex(object):
     shutil.rmtree(self._tempdir)
 
   def __enter__(self):
-    return self._list('./')
+    return self
 
   def __exit__(self, type, value, traceback):
     pass
+
+  def list(self, is_recursive=False):
+    root = self._list('./')
+    return root.list(is_recursive)
 
   def _list(self, path):
     if path in self._cache:
@@ -237,7 +237,7 @@ class Apex(object):
 
     return ApexImageDirectory(path, entries, self)
 
-  def _extract(self, path, dest):
+  def extract(self, dest):
     # get filesystem type
     process = subprocess.Popen([self._blkid, '-o', 'value', '-s', 'TYPE', self._payload],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -251,7 +251,7 @@ class Apex(object):
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  universal_newlines=True)
     else:
-      process = subprocess.Popen([self._debugfs, '-R', 'rdump %s %s' % (path, dest), self._payload],
+      process = subprocess.Popen([self._debugfs, '-R', 'rdump ./ %s' % (dest), self._payload],
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  universal_newlines=True)
 
