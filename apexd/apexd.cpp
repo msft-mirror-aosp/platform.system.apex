@@ -1788,8 +1788,14 @@ Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
     apex_queue.emplace(&apex);
   }
 
-  // Creates threads as many as half number of cores for the performance.
-  size_t worker_num = std::max(get_nprocs_conf() >> 1, 1);
+  size_t worker_num =
+      android::sysprop::ApexProperties::boot_activation_threads().value_or(0);
+
+  // Setting number of workers to the number of packages to load
+  // This seems to provide the best performance
+  if (worker_num == 0) {
+    worker_num = apex_queue.size();
+  }
   worker_num = std::min(apex_queue.size(), worker_num);
 
   // On -eng builds there might be two different pre-installed art apexes.
