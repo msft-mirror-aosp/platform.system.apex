@@ -279,6 +279,8 @@ Result<void> PreAllocateLoopDevices(size_t num) {
     return ErrnoError() << "Failed to open loop-control";
   }
 
+  int new_allocations = 0;  // for logging purpose
+
   // Assumption: loop device ID [0..num) is valid.
   // This is because pre-allocation happens during bootstrap.
   // Anyway Kernel pre-allocated loop devices
@@ -288,7 +290,7 @@ Result<void> PreAllocateLoopDevices(size_t num) {
   for (size_t id = 0ul, cnt = 0; cnt < num; ++id) {
     int ret = ioctl(ctl_fd.get(), LOOP_CTL_ADD, id);
     if (ret > 0) {
-      LOG(INFO) << "Pre-allocated loop device " << id;
+      new_allocations++;
       cnt++;
     } else if (errno == EEXIST) {
       // When LOOP_CTL_ADD failed with EEXIST, it can check
@@ -298,7 +300,6 @@ Result<void> PreAllocateLoopDevices(size_t num) {
       if (access(loop_device.c_str(), F_OK) == 0) {
         LOG(WARNING) << "Loop device " << id << " already in use";
       } else {
-        LOG(INFO) << "Found preallocated loop device " << id;
         cnt++;
       }
     } else {
@@ -313,7 +314,10 @@ Result<void> PreAllocateLoopDevices(size_t num) {
   // access them for activating APEXes. If the dev nodes are not ready
   // even then, we wait 50ms and warning message will be printed (see below
   // CreateLoopDevice()).
-  LOG(INFO) << "Pre-allocated " << num << " loopback devices";
+  LOG(INFO) << "Found " << (num - new_allocations)
+            << " idle loopback devices that were "
+            << "pre-allocated by kernel. Allocated " << new_allocations
+            << " more.";
   return {};
 }
 
