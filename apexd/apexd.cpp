@@ -48,6 +48,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <utils/Trace.h>
+#include <vintf/VintfObject.h>
 
 #include <algorithm>
 #include <array>
@@ -83,6 +84,7 @@
 #include "apexd_rollback_utils.h"
 #include "apexd_session.h"
 #include "apexd_utils.h"
+#include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
 #include "com_android_apex.h"
 
@@ -936,6 +938,9 @@ Result<void> VerifyPackageStagedInstall(const ApexFile& apex_file) {
   const auto validate_fn = [&apex_file](const std::string& mount_point) {
     if (apex_file.GetManifest().name() == kSepolicyApexName) {
       return CopySepolicyToMetadata(mount_point);
+    }
+    if (IsVendorApex(apex_file)) {
+      return CheckVendorApexUpdate(apex_file, mount_point);
     }
     return Result<void>{};
   };
@@ -3867,6 +3872,9 @@ Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file) {
     if (std::find(dirs->begin(), dirs->end(), mount_point + "/priv-app") !=
         dirs->end()) {
       return Error() << apex_file.GetPath() << " contains priv-app inside";
+    }
+    if (IsVendorApex(apex_file)) {
+      return CheckVendorApexUpdate(apex_file, mount_point);
     }
     return Result<void>{};
   };

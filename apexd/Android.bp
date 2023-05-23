@@ -80,6 +80,7 @@ cc_defaults {
   shared_libs: [
     "liblog",
     "liblogwrap",
+    "libvintf",
   ],
   static_libs: [
     "libapex",
@@ -161,6 +162,7 @@ cc_binary {
   ],
   exclude_shared_libs: [
     "libprotobuf-cpp-full",
+    "libvintf",
   ],
   // Just like the init, apexd should be able to run without
   // any APEX activated. To do so, it uses the bootstrap linker
@@ -187,6 +189,7 @@ cc_library_static {
     "apexd_private.cpp",
     "apexd_session.cpp",
     "apexd_verity.cpp",
+    "apexd_vendor_apex.cpp",
   ],
   export_include_dirs: ["."],
   generated_sources: ["apex-info-list-tinyxml"],

@@ -167,6 +167,10 @@ java_test_host {
         ":com.android.apex.cts.shim.v2_prebuilt",
         ":com.android.apex.cts.shim.v2_no_pb",
         ":com.android.apex.cts.shim.v2_additional_file_prebuilt",
+        ":test.good1.com.android.hardware.wifi",
+        ":test.bad1.com.android.hardware.wifi",
+        ":test.bad2.com.android.hardware.wifi",
+        ":test.bad3.com.android.hardware.wifi",
     ],
 }
 
