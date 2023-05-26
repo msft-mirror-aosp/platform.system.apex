@@ -1788,8 +1788,14 @@ Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
     apex_queue.emplace(&apex);
   }
 
-  // Creates threads as many as half number of cores for the performance.
-  size_t worker_num = std::max(get_nprocs_conf() >> 1, 1);
+  size_t worker_num =
+      android::sysprop::ApexProperties::boot_activation_threads().value_or(0);
+
+  // Setting number of workers to the number of packages to load
+  // This seems to provide the best performance
+  if (worker_num == 0) {
+    worker_num = apex_queue.size();
+  }
   worker_num = std::min(apex_queue.size(), worker_num);
 
   // On -eng builds there might be two different pre-installed art apexes.
@@ -3730,7 +3736,7 @@ int OnOtaChrootBootstrap() {
   return 0;
 }
 
-int ActivateFlattenedApex() {
+int ActivateFlattenedApex(const std::vector<std::string>& multi_apex_prefixes) {
   LOG(INFO) << "ActivateFlattenedApex";
 
   std::vector<com::android::apex::ApexInfo> apex_infos;
@@ -3765,6 +3771,21 @@ int ActivateFlattenedApex() {
         LOG(ERROR) << "Failed to read apex manifest from " << manifest_file
                    << " : " << manifest.error();
         continue;
+      }
+
+      // Support for multi-install-apex with flattened apexes works with "ro."
+      // property but not with "persist." property because "persist." properties
+      // are not loaded yet.
+      auto selected =
+          GetApexSelectFilenameFromProp(multi_apex_prefixes, manifest->name());
+      if (!selected.empty()) {
+        if (selected != android::base::Basename(apex_dir)) {
+          LOG(INFO) << "Skipping APEX at " << apex_dir << " because "
+                    << selected << " is selected for " << manifest->name();
+          continue;
+        }
+        LOG(INFO) << "Selecting APEX at " << apex_dir << " for "
+                  << manifest->name();
       }
 
       if (auto it = apex_names.find(manifest->name()); it != apex_names.end()) {
@@ -3832,6 +3853,10 @@ int ActivateFlattenedApex() {
   }
 
   return 0;
+}
+
+int ActivateFlattenedApex() {
+  return ActivateFlattenedApex(kMultiApexSelectPrefix);
 }
 
 android::apex::MountedApexDatabase& GetApexDatabaseForTesting() {
