@@ -55,6 +55,14 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     @Before
     public void setUp() throws Exception {
         assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
+
+        // TODO(b/280155297) workaround to ensure RW. When partition.vendor.verified is still
+        // set to something, then the device should be remount-ed again.
+        getDevice().remountVendorWritable();
+        String verity = getDevice().getProperty("partition.vendor.verified");
+        if (verity != null && !verity.isEmpty()) {
+            getDevice().remountVendorWritable();
+        }
     }
 
     @After
@@ -103,7 +111,6 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     private void pushPreinstalledApex(String fileName) throws Exception {
         CompatibilityBuildHelper buildHelper = new CompatibilityBuildHelper(getBuild());
         final File apex = buildHelper.getTestFile(fileName);
-        getDevice().remountVendorWritable();
         assertTrue(getDevice().pushFile(apex, Paths.get("/vendor/apex", fileName).toString()));
         getDevice().reboot();
     }
