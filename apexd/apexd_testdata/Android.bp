@@ -201,6 +201,7 @@ apex {
     installable: false,
     min_sdk_version: "current",
     payload_fs_type: "f2fs",
+    updatable: false,
 }
 
 apex {
@@ -212,6 +213,7 @@ apex {
     installable: false,
     min_sdk_version: "current",
     payload_fs_type: "erofs",
+    updatable: false,
 }
 
 apex {
