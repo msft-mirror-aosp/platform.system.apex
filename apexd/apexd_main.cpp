@@ -16,18 +16,17 @@
 
 #define LOG_TAG "apexd"
 
-#include <strings.h>
-#include <sys/stat.h>
-
 #include <ApexProperties.sysprop.h>
 #include <android-base/logging.h>
+#include <android-base/properties.h>
+#include <selinux/android.h>
+#include <strings.h>
+#include <sys/stat.h>
 
 #include "apexd.h"
 #include "apexd_checkpoint_vold.h"
 #include "apexd_lifecycle.h"
 #include "apexservice.h"
-
-#include <android-base/properties.h>
 
 namespace {
 
@@ -101,6 +100,12 @@ void InstallSigtermSignalHandler() {
   sigaction(SIGTERM, &action, nullptr);
 }
 
+void InstallSelinuxLogging() {
+  union selinux_callback cb;
+  cb.func_log = selinux_log_callback;
+  selinux_set_callback(SELINUX_CB_LOG, cb);
+}
+
 }  // namespace
 
 int main(int /*argc*/, char** argv) {
@@ -112,6 +117,10 @@ int main(int /*argc*/, char** argv) {
   // processes e.g.) /apex/apex-info-list.xml is supposed to be read by other
   // processes
   umask(022);
+
+  // In some scenarios apexd needs to adjust the selinux label of the files.
+  // Install the selinux logging callback so that we can catch potential errors.
+  InstallSelinuxLogging();
 
   InstallSigtermSignalHandler();
 
