@@ -2614,7 +2614,7 @@ int OnBootstrap() {
   // TODO(b/192241176): move to apexd_verity.{h,cpp}
   for (const auto& apex : pre_installed_apexes) {
     const std::string& name = apex.get().GetManifest().name();
-    if (!dm.CreateEmptyDevice(name)) {
+    if (!dm.CreatePlaceholderDevice(name)) {
       LOG(ERROR) << "Failed to create empty device " << name;
     }
   }

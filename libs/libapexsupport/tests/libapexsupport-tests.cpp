@@ -19,6 +19,10 @@
 
 #include <android/apexsupport.h>
 
+// TODO(b/288341340) Enable tests when we can compare __ANDROID_API__ against
+// __ANDROID_API_V__.
+#if 0
+
 TEST(libapexsupport, AApexInfo_with_no_error_code) {
   EXPECT_EQ(AApexInfo_create(nullptr), AAPEXINFO_NULL);
 }
@@ -35,6 +39,8 @@ TEST(libapexsupport, AApexInfo) {
 
   AApexInfo_destroy(info);
 }
+
+#endif // 0
 
 // TODO(b/271488212) Add tests for error cases
 
