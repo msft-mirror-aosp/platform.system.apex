@@ -25,7 +25,7 @@
 #include "apexd.h"
 
 int main(int /*argc*/, char** argv) {
-  android::base::InitLogging(argv, &android::base::KernelLogger);
+  android::base::InitLogging(argv);
   android::base::SetMinimumLogSeverity(android::base::INFO);
 
   // set umask to 022 so that files/dirs created are accessible to other

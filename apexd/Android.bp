@@ -287,24 +287,6 @@ cc_library_static {
   export_include_dirs: ["."],
 }
 
-cc_binary_host {
-  name: "dump_apex_info",
-  defaults: [
-    "apex_flags_defaults",
-    "libapex-deps",
-  ],
-  static_libs: [
-    "libapex",
-  ],
-  srcs: [
-    "dump_apex_info.cpp",
-  ],
-  shared_libs: [
-    "libtinyxml2",
-  ],
-  generated_sources: ["apex-info-list-tinyxml"],
-}
-
 genrule {
   // Generates an apex which has a different manifest outside the filesystem
   // image.
@@ -669,24 +651,6 @@ cc_test {
   generated_sources: ["apex-info-list-tinyxml"],
   test_suites: ["device-tests"],
   test_config: "ApexServiceTestCases.xml",
-}
-
-cc_test {
-  name: "flattened_apex_test",
-  defaults: [
-    "apex_flags_defaults",
-    "libapex-deps",
-    "libapexd-deps"
-  ],
-  srcs: ["flattened_apex_test.cpp"],
-  host_supported: false,
-  compile_multilib: "first",
-  static_libs: [
-    "libapex",
-    "libapexd",
-  ],
-  test_suites: ["device-tests"],
-  test_config: "flattened_apex_test_config.xml",
 }
 
 xsd_config {
