@@ -1,0 +1,10 @@
+{
+  "presubmit": [
+    {
+      "name": "libapexsupport.ffi.tests"
+    },
+    {
+      "name": "libapexsupport-tests.sh"
+    }
+  ]
+}

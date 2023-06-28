@@ -16,18 +16,16 @@
 
 #define LOG_TAG "apexd"
 
+#include <android-base/logging.h>
+#include <android-base/properties.h>
+#include <selinux/android.h>
 #include <strings.h>
 #include <sys/stat.h>
-
-#include <ApexProperties.sysprop.h>
-#include <android-base/logging.h>
 
 #include "apexd.h"
 #include "apexd_checkpoint_vold.h"
 #include "apexd_lifecycle.h"
 #include "apexservice.h"
-
-#include <android-base/properties.h>
 
 namespace {
 
@@ -101,6 +99,12 @@ void InstallSigtermSignalHandler() {
   sigaction(SIGTERM, &action, nullptr);
 }
 
+void InstallSelinuxLogging() {
+  union selinux_callback cb;
+  cb.func_log = selinux_log_callback;
+  selinux_set_callback(SELINUX_CB_LOG, cb);
+}
+
 }  // namespace
 
 int main(int /*argc*/, char** argv) {
@@ -113,6 +117,10 @@ int main(int /*argc*/, char** argv) {
   // processes
   umask(022);
 
+  // In some scenarios apexd needs to adjust the selinux label of the files.
+  // Install the selinux logging callback so that we can catch potential errors.
+  InstallSelinuxLogging();
+
   InstallSigtermSignalHandler();
 
   android::apex::SetConfig(android::apex::kDefaultConfig);
@@ -122,32 +130,6 @@ int main(int /*argc*/, char** argv) {
   bool booting = lifecycle.IsBooting();
 
   const bool has_subcommand = argv[1] != nullptr;
-  if (!android::sysprop::ApexProperties::updatable().value_or(false)) {
-    if (!has_subcommand) {
-      if (!booting) {
-        // We've finished booting, but for some reason somebody tried to start
-        // apexd. Simply exit.
-        return 0;
-      }
-
-      LOG(INFO) << "This device does not support updatable APEX. Exiting";
-      // Mark apexd as activated so that init can proceed.
-      android::apex::OnAllPackagesActivated(/*is_bootstrap=*/false);
-    } else if (strcmp("--snapshotde", argv[1]) == 0) {
-      LOG(INFO) << "This device does not support updatable APEX. Exiting";
-      // mark apexd as ready
-      android::apex::OnAllPackagesReady();
-    } else if (strcmp("--otachroot-bootstrap", argv[1]) == 0) {
-      SetDefaultTag("apexd-otachroot");
-      LOG(INFO) << "OTA chroot bootstrap subcommand detected";
-      return android::apex::ActivateFlattenedApex();
-    } else if (strcmp("--bootstrap", argv[1]) == 0) {
-      LOG(INFO) << "Bootstrap subcommand detected";
-      return android::apex::ActivateFlattenedApex();
-    }
-    return 0;
-  }
-
   if (has_subcommand) {
     return HandleSubcommand(argv);
   }
