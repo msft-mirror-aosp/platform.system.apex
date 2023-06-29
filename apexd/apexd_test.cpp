@@ -146,8 +146,6 @@ class ApexdUnitTest : public ::testing::Test {
     metadata_sepolicy_staged_dir_ =
         StringPrintf("%s/metadata-sepolicy-staged-dir", td_.path);
 
-    vm_payload_disk_ = StringPrintf("%s/vm-payload", td_.path);
-
     config_ = {kTestApexdStatusSysprop,
                {built_in_dir_},
                data_dir_.c_str(),
@@ -212,18 +210,6 @@ class ApexdUnitTest : public ::testing::Test {
                         target_name.c_str());
   }
 
-  std::string AddBlockApex(const std::string& apex_name,
-                           const std::string& public_key = "",
-                           const std::string& root_digest = "",
-                           bool is_factory = true) {
-    auto apex_path = vm_payload_disk_ + std::to_string(block_device_index_++);
-    auto apex_file = GetTestFile(apex_name);
-    AddToMetadata(apex_name, public_key, root_digest, is_factory);
-    // loop_devices_ will be disposed after each test
-    loop_devices_.push_back(*WriteBlockApex(apex_file, apex_path));
-    return apex_path;
-  }
-
   // Copies the compressed apex to |built_in_dir| and decompresses it to
   // |decompressed_dir| and then hard links to |target_dir|
   std::string PrepareCompressedApex(const std::string& name,
@@ -251,12 +237,6 @@ class ApexdUnitTest : public ::testing::Test {
     return result;
   }
 
-  void SetBlockApexEnabled(bool enabled) {
-    // The first partition(1) is "metadata" partition
-    base::SetProperty(kTestVmPayloadMetadataPartitionProp,
-                      enabled ? (vm_payload_disk_ + "1") : "");
-  }
-
  protected:
   void SetUp() override {
     SetConfig(config_);
@@ -271,45 +251,20 @@ class ApexdUnitTest : public ::testing::Test {
 
     DeleteDirContent(ApexSession::GetSessionsDir());
   }
-  void AddToMetadata(const std::string& apex_name,
-                     const std::string& public_key,
-                     const std::string& root_digest, bool is_factory) {
-    android::microdroid::Metadata metadata;
-    // The first partition is metadata partition
-    auto metadata_partition = vm_payload_disk_ + "1";
-    if (access(metadata_partition.c_str(), F_OK) == 0) {
-      metadata = *android::microdroid::ReadMetadata(metadata_partition);
-    }
 
-    auto apex = metadata.add_apexes();
-    apex->set_name(apex_name);
-    apex->set_public_key(public_key);
-    apex->set_root_digest(root_digest);
-    apex->set_is_factory(is_factory);
+  void TearDown() override { DeleteDirContent(ApexSession::GetSessionsDir()); }
 
-    std::ofstream out(metadata_partition);
-    android::microdroid::WriteMetadata(metadata, out);
-  }
-
-  void TearDown() override {
-    DeleteDirContent(ApexSession::GetSessionsDir());
-    SetBlockApexEnabled(false);
-  }
-
- private:
+ protected:
   TemporaryDir td_;
   std::string built_in_dir_;
   std::string data_dir_;
   std::string decompression_dir_;
   std::string ota_reserved_dir_;
   std::string hash_tree_dir_;
-  std::string vm_payload_disk_;
-  std::string vm_payload_metadata_path_;
+
   std::string staged_session_dir_;
   std::string metadata_sepolicy_staged_dir_;
   ApexdConfig config_;
-  std::vector<loop::LoopbackDeviceUniqueFd> loop_devices_;  // to be cleaned up
-  int block_device_index_ = 2;  // "1" is reserved for metadata;
 };
 
 // Apex that does not have pre-installed version, does not get selected
@@ -898,8 +853,13 @@ TEST_F(ApexdUnitTest, GetStagedApexFilesWithChildren) {
 }
 
 // A test fixture to use for tests that mount/unmount apexes.
+// This also supports test-purpose BlockApex via mount.
 class ApexdMountTest : public ApexdUnitTest {
  public:
+  ApexdMountTest() {
+    vm_payload_disk_ = StringPrintf("%s/vm-payload", td_.path);
+  }
+
   void UnmountOnTearDown(const std::string& apex_file) {
     to_unmount_.push_back(apex_file);
   }
@@ -914,6 +874,7 @@ class ApexdMountTest : public ApexdUnitTest {
 
   void TearDown() final {
     ApexdUnitTest::TearDown();
+    SetBlockApexEnabled(false);
     for (const auto& apex : to_unmount_) {
       if (auto status = DeactivatePackage(apex); !status.ok()) {
         LOG(ERROR) << "Failed to unmount " << apex << " : " << status.error();
@@ -921,9 +882,61 @@ class ApexdMountTest : public ApexdUnitTest {
     }
   }
 
+  void SetBlockApexEnabled(bool enabled) {
+    // The first partition(1) is "metadata" partition
+    base::SetProperty(kTestVmPayloadMetadataPartitionProp,
+                      enabled ? (vm_payload_disk_ + "1") : "");
+  }
+
+  std::string AddBlockApex(const std::string& apex_name,
+                           const std::string& public_key = "",
+                           const std::string& root_digest = "",
+                           bool is_factory = true) {
+    auto apex_path = vm_payload_disk_ + std::to_string(block_device_index_++);
+    auto apex_file = GetTestFile(apex_name);
+    AddToMetadata(apex_name, public_key, root_digest, is_factory);
+    // block_apexes_ will be disposed after each test
+    auto block_apex = WriteBlockApex(apex_file, apex_path);
+    if (!block_apex.ok()) {
+      PLOG(ERROR) << block_apex.error();
+    }
+    block_apexes_.push_back(std::move(*block_apex));
+    return apex_path;
+  }
+
+  void AddToMetadata(const std::string& apex_name,
+                     const std::string& public_key,
+                     const std::string& root_digest, bool is_factory) {
+    android::microdroid::Metadata metadata;
+    // The first partition is metadata partition
+    auto metadata_partition = vm_payload_disk_ + "1";
+    if (access(metadata_partition.c_str(), F_OK) == 0) {
+      auto result = android::microdroid::ReadMetadata(metadata_partition);
+      ASSERT_THAT(result, Ok());
+      metadata = *result;
+    }
+
+    auto apex = metadata.add_apexes();
+    apex->set_name(apex_name);
+    apex->set_public_key(public_key);
+    apex->set_root_digest(root_digest);
+    apex->set_is_factory(is_factory);
+
+    std::ofstream out(metadata_partition);
+    ASSERT_THAT(android::microdroid::WriteMetadata(metadata, out), Ok());
+  }
+
  private:
   MountNamespaceRestorer restorer_;
   std::vector<std::string> to_unmount_;
+
+  // Block APEX specific stuff.
+  std::string vm_payload_disk_;
+  int block_device_index_ = 2;  // "1" is reserved for metadata;
+  // This should be freed before ~MountNamespaceRestorer() because it
+  // switches to the original mount namespace while block apexes are mounted
+  // in test-purpose mount namespace.
+  std::vector<BlockApex> block_apexes_;
 };
 
 // TODO(b/187864524): cover other negative scenarios.

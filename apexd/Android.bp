@@ -287,24 +287,6 @@ cc_library_static {
   export_include_dirs: ["."],
 }
 
-cc_binary_host {
-  name: "dump_apex_info",
-  defaults: [
-    "apex_flags_defaults",
-    "libapex-deps",
-  ],
-  static_libs: [
-    "libapex",
-  ],
-  srcs: [
-    "dump_apex_info.cpp",
-  ],
-  shared_libs: [
-    "libtinyxml2",
-  ],
-  generated_sources: ["apex-info-list-tinyxml"],
-}
-
 genrule {
   // Generates an apex which has a different manifest outside the filesystem
   // image.
