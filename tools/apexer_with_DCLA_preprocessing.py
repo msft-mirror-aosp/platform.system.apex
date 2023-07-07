@@ -10,12 +10,12 @@ regardless of the build system
 
 import argparse
 from glob import glob
-import hashlib
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
+
+import apexer_wrapper_utils
 
 def ParseArgs(argv):
   parser = argparse.ArgumentParser(
@@ -39,28 +39,6 @@ def ParseArgs(argv):
       nargs='*',
       help='remaining flags that will be passed as-is to apexer')
   return parser.parse_args(argv)
-
-def RunCommand(cmd: list[str]) -> None:
-  """Construct a command line from parts and run it."""
-  try:
-    res = subprocess.run(
-        cmd,
-        check=True,
-        stdout=subprocess.PIPE,
-        universal_newlines=True,
-        stderr=subprocess.PIPE)
-  except subprocess.CalledProcessError as err:
-    print(err.stderr)
-    print(err.output)
-    raise err
-
-def GetDigest(file_path: str) -> str:
-  """Get sha512 digest of a file """
-  digester = hashlib.sha512()
-  with open(file_path, 'rb') as f:
-    bytes_to_digest = f.read()
-    digester.update(bytes_to_digest)
-    return digester.hexdigest()
 
 def PlaceDCLANativeSharedLibs(image_dir: str, canned_fs_config: str) -> str:
   """Place native shared libs for DCLA in a special way.
@@ -88,7 +66,7 @@ def PlaceDCLANativeSharedLibs(image_dir: str, canned_fs_config: str) -> str:
         with tempfile.TemporaryDirectory() as tmp_dir:
           # move native libs
           lib_file = os.path.join(image_dir, segs[0][1:])
-          digest = GetDigest(lib_file)
+          digest = apexer_wrapper_utils.GetDigest(lib_file)
           lib_name = os.path.basename(lib_file)
           dest_dir = os.path.join(lib_file, digest)
 
@@ -114,7 +92,7 @@ def main(argv):
   cmd.extend(args.rest_args)
   cmd.extend([args.input_dir, args.output])
 
-  RunCommand(cmd)
+  apexer_wrapper_utils.RunCommand(cmd)
 
 if __name__ == "__main__":
  main(sys.argv[1:])
