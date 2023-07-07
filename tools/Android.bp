@@ -22,11 +22,7 @@ python_binary_host {
         "deapexer.py",
     ],
     version: {
-        py2: {
-            enabled: false,
-        },
         py3: {
-            enabled: true,
             embedded_launcher: true,
         },
     },
@@ -46,11 +42,7 @@ python_binary_host {
         "apex_compression_tool.py",
     ],
     version: {
-        py2: {
-            enabled: false,
-        },
         py3: {
-            enabled: true,
             embedded_launcher: true,
         },
     },
@@ -77,14 +69,6 @@ python_test_host {
         ":deapexer",
         ":soong_zip",
     ],
-    version: {
-        py2: {
-            enabled: false,
-        },
-        py3: {
-            enabled: true,
-        },
-    },
     libs: [
         "apex_manifest_proto",
     ],
@@ -137,20 +121,24 @@ sh_test_host {
     ],
 }
 
+python_library_host {
+    name: "apexer_wrapper_utils",
+    srcs: ["apexer_wrapper_utils.py"]
+}
+
 python_binary_host {
     name: "apexer_with_DCLA_preprocessing",
     srcs: [
         "apexer_with_DCLA_preprocessing.py",
     ],
     version: {
-        py2: {
-            enabled: false,
-        },
         py3: {
-            enabled: true,
             embedded_launcher: true,
         },
     },
+    libs: [
+        "apexer_wrapper_utils",
+    ],
 }
 
 python_test_host {
@@ -165,16 +153,24 @@ python_test_host {
         ":com.android.example.apex",
         "testdata/com.android.example.apex.pem",
     ],
-    version: {
-        py2: {
-            enabled: false,
-        },
-        py3: {
-            enabled: true,
-        },
-    },
     test_suites: ["general-tests"],
     test_options: {
         unit_test: true,
     },
+}
+
+python_binary_host {
+    name: "apexer_with_trim_preprocessing",
+    srcs: [
+        "apexer_with_trim_preprocessing.py",
+    ],
+    version: {
+        py3: {
+            embedded_launcher: true,
+        },
+    },
+    libs: [
+        "apex_manifest_proto",
+        "apexer_wrapper_utils",
+    ],
 }
