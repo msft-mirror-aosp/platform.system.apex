@@ -301,8 +301,10 @@ class ApexerRebuildTest(unittest.TestCase):
 
     def _get_java_toolchain(self):
         java_toolchain = "java"
-        if os.path.isfile("prebuilts/jdk/jdk11/linux-x86/bin/java"):
-            java_toolchain = "prebuilts/jdk/jdk11/linux-x86/bin/java"
+        if os.path.isfile("prebuilts/jdk/jdk17/linux-x86/bin/java"):
+            java_toolchain = "prebuilts/jdk/jdk17/linux-x86/bin/java"
+        elif os.path.isfile("/jdk/jdk17/linux-x86/bin/java"):
+            java_toolchain = "/jdk/jdk17/linux-x86/bin/java"
         elif "ANDROID_JAVA_TOOLCHAIN" in os.environ:
             java_toolchain = os.path.join(os.environ["ANDROID_JAVA_TOOLCHAIN"], "java")
         elif "ANDROID_JAVA_HOME" in os.environ:
