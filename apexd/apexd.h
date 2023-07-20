@@ -215,10 +215,6 @@ int OnStartInVmMode();
 // TODO(b/172911822): support compressed apexes.
 int OnOtaChrootBootstrap();
 
-// Activates flattened apexes
-int ActivateFlattenedApex();
-int ActivateFlattenedApex(const std::vector<std::string>& multi_apex_prefixes);
-
 android::apex::MountedApexDatabase& GetApexDatabaseForTesting();
 
 // Performs a non-staged install of an APEX specified by |package_path|.

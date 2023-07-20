@@ -164,7 +164,6 @@ class Apex(object):
     self._fsckerofs = args.fsckerofs_path
     self._apex = args.apex
     self._tempdir = tempfile.mkdtemp()
-    # TODO(b/139125405): support flattened APEXes.
     with zipfile.ZipFile(self._apex, 'r') as zip_ref:
       self._payload = zip_ref.extract('apex_payload.img', path=self._tempdir)
     self._payload_fs_type = RetrieveFileSystemType(self._payload)
@@ -189,11 +188,8 @@ class Apex(object):
   def _list(self, path):
     if path in self._cache:
       return self._cache[path]
-    process = subprocess.Popen([self._debugfs, '-R', 'ls -l -p %s' % path, self._payload],
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               universal_newlines=True)
-    stdout, _ = process.communicate()
-    res = str(stdout)
+    res = subprocess.check_output([self._debugfs, '-R', 'ls -l -p %s' % path, self._payload],
+                                  text=True, stderr=subprocess.DEVNULL)
     entries = []
     for line in res.split('\n'):
       if not line:
@@ -212,17 +208,15 @@ class Apex(object):
       is_directory=bits[1]=='4'
 
       if not is_symlink and not is_directory:
-        process = subprocess.Popen([self._debugfs, '-R', 'dump_extents <%s>' % ino,
-                                    self._payload], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    universal_newlines=True)
-        stdout, _ = process.communicate()
+        stdout = subprocess.check_output([self._debugfs, '-R', 'dump_extents <%s>' % ino,
+                                          self._payload], text=True, stderr=subprocess.DEVNULL)
         # Output of dump_extents for an inode fragmented in 3 blocks (length and addresses represent
         # block-sized sections):
         # Level Entries       Logical      Physical Length Flags
         # 0/ 0   1/  3     0 -     0    18 -    18      1
         # 0/ 0   2/  3     1 -    15    20 -    34     15
         # 0/ 0   3/  3    16 -  1863    37 -  1884   1848
-        res = str(stdout).splitlines()
+        res = stdout.splitlines()
         res.pop(0) # the first line contains only columns names
         left_length = int(size)
         try: # dump_extents sometimes has an unexpected output
@@ -261,20 +255,14 @@ class Apex(object):
 
   def extract(self, dest):
     if self._payload_fs_type == 'erofs':
-      process = subprocess.Popen([self._fsckerofs, '--extract=%s' % (dest), '--overwrite', self._payload],
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 universal_newlines=True)
+      subprocess.run([self._fsckerofs, '--extract=%s' % (dest), '--overwrite', self._payload],
+                     stdout=subprocess.DEVNULL, check=True)
     elif self._payload_fs_type == 'ext4':
-      process = subprocess.Popen([self._debugfs, '-R', 'rdump ./ %s' % (dest), self._payload],
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 universal_newlines=True)
+      subprocess.run([self._debugfs, '-R', 'rdump ./ %s' % (dest), self._payload],
+                     stdout=subprocess.DEVNULL, check=True)
     else:
       # TODO(b/279688635) f2fs is not supported yet.
       sys.exit(f"{self._payload_fs_type} is not supported for `extract`.")
-
-    _, stderr = process.communicate()
-    if process.returncode != 0:
-      print(stderr, file=sys.stderr)
 
 
 def RunList(args):
@@ -390,15 +378,13 @@ def main(argv):
 
   debugfs_default = None
   fsckerofs_default = None
-  blkid_default = None
   if 'ANDROID_HOST_OUT' in os.environ:
     debugfs_default = '%s/bin/debugfs_static' % os.environ['ANDROID_HOST_OUT']
     fsckerofs_default = '%s/bin/fsck.erofs' % os.environ['ANDROID_HOST_OUT']
-    blkid_default = '%s/bin/blkid_static' % os.environ['ANDROID_HOST_OUT']
   parser.add_argument('--debugfs_path', help='The path to debugfs binary', default=debugfs_default)
   parser.add_argument('--fsckerofs_path', help='The path to fsck.erofs binary', default=fsckerofs_default)
   # TODO(b/279858383) remove the argument
-  parser.add_argument('--blkid_path', help='NOT USED', default=blkid_default)
+  parser.add_argument('--blkid_path', help='NOT USED')
 
   subparsers = parser.add_subparsers(required=True, dest='cmd')
 
@@ -445,11 +431,6 @@ def main(argv):
     sys.exit(1)
 
   if args.cmd == 'extract':
-    if not args.blkid_path:
-      print('ANDROID_HOST_OUT environment variable is not defined, --blkid_path must be set',
-            file=sys.stderr)
-      sys.exit(1)
-
     if not args.fsckerofs_path:
       print('ANDROID_HOST_OUT environment variable is not defined, --fsckerofs_path must be set',
             file=sys.stderr)

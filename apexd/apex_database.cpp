@@ -247,8 +247,7 @@ Result<MountedApexData> ResolveMountInfo(
 // - /dev/block/loopX : loop device
 // - /dev/block/dm-X : dm-verity
 
-// In case of loop device, it is from a non-flattened
-// APEX file. This original APEX file can be tracked
+// In case of loop device, the original APEX file can be tracked
 // by /sys/block/loopX/loop/backing_file.
 
 // In case of dm-verity, it is mapped to a loop device.
