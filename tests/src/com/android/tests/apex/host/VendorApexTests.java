@@ -24,6 +24,8 @@ import static org.junit.Assume.assumeTrue;
 import android.cts.install.lib.host.InstallUtilsHost;
 import android.platform.test.annotations.LargeTest;
 
+import com.android.apex.ApexInfo;
+import com.android.apex.XmlParser;
 import com.android.compatibility.common.tradefed.build.CompatibilityBuildHelper;
 import com.android.tradefed.testtype.DeviceJUnit4ClassRunner;
 import com.android.tradefed.testtype.junit4.BaseHostJUnit4Test;
@@ -35,8 +37,12 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import static java.util.stream.Collectors.toList;
+
 import java.io.File;
+import java.io.FileInputStream;
 import java.nio.file.Paths;
+import java.util.List;
 
 @RunWith(DeviceJUnit4ClassRunner.class)
 public class VendorApexTests extends BaseHostJUnit4Test {
@@ -106,6 +112,21 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     public void testRestartServiceAfterRebootlessUpdate() throws Exception {
         pushPreinstalledApex("com.android.apex.vendor.foo.v1_with_service.apex");
         runPhase("testRestartServiceAfterRebootlessUpdate");
+    }
+
+    @Test
+    @LargeTest
+    public void testVendorBootstrapApex() throws Exception {
+        pushPreinstalledApex("com.android.apex.vendor.foo.bootstrap.apex");
+        try (FileInputStream fis = new FileInputStream(
+                getDevice().pullFile("/apex/.bootstrap-apex-info-list.xml"))) {
+            List<String> names = XmlParser.readApexInfoList(fis)
+                    .getApexInfo()
+                    .stream()
+                    .map(ApexInfo::getModuleName)
+                    .collect(toList());
+            assertThat(names).contains("com.android.apex.vendor.foo");
+        }
     }
 
     private void pushPreinstalledApex(String fileName) throws Exception {

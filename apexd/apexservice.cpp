@@ -118,6 +118,7 @@ class ApexService : public BnApexService {
   BinderStatus reserveSpaceForCompressedApex(
       const CompressedApexInfoList& compressed_apex_info_list) override;
   BinderStatus installAndActivatePackage(const std::string& package_path,
+                                         bool force,
                                          ApexInfo* aidl_return) override;
 
   status_t dump(int fd, const Vector<String16>& args) override;
@@ -131,7 +132,7 @@ class ApexService : public BnApexService {
 
 BinderStatus CheckDebuggable(const std::string& name) {
   if (!::android::base::GetBoolProperty("ro.debuggable", false)) {
-    std::string tmp = name + " unavailable";
+    std::string tmp = name + " unavailable on non-debuggable builds";
     return BinderStatus::fromExceptionCode(BinderStatus::EX_SECURITY,
                                            String8(tmp.c_str()));
   }
@@ -541,16 +542,23 @@ BinderStatus ApexService::getAllPackages(std::vector<ApexInfo>* aidl_return) {
 }
 
 BinderStatus ApexService::installAndActivatePackage(
-    const std::string& package_path, ApexInfo* aidl_return) {
+    const std::string& package_path, bool force, ApexInfo* aidl_return) {
   LOG(INFO) << "installAndActivatePackage() received by ApexService, path: "
-            << package_path;
+            << package_path << " force : " << force;
 
   auto check = CheckCallerSystemOrRoot("installAndActivatePackage");
   if (!check.isOk()) {
     return check;
   }
 
-  auto res = InstallPackage(package_path);
+  if (force) {
+    auto debug_check = CheckDebuggable("Forced non-staged APEX update");
+    if (!debug_check.isOk()) {
+      return debug_check;
+    }
+  }
+
+  auto res = InstallPackage(package_path, force);
   if (!res.ok()) {
     LOG(ERROR) << "Failed to install package " << package_path << " : "
                << res.error();

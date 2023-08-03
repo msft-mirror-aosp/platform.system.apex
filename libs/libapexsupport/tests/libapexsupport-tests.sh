@@ -18,7 +18,7 @@ wait_boot_complete
 adb remount
 
 # push the apex
-adb push libapexsupport-tests-apex.apex /vendor/apex
+adb push com.android.libapexsupport.tests.apex /vendor/apex
 adb reboot
 adb wait-for-device
 
@@ -29,5 +29,5 @@ adb shell /apex/com.android.libapexsupport.tests/bin/libapexsupport-tests
 adb root; adb wait-for-device
 wait_boot_complete
 adb remount
-adb shell rm /vendor/apex/libapexsupport-tests-apex.apex
+adb shell rm /vendor/apex/com.android.libapexsupport.tests.apex
 adb reboot

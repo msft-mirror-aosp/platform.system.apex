@@ -14,20 +14,38 @@
  * limitations under the License.
  */
 
-#include <gmock/gmock.h>
+#include <dlfcn.h>
 #include <gtest/gtest.h>
 
 #include <android/apexsupport.h>
 
-// TODO(b/288341340) Enable tests when we can compare __ANDROID_API__ against
-// __ANDROID_API_V__.
-#if 0
+// A utility class to access APIs via dlsym().
+//
+// TODO(b/288341340) Use __ANDROID_API__ instead.
+// #if (__ANDROID_API__ >= __ANDROID_API_V__) is not available for vendor
+// modules yet.
+struct LibApexSupport {
+#define DLSYM(sym)                                                             \
+  decltype(&::sym) sym = (decltype(&::sym))dlsym(RTLD_DEFAULT, #sym);
+  // APIs added in __ANDROID_API_V__
+  DLSYM(AApexInfo_create)
+  DLSYM(AApexInfo_destroy)
+  DLSYM(AApexInfo_getName)
+  DLSYM(AApexInfo_getVersion)
+#undef DLSYM
+};
 
-TEST(libapexsupport, AApexInfo_with_no_error_code) {
-  EXPECT_EQ(AApexInfo_create(nullptr), AAPEXINFO_NULL);
-}
+struct LibApexSupportTest : testing::Test, LibApexSupport {
+  void SetUp() override {
+    if (AApexInfo_create == nullptr) {
+      GTEST_SKIP() << "libapexsupport is not available";
+    }
+  }
+};
 
-TEST(libapexsupport, AApexInfo) {
+#ifdef __ANDROID_APEX__
+
+TEST_F(LibApexSupportTest, AApexInfo) {
   AApexInfo *info;
   EXPECT_EQ(AApexInfo_create(&info), AAPEXINFO_OK);
   ASSERT_NE(info, nullptr);
@@ -40,9 +58,14 @@ TEST(libapexsupport, AApexInfo) {
   AApexInfo_destroy(info);
 }
 
-#endif // 0
+#else // __ANDROID_APEX__
 
-// TODO(b/271488212) Add tests for error cases
+TEST_F(LibApexSupportTest, AApexInfo) {
+  AApexInfo *info;
+  EXPECT_EQ(AApexInfo_create(&info), AAPEXINFO_NO_APEX);
+}
+
+#endif // __ANDROID_APEX__
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

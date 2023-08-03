@@ -633,8 +633,8 @@ TEST_F(ApexFileRepositoryTestAddBlockApex,
   PayloadMetadata(metadata_partition_path)
       .apex(test_apex_foo)
       .apex(test_apex_bar);
-  auto loop_device1 = WriteBlockApex(test_apex_foo, apex_foo_path);
-  auto loop_device2 = WriteBlockApex(test_apex_bar, apex_bar_path);
+  auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
+  auto block_apex2 = WriteBlockApex(test_apex_bar, apex_bar_path);
 
   // call ApexFileRepository::AddBlockApex()
   ApexFileRepository instance;
@@ -673,8 +673,8 @@ TEST_F(ApexFileRepositoryTestAddBlockApex,
 
   // metadata lists only "foo"
   PayloadMetadata(metadata_partition_path).apex(test_apex_foo);
-  auto loop_device1 = WriteBlockApex(test_apex_foo, apex_foo_path);
-  auto loop_device2 = WriteBlockApex(test_apex_bar, apex_bar_path);
+  auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
+  auto block_apex2 = WriteBlockApex(test_apex_bar, apex_bar_path);
 
   // call ApexFileRepository::AddBlockApex()
   ApexFileRepository instance;
@@ -706,8 +706,8 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, FailsWhenTheresDuplicateNames) {
   PayloadMetadata(metadata_partition_path)
       .apex(test_apex_foo)
       .apex(test_apex_bar);
-  auto loop_device1 = WriteBlockApex(test_apex_foo, apex_foo_path);
-  auto loop_device2 = WriteBlockApex(test_apex_bar, apex_bar_path);
+  auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
+  auto block_apex2 = WriteBlockApex(test_apex_bar, apex_bar_path);
 
   ApexFileRepository instance;
   auto status = instance.AddBlockApex(metadata_partition_path);
@@ -733,7 +733,7 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, GetBlockApexRootDigest) {
   // metadata lists "foo"
   PayloadMetadata(metadata_partition_path)
       .apex(test_apex_foo, /*public_key=*/"", root_digest);
-  auto loop_device1 = WriteBlockApex(test_apex_foo, apex_foo_path);
+  auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
 
   // call ApexFileRepository::AddBlockApex()
   ApexFileRepository instance;
@@ -759,7 +759,7 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, GetBlockApexLastUpdateSeconds) {
   PayloadMetadata(metadata_partition_path)
       .apex(test_apex_foo, /*public_key=*/"", /*root_digest=*/"",
             last_update_seconds);
-  auto loop_device1 = WriteBlockApex(test_apex_foo, apex_foo_path);
+  auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
 
   // call ApexFileRepository::AddBlockApex()
   ApexFileRepository instance;
@@ -783,7 +783,7 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, VerifyPublicKeyWhenAddingBlockApex) {
   // metadata lists "foo"
   PayloadMetadata(metadata_partition_path)
       .apex(test_apex_foo, /*public_key=*/"wrong public key");
-  auto loop_device1 = WriteBlockApex(test_apex_foo, apex_foo_path);
+  auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
 
   // call ApexFileRepository::AddBlockApex()
   ApexFileRepository instance;
@@ -800,7 +800,7 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, RespectIsFactoryBitFromMetadata) {
 
   const std::string metadata_partition_path = test_dir.path + "/vdc1"s;
   const std::string apex_foo_path = test_dir.path + "/vdc2"s;
-  auto loop_device1 = WriteBlockApex(test_apex_foo, apex_foo_path);
+  auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
 
   for (const bool is_factory : {true, false}) {
     // metadata lists "foo"
