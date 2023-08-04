@@ -47,10 +47,16 @@ PARTITIONS = ['system', 'system_ext', 'product', 'vendor']
 
 def DirectoryType(path):
   if not os.path.exists(path):
-    raise argparse.ArgumentTypeError(f'{path} is not found')
+    return None
   if not os.path.isdir(path):
     raise argparse.ArgumentTypeError(f'{path} is not a directory')
   return os.path.realpath(path)
+
+
+def ExistentDirectoryType(path):
+  if not os.path.exists(path):
+    raise argparse.ArgumentTypeError(f'{path} is not found')
+  return DirectoryType(path)
 
 
 def ParseArgs():
@@ -59,7 +65,7 @@ def ParseArgs():
   parser.add_argument(
       '--apex_path',
       required=True,
-      type=DirectoryType,
+      type=ExistentDirectoryType,
       help='Path to the directory where to activate APEXes',
   )
   for part in PARTITIONS:

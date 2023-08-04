@@ -164,6 +164,9 @@ static const std::vector<std::string> kBootstrapApexes = ([]() {
 static constexpr const int kNumRetriesWhenCheckpointingEnabled = 1;
 
 bool IsBootstrapApex(const ApexFile& apex) {
+  if (IsVendorApex(apex) && apex.GetManifest().vendorbootstrap()) {
+    return true;
+  }
   return std::find(kBootstrapApexes.begin(), kBootstrapApexes.end(),
                    apex.GetManifest().name()) != kBootstrapApexes.end();
 }
@@ -1106,8 +1109,10 @@ Result<void> RestoreActivePackages() {
 }
 
 Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
-                            bool deferred) {
-  LOG(INFO) << "Unmounting " << GetPackageId(apex.GetManifest());
+                            bool deferred, bool detach_mount_point) {
+  LOG(INFO) << "Unmounting " << GetPackageId(apex.GetManifest())
+            << " allow_latest : " << allow_latest << " deferred : " << deferred
+            << " detach_mount_point : " << detach_mount_point;
 
   const ApexManifest& manifest = apex.GetManifest();
 
@@ -1134,7 +1139,11 @@ Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
     }
     std::string mount_point = apexd_private::GetActiveMountPoint(manifest);
     LOG(INFO) << "Unmounting " << mount_point;
-    if (umount2(mount_point.c_str(), UMOUNT_NOFOLLOW) != 0) {
+    int flags = UMOUNT_NOFOLLOW;
+    if (detach_mount_point) {
+      flags |= MNT_DETACH;
+    }
+    if (umount2(mount_point.c_str(), flags) != 0) {
       return ErrnoError() << "Failed to unmount " << mount_point;
     }
 
@@ -1471,7 +1480,7 @@ Result<void> DeactivatePackage(const std::string& full_path) {
   }
 
   return UnmountPackage(*apex_file, /* allow_latest= */ true,
-                        /* deferred= */ false);
+                        /* deferred= */ false, /* detach_mount_point= */ false);
 }
 
 Result<std::vector<ApexFile>> GetStagedApexFiles(
@@ -3726,13 +3735,18 @@ android::apex::MountedApexDatabase& GetApexDatabaseForTesting() {
 
 // A version of apex verification that happens during non-staged APEX
 // installation.
-Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file) {
+Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file,
+                                           bool force) {
   const auto& verify_package_boot_status = VerifyPackageBoot(apex_file);
   if (!verify_package_boot_status.ok()) {
     return verify_package_boot_status;
   }
 
-  auto check_fn = [&apex_file](const std::string& mount_point) -> Result<void> {
+  auto check_fn = [&apex_file,
+                   &force](const std::string& mount_point) -> Result<void> {
+    if (force) {
+      return Result<void>{};
+    }
     auto dirs = GetSubdirs(mount_point);
     if (!dirs.ok()) {
       return dirs.error();
@@ -3753,36 +3767,39 @@ Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file) {
   return RunVerifyFnInsideTempMount(apex_file, check_fn, true);
 }
 
-Result<void> CheckSupportsNonStagedInstall(const ApexFile& new_apex) {
+Result<void> CheckSupportsNonStagedInstall(const ApexFile& new_apex,
+                                           bool force) {
   const auto& new_manifest = new_apex.GetManifest();
 
-  if (!new_manifest.supportsrebootlessupdate()) {
-    return Error() << new_apex.GetPath()
-                   << " does not support non-staged update";
-  }
+  if (!force) {
+    if (!new_manifest.supportsrebootlessupdate()) {
+      return Error() << new_apex.GetPath()
+                     << " does not support non-staged update";
+    }
 
-  // Check if update will impact linkerconfig.
+    // Check if update will impact linkerconfig.
 
-  // Updates to shared libs APEXes must be done via staged install flow.
-  if (new_manifest.providesharedapexlibs()) {
-    return Error() << new_apex.GetPath() << " is a shared libs APEX";
-  }
+    // Updates to shared libs APEXes must be done via staged install flow.
+    if (new_manifest.providesharedapexlibs()) {
+      return Error() << new_apex.GetPath() << " is a shared libs APEX";
+    }
 
-  // This APEX provides native libs to other parts of the platform. It can only
-  // be updated via staged install flow.
-  if (new_manifest.providenativelibs_size() > 0) {
-    return Error() << new_apex.GetPath() << " provides native libs";
-  }
+    // This APEX provides native libs to other parts of the platform. It can
+    // only be updated via staged install flow.
+    if (new_manifest.providenativelibs_size() > 0) {
+      return Error() << new_apex.GetPath() << " provides native libs";
+    }
 
-  // This APEX requires libs provided by dynamic common library APEX, hence it
-  // can only be installed using staged install flow.
-  if (new_manifest.requiresharedapexlibs_size() > 0) {
-    return Error() << new_apex.GetPath() << " requires shared apex libs";
-  }
+    // This APEX requires libs provided by dynamic common library APEX, hence it
+    // can only be installed using staged install flow.
+    if (new_manifest.requiresharedapexlibs_size() > 0) {
+      return Error() << new_apex.GetPath() << " requires shared apex libs";
+    }
 
-  // We don't allow non-staged updates of APEXES that have java libs inside.
-  if (new_manifest.jnilibs_size() > 0) {
-    return Error() << new_apex.GetPath() << " requires JNI libs";
+    // We don't allow non-staged updates of APEXES that have java libs inside.
+    if (new_manifest.jnilibs_size() > 0) {
+      return Error() << new_apex.GetPath() << " requires JNI libs";
+    }
   }
 
   auto expected_public_key =
@@ -3894,7 +3911,7 @@ Result<void> LoadApexFromInit(const std::string& apex_name) {
   return {};
 }
 
-Result<ApexFile> InstallPackage(const std::string& package_path) {
+Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
   LOG(INFO) << "Installing " << package_path;
   auto temp_apex = ApexFile::Open(package_path);
   if (!temp_apex.ok()) {
@@ -3916,15 +3933,15 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
   // Do a quick check if this APEX can be installed without a reboot.
   // Note that passing this check doesn't guarantee that APEX will be
   // successfully installed.
-  if (auto r = CheckSupportsNonStagedInstall(*temp_apex); !r.ok()) {
+  if (auto r = CheckSupportsNonStagedInstall(*temp_apex, force); !r.ok()) {
     return r.error();
   }
 
   // 1. Verify that APEX is correct. This is a heavy check that involves
   // mounting an APEX on a temporary mount point and reading the entire
   // dm-verity block device.
-  if (auto verify = VerifyPackageNonStagedInstall(*temp_apex); !verify.ok()) {
-    return verify.error();
+  if (auto res = VerifyPackageNonStagedInstall(*temp_apex, force); !res.ok()) {
+    return res.error();
   }
 
   // 2. Compute params for mounting new apex.
@@ -3950,8 +3967,9 @@ Result<ApexFile> InstallPackage(const std::string& package_path) {
   });
 
   // 2. Unmount currently active APEX.
-  if (auto res = UnmountPackage(*cur_apex, /* allow_latest= */ true,
-                                /* deferred= */ true);
+  if (auto res =
+          UnmountPackage(*cur_apex, /* allow_latest= */ true,
+                         /* deferred= */ true, /* detach_mount_point= */ force);
       !res.ok()) {
     return res.error();
   }

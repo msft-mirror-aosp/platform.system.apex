@@ -197,6 +197,7 @@ java_test_host {
         ":com.android.apex.vendor.foo",
         ":com.android.apex.vendor.foo",
         ":com.android.apex.vendor.foo.apex.all.ready",
+        ":com.android.apex.vendor.foo.bootstrap",
         ":com.android.apex.vendor.foo.v1_with_service"
     ],
     test_config: "vendor-apex-tests.xml",

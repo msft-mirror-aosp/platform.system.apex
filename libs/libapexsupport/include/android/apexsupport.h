@@ -32,11 +32,9 @@ typedef struct AApexInfo AApexInfo;
 typedef enum AApexInfoError : int32_t {
   /* No error */
   AAPEXINFO_OK,
-  /* Out parameter is null. */
-  AAPEXINFO_NULL,
   /* The calling process is not from an APEX. */
   AAPEXINFO_NO_APEX,
-  /* Failed to get the exectuable path of the calling process.
+  /* Failed to get the executable path of the calling process.
    * See the log for details.
    */
   AAPEXINFO_ERROR_EXECUTABLE_PATH,
@@ -53,19 +51,22 @@ typedef enum AApexInfoError : int32_t {
  * "com.android.foo". The allocated AApexInfo object has to be deallocated using
  * AApexInfo_destroy().
  *
- * \param info out parameter for an AApexInfo object for the current APEX
+ * \param info out parameter for an AApexInfo object for the current APEX. Null
+ * when called from a non-APEX executable.
  *
  * \returns AApexInfoError
  */
 __attribute__((warn_unused_result)) AApexInfoError
-AApexInfo_create(AApexInfo **info) __INTRODUCED_IN(__ANDROID_API_V__);
+AApexInfo_create(AApexInfo *_Nullable *_Nonnull info)
+    __INTRODUCED_IN(__ANDROID_API_V__);
 
 /**
  * Destroys an AApexInfo object created by AApexInfo_create().
  *
  * \param info pointer to the AApexInfo object created by AApexInfo_create()
  */
-void AApexInfo_destroy(AApexInfo *info) __INTRODUCED_IN(__ANDROID_API_V__);
+void AApexInfo_destroy(AApexInfo *_Nonnull info)
+    __INTRODUCED_IN(__ANDROID_API_V__);
 
 /**
  * Returns a C-string for the APEX name.
@@ -76,19 +77,20 @@ void AApexInfo_destroy(AApexInfo *info) __INTRODUCED_IN(__ANDROID_API_V__);
  *
  * \param info pointer to the AApexInfo object created by AApexInfo_create()
  *
- * \return the APEX name. null if AApexInfo is null.
+ * \return the APEX name.
  */
-__attribute__((warn_unused_result)) char *
-AApexInfo_getName(const AApexInfo *info) __INTRODUCED_IN(__ANDROID_API_V__);
+__attribute__((warn_unused_result))
+const char *_Nonnull AApexInfo_getName(const AApexInfo *_Nonnull info)
+    __INTRODUCED_IN(__ANDROID_API_V__);
 
 /**
  * Returns the APEX version.
  *
  * \param info pointer to the AApexInfo object created by AApexInfo_create()
  *
- * \return the APEX version. -1 if AApexInfo is null.
+ * \return the APEX version.
  */
-int64_t AApexInfo_getVersion(const AApexInfo *info)
+int64_t AApexInfo_getVersion(const AApexInfo *_Nonnull info)
     __INTRODUCED_IN(__ANDROID_API_V__);
 
 __END_DECLS
