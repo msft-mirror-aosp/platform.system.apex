@@ -34,11 +34,11 @@ cc_test {
     },
 
     shared_libs: [
-        "libbase",
         "liblog",
     ],
 
     static_libs: [
+        "libbase",
         "libc++fs",
         "libfs_mgr",
     ],
