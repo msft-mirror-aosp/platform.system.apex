@@ -119,7 +119,7 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     public void testVendorBootstrapApex() throws Exception {
         pushPreinstalledApex("com.android.apex.vendor.foo.bootstrap.apex");
         try (FileInputStream fis = new FileInputStream(
-                getDevice().pullFile("/apex/.bootstrap-apex-info-list.xml"))) {
+                getDevice().pullFile("/bootstrap-apex/apex-info-list.xml"))) {
             List<String> names = XmlParser.readApexInfoList(fis)
                     .getApexInfo()
                     .stream()
