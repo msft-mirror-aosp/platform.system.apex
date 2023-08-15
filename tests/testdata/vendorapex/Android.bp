@@ -278,10 +278,23 @@ prebuilt_etc {
     sub_dir: "vintf", // Puts fragment into etc/vintf
 }
 
+prebuilt_etc {
+    name: "apex_vendor_foo_bootstrap.rc",
+    src: "apex_vendor_foo_bootstrap.rc",
+    vendor: true,
+    installable: false,
+}
+
 apex {
     name: "com.android.apex.vendor.foo.bootstrap",
     defaults: [
         "com.android.apex.vendor.foo.defaults",
+    ],
+    binaries: [
+        "apex_vendor_foo",
+    ],
+    prebuilts: [
+        "apex_vendor_foo_bootstrap.rc",
     ],
     manifest: "manifest_bootstrap.json",
 }

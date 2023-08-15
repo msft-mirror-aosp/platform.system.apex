@@ -118,6 +118,9 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     @LargeTest
     public void testVendorBootstrapApex() throws Exception {
         pushPreinstalledApex("com.android.apex.vendor.foo.bootstrap.apex");
+
+        // Now there should be "com.android.apex.vendor.foo" activated as an
+        // bootstrap apex, listed in apex-info-list in the bootstrap mount namespace.
         try (FileInputStream fis = new FileInputStream(
                 getDevice().pullFile("/bootstrap-apex/apex-info-list.xml"))) {
             List<String> names = XmlParser.readApexInfoList(fis)
@@ -127,6 +130,20 @@ public class VendorApexTests extends BaseHostJUnit4Test {
                     .collect(toList());
             assertThat(names).contains("com.android.apex.vendor.foo");
         }
+
+        // And also the `early_hal` service in the apex (apex_vendor_foo) should
+        // be started in the bootstrap mount namespace.
+        assertThat(getMountNamespaceFor("$(pidof apex_vendor_foo)"))
+            .isEqualTo(getMountNamespaceFor("$(pidof vold)"));
+    }
+
+    private String getMountNamespaceFor(String proc) throws Exception {
+        CommandResult result =
+                getDevice().executeShellV2Command("readlink /proc/" + proc + "/ns/mnt");
+        if (result.getStatus() != CommandStatus.SUCCESS) {
+            throw new RuntimeException("failed to read namespace for " + proc);
+        }
+        return result.getStdout().trim();
     }
 
     private void pushPreinstalledApex(String fileName) throws Exception {
