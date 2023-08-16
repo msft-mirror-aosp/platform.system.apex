@@ -127,6 +127,9 @@ MountedApexDatabase gMountedApexes;
 // Can be set by SetConfig()
 std::optional<ApexdConfig> gConfig;
 
+// Set by InitializeSessionManager
+ApexSessionManager* gSessionManager;
+
 CheckpointInterface* gVoldService;
 bool gSupportsFsCheckpoints = false;
 bool gInFsCheckpointMode = false;
@@ -1245,7 +1248,7 @@ std::string GetActiveMountPoint(const ApexManifest& manifest) {
 
 Result<void> ResumeRevertIfNeeded() {
   auto sessions =
-      ApexSession::GetSessionsInState(SessionState::REVERT_IN_PROGRESS);
+      gSessionManager->GetSessionsInState(SessionState::REVERT_IN_PROGRESS);
   if (sessions.empty()) {
     return {};
   }
@@ -1485,7 +1488,7 @@ Result<void> DeactivatePackage(const std::string& full_path) {
 
 Result<std::vector<ApexFile>> GetStagedApexFiles(
     int session_id, const std::vector<int>& child_session_ids) {
-  auto session = ApexSession::GetSession(session_id);
+  auto session = gSessionManager->GetSession(session_id);
   if (!session.ok()) {
     return session.error();
   }
@@ -1706,7 +1709,7 @@ Result<void> DeleteStagedSepolicy() {
  * Returns without error only if session was successfully aborted.
  **/
 Result<void> AbortStagedSession(int session_id) {
-  auto session = ApexSession::GetSession(session_id);
+  auto session = gSessionManager->GetSession(session_id);
   if (!session.ok()) {
     return Error() << "No session found with id " << session_id;
   }
@@ -2014,7 +2017,7 @@ void SnapshotOrRestoreDeIfNeeded(const std::string& base_dir,
 }
 
 void SnapshotOrRestoreDeSysData() {
-  auto sessions = ApexSession::GetSessionsInState(SessionState::ACTIVATED);
+  auto sessions = gSessionManager->GetSessionsInState(SessionState::ACTIVATED);
 
   for (const ApexSession& session : sessions) {
     SnapshotOrRestoreDeIfNeeded(kDeSysDataDir, session);
@@ -2029,7 +2032,7 @@ int SnapshotOrRestoreDeUserData() {
     return 1;
   }
 
-  auto sessions = ApexSession::GetSessionsInState(SessionState::ACTIVATED);
+  auto sessions = gSessionManager->GetSessionsInState(SessionState::ACTIVATED);
 
   for (const ApexSession& session : sessions) {
     for (const auto& user_dir : *user_dirs) {
@@ -2050,12 +2053,6 @@ Result<void> RestoreCeData(const int user_id, const int rollback_id,
                            const std::string& apex_name) {
   auto base_dir = StringPrintf("%s/%d", kCeDataDir, user_id);
   return RestoreDataDirectory(base_dir, rollback_id, apex_name);
-}
-
-//  Migrates sessions directory from /data/apex/sessions to
-//  /metadata/apex/sessions, if necessary.
-Result<void> MigrateSessionsDirIfNeeded() {
-  return ApexSession::MigrateToMetadataSessionsDir();
 }
 
 Result<void> DestroySnapshots(const std::string& base_dir,
@@ -2178,18 +2175,18 @@ void OnBootCompleted() {
 
 // Returns true if any session gets staged
 void ScanStagedSessionsDirAndStage() {
-  LOG(INFO) << "Scanning " << ApexSession::GetSessionsDir()
+  LOG(INFO) << "Scanning " << GetSessionsDir()
             << " looking for sessions to be activated.";
 
   auto sessions_to_activate =
-      ApexSession::GetSessionsInState(SessionState::STAGED);
+      gSessionManager->GetSessionsInState(SessionState::STAGED);
   if (gSupportsFsCheckpoints) {
     // A session that is in the ACTIVATED state should still be re-activated if
     // fs checkpointing is supported. In this case, a session may be in the
     // ACTIVATED state yet the data/apex/active directory may have been
     // reverted. The session should be reverted in this scenario.
     auto activated_sessions =
-        ApexSession::GetSessionsInState(SessionState::ACTIVATED);
+        gSessionManager->GetSessionsInState(SessionState::ACTIVATED);
     sessions_to_activate.insert(sessions_to_activate.end(),
                                 activated_sessions.begin(),
                                 activated_sessions.end());
@@ -2453,7 +2450,14 @@ Result<void> RevertActiveSessions(const std::string& crashing_native_process,
   // First check whenever there is anything to revert. If there is none, then
   // fail. This prevents apexd from boot looping a device in case a native
   // process is crashing and there are no apex updates.
-  auto active_sessions = ApexSession::GetActiveSessions();
+  auto active_sessions = gSessionManager->GetSessions();
+  active_sessions.erase(
+      std::remove_if(active_sessions.begin(), active_sessions.end(),
+                     [](const auto& s) {
+                       return s.IsFinalized() ||
+                              s.GetState() == SessionState::UNKNOWN;
+                     }),
+      active_sessions.end());
   if (active_sessions.empty()) {
     return Error() << "Revert requested, when there are no active sessions.";
   }
@@ -2673,6 +2677,10 @@ void InitializeVold(CheckpointInterface* checkpoint_service) {
       }
     }
   }
+}
+
+void InitializeSessionManager(ApexSessionManager* session_manager) {
+  gSessionManager = session_manager;
 }
 
 void Initialize(CheckpointInterface* checkpoint_service) {
@@ -3192,7 +3200,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
                    << " rollback and enabled for rollback.";
   }
 
-  auto session = ApexSession::CreateSession(session_id);
+  auto session = gSessionManager->CreateSession(session_id);
   if (!session.ok()) {
     return session.error();
   }
@@ -3228,7 +3236,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
 }
 
 Result<void> MarkStagedSessionReady(const int session_id) {
-  auto session = ApexSession::GetSession(session_id);
+  auto session = gSessionManager->GetSession(session_id);
   if (!session.ok()) {
     return session.error();
   }
@@ -3247,7 +3255,7 @@ Result<void> MarkStagedSessionReady(const int session_id) {
 }
 
 Result<void> MarkStagedSessionSuccessful(const int session_id) {
-  auto session = ApexSession::GetSession(session_id);
+  auto session = gSessionManager->GetSession(session_id);
   if (!session.ok()) {
     return session.error();
   }
@@ -3336,7 +3344,18 @@ void DeleteUnusedVerityDevices() {
 
 void BootCompletedCleanup() {
   RemoveInactiveDataApex();
-  ApexSession::DeleteFinalizedSessions();
+
+  auto sessions = gSessionManager->GetSessions();
+  for (const ApexSession& session : sessions) {
+    if (!session.IsFinalized()) {
+      continue;
+    }
+    auto result = session.DeleteSession();
+    if (!result.ok()) {
+      LOG(WARNING) << "Failed to delete finalized session: " << session.GetId();
+    }
+  }
+
   DeleteUnusedVerityDevices();
 }
 

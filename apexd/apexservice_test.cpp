@@ -391,7 +391,7 @@ class ApexServiceTest : public ::testing::Test {
     DeleteDirContent(kActiveApexPackagesDataDir);
     DeleteDirContent(kApexBackupDir);
     DeleteDirContent(kApexHashTreeDir);
-    DeleteDirContent(ApexSession::GetSessionsDir());
+    DeleteDirContent(GetSessionsDir());
 
     DeleteIfExists("/data/misc_ce/0/apexdata/apex.apexd_test");
     DeleteIfExists("/data/misc_ce/0/apexrollback/123456");

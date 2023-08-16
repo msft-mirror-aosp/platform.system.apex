@@ -146,6 +146,10 @@ class ApexdUnitTest : public ::testing::Test {
     metadata_sepolicy_staged_dir_ =
         StringPrintf("%s/metadata-sepolicy-staged-dir", td_.path);
 
+    sessions_metadata_dir_ =
+        StringPrintf("%s/metadata-staged-session-dir", td_.path);
+    session_manager_ = ApexSessionManager::Create(sessions_metadata_dir_);
+
     config_ = {kTestApexdStatusSysprop,
                {built_in_dir_},
                data_dir_.c_str(),
@@ -170,6 +174,7 @@ class ApexdUnitTest : public ::testing::Test {
   const std::string& GetMetadataSepolicyStagedDir() {
     return metadata_sepolicy_staged_dir_;
   }
+  ApexSessionManager* GetSessionManager() { return session_manager_.get(); }
 
   std::string GetRootDigest(const ApexFile& apex) {
     if (apex.IsCompressed()) {
@@ -232,7 +237,7 @@ class ApexdUnitTest : public ::testing::Test {
                                           int session_id) {
     CreateDirIfNeeded(GetStagedDir(session_id), 0755);
     fs::copy(GetTestFile(apex_name), GetStagedDir(session_id));
-    auto result = ApexSession::CreateSession(session_id);
+    auto result = session_manager_->CreateSession(session_id);
     result->SetBuildFingerprint(GetProperty("ro.build.fingerprint", ""));
     return result;
   }
@@ -248,11 +253,17 @@ class ApexdUnitTest : public ::testing::Test {
     ASSERT_EQ(mkdir(hash_tree_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(staged_session_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(metadata_sepolicy_staged_dir_.c_str(), 0755), 0);
+    ASSERT_EQ(mkdir(sessions_metadata_dir_.c_str(), 0755), 0);
 
-    DeleteDirContent(ApexSession::GetSessionsDir());
+    // We don't really need for all the test cases, but until we refactor apexd
+    // to use dependency injection instead of this SetConfig approach, it is not
+    // trivial to figure out which test cases need the session manager, so we
+    // initialize it for all of them.
+    InitializeSessionManager(GetSessionManager());
+    DeleteDirContent(GetSessionsDir());
   }
 
-  void TearDown() override { DeleteDirContent(ApexSession::GetSessionsDir()); }
+  void TearDown() override { DeleteDirContent(GetSessionsDir()); }
 
  protected:
   TemporaryDir td_;
@@ -264,6 +275,9 @@ class ApexdUnitTest : public ::testing::Test {
 
   std::string staged_session_dir_;
   std::string metadata_sepolicy_staged_dir_;
+  std::string sessions_metadata_dir_;
+  std::unique_ptr<ApexSessionManager> session_manager_;
+
   ApexdConfig config_;
 };
 
@@ -4401,7 +4415,7 @@ TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent) {
 
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("APEX build fingerprint has changed"));
 }
@@ -4414,7 +4428,7 @@ TEST_F(ApexActivationFailureTests, ApexFileMissingInStagingDirectory) {
 
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("No APEX packages found"));
 }
@@ -4426,7 +4440,7 @@ TEST_F(ApexActivationFailureTests, MultipleApexFileInStagingDirectory) {
 
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("More than one APEX package found"));
 }
@@ -4438,7 +4452,7 @@ TEST_F(ApexActivationFailureTests, CorruptedSuperblockApexCannotBeStaged) {
 
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("Couldn't find filesystem magic"));
 }
@@ -4449,7 +4463,7 @@ TEST_F(ApexActivationFailureTests, CorruptedApexCannotBeStaged) {
 
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("Activation failed for packages"));
 }
@@ -4466,7 +4480,7 @@ TEST_F(ApexActivationFailureTests, ActivatePackageImplFails) {
   UnmountOnTearDown(shim_path);
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("Failed to activate packages"));
   ASSERT_THAT(apex_session->GetErrorMessage(),
@@ -4490,7 +4504,7 @@ TEST_F(ApexActivationFailureTests,
   UnmountOnTearDown(pre_installed_apex);
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
   ASSERT_EQ(apex_session->GetState(), SessionState::ACTIVATION_FAILED);
   ASSERT_THAT(
       apex_session->GetErrorMessage(),
@@ -4514,7 +4528,7 @@ TEST_F(ApexActivationFailureTests, StagedSessionRevertsWhenInFsRollbackMode) {
   UnmountOnTearDown(pre_installed_apex);
   OnStart();
 
-  apex_session = ApexSession::GetSession(123);
+  apex_session = GetSessionManager()->GetSession(123);
   ASSERT_EQ(apex_session->GetState(), SessionState::REVERTED);
 }
 
@@ -4704,7 +4718,7 @@ TEST_F(ApexdUnitTest, RevertStoresCrashingNativeProcess) {
               Ok());
 
   ASSERT_THAT(RevertActiveSessions("test_process", ""), Ok());
-  apex_session = ApexSession::GetSession(1543);
+  apex_session = GetSessionManager()->GetSession(1543);
   ASSERT_THAT(apex_session, Ok());
   ASSERT_EQ(apex_session->GetCrashingNativeProcess(), "test_process");
 }
@@ -4849,7 +4863,7 @@ TEST_F(ApexdMountTest, ActivatesStagedSession) {
 
   // Quick check that session was activated
   {
-    auto session = ApexSession::GetSession(37);
+    auto session = GetSessionManager()->GetSession(37);
     ASSERT_THAT(session, Ok());
     ASSERT_EQ(session->GetState(), SessionState::ACTIVATED);
   }
@@ -4880,7 +4894,7 @@ TEST_F(ApexdMountTest, FailsToActivateStagedSession) {
 
   // Quick check that session was activated
   {
-    auto session = ApexSession::GetSession(73);
+    auto session = GetSessionManager()->GetSession(73);
     ASSERT_THAT(session, Ok());
     ASSERT_NE(session->GetState(), SessionState::ACTIVATED);
   }

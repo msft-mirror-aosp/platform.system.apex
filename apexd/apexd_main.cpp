@@ -60,6 +60,13 @@ int HandleSubcommand(char** argv) {
       android::apex::InitializeVold(&*vold_service_st);
     }
 
+    // We are running regular apexd, which starts after /metadata/apex/sessions
+    // and /data/apex/sessions have been created by init. It is safe to create
+    // ApexSessionManager.
+    auto session_manager = android::apex::ApexSessionManager::Create(
+        android::apex::GetSessionsDir());
+    android::apex::InitializeSessionManager(session_manager.get());
+
     int result = android::apex::SnapshotOrRestoreDeUserData();
 
     if (result == 0) {
@@ -132,6 +139,13 @@ int main(int /*argc*/, char** argv) {
     return HandleSubcommand(argv);
   }
 
+  // We are running regular apexd, which starts after /metadata/apex/sessions
+  // and /data/apex/sessions have been created by init. It is safe to create
+  // ApexSessionManager.
+  auto session_manager = android::apex::ApexSessionManager::Create(
+      android::apex::GetSessionsDir());
+  android::apex::InitializeSessionManager(session_manager.get());
+
   android::base::Result<android::apex::VoldCheckpointInterface>
       vold_service_st = android::apex::VoldCheckpointInterface::Create();
   android::apex::VoldCheckpointInterface* vold_service = nullptr;
@@ -144,7 +158,9 @@ int main(int /*argc*/, char** argv) {
   android::apex::Initialize(vold_service);
 
   if (booting) {
-    if (auto res = android::apex::MigrateSessionsDirIfNeeded(); !res.ok()) {
+    auto res = session_manager->MigrateFromOldSessionsDir(
+        android::apex::kOldApexSessionsDir);
+    if (!res.ok()) {
       LOG(ERROR) << "Failed to migrate sessions to /metadata partition : "
                  << res.error();
     }

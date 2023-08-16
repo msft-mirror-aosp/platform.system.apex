@@ -140,16 +140,14 @@ android::base::Result<void> DestroyCeSnapshotsNotSpecified(
 int OnBootstrap();
 // Sets the values of gVoldService and gInFsCheckpointMode.
 void InitializeVold(CheckpointInterface* checkpoint_service);
+// Sets the value of gSessionManager.
+void InitializeSessionManager(ApexSessionManager* session_manager);
 // Initializes in-memory state (e.g. pre-installed data, activated apexes).
 // Must be called first before calling any other boot sequence related function.
 void Initialize(CheckpointInterface* checkpoint_service);
 // Initializes data apex as in-memory state. Should be called only if we are
 // not booting, since initialization timing is different when booting
 void InitializeDataApex();
-// Migrates sessions from /data/apex/session to /metadata/session.i
-// Must only be called during boot (i.e apexd.status is not "ready" or
-// "activated").
-android::base::Result<void> MigrateSessionsDirIfNeeded();
 // Apex activation logic. Scans staged apex sessions and activates apexes.
 // Must only be called during boot (i.e apexd.status is not "ready" or
 // "activated").
