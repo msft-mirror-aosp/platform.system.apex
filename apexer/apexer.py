@@ -111,8 +111,8 @@ def ParseArgs(argv):
       metavar='TYPE',
       required=False,
       default='image',
-      choices=['zip', 'image'],
-      help='type of APEX payload being built "zip" or "image"')
+      choices=['image'],
+      help='type of APEX payload being built..')
   parser.add_argument(
       '--payload_fs_type',
       metavar='FS_TYPE',
@@ -341,29 +341,28 @@ def ValidateArgs(args):
     args.payload_only = True;
     args.unsigned_payload = True;
 
-  if args.payload_type == 'image':
-    if not args.key and not args.unsigned_payload:
-      print('Missing --key {keyfile} argument!')
+  if not args.key and not args.unsigned_payload:
+    print('Missing --key {keyfile} argument!')
+    return False
+
+  if not args.file_contexts:
+    if build_info is not None:
+      with tempfile.NamedTemporaryFile(delete=False) as temp:
+        temp.write(build_info.file_contexts)
+        args.file_contexts = temp.name
+    else:
+      print('Missing --file_contexts {contexts} argument, or a --build_info argument!')
       return False
 
-    if not args.file_contexts:
+  if not args.canned_fs_config:
+    if not args.canned_fs_config:
       if build_info is not None:
         with tempfile.NamedTemporaryFile(delete=False) as temp:
-          temp.write(build_info.file_contexts)
-          args.file_contexts = temp.name
+          temp.write(build_info.canned_fs_config)
+          args.canned_fs_config = temp.name
       else:
-        print('Missing --file_contexts {contexts} argument, or a --build_info argument!')
+        print('Missing ----canned_fs_config {config} argument, or a --build_info argument!')
         return False
-
-    if not args.canned_fs_config:
-      if not args.canned_fs_config:
-        if build_info is not None:
-          with tempfile.NamedTemporaryFile(delete=False) as temp:
-            temp.write(build_info.canned_fs_config)
-            args.canned_fs_config = temp.name
-        else:
-          print('Missing ----canned_fs_config {config} argument, or a --build_info argument!')
-          return False
 
   if not args.target_sdk_version:
     if build_info is not None:
@@ -718,20 +717,10 @@ def CreateApexPayload(args, work_dir, content_dir, manifests_dir,
   Returns:
     payload file
   """
-  if args.payload_type == 'image':
-    img_file = os.path.join(content_dir, 'apex_payload.img')
-    CreateImage(args, work_dir, manifests_dir, img_file)
-    if not args.unsigned_payload:
-      SignImage(args, manifest_apex, img_file)
-  else:
-    img_file = os.path.join(content_dir, 'apex_payload.zip')
-    cmd = ['soong_zip']
-    cmd.extend(['-o', img_file])
-    cmd.extend(['-C', args.input_dir])
-    cmd.extend(['-D', args.input_dir])
-    cmd.extend(['-C', manifests_dir])
-    cmd.extend(['-D', manifests_dir])
-    RunCommand(cmd, args.verbose)
+  img_file = os.path.join(content_dir, 'apex_payload.img')
+  CreateImage(args, work_dir, manifests_dir, img_file)
+  if not args.unsigned_payload:
+    SignImage(args, manifest_apex, img_file)
   return img_file
 
 

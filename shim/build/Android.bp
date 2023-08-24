@@ -252,6 +252,7 @@ genrule {
   name: "generate_hash_v1",
   srcs: [
     ":com.android.apex.cts.shim.v2",
+    ":com.android.apex.cts.shim.v2_add_apk_to_apex",
     ":com.android.apex.cts.shim.v2_without_apk_in_apex",
     ":com.android.apex.cts.shim.v2_additional_file",
     ":com.android.apex.cts.shim.v2_additional_folder",
@@ -619,6 +620,18 @@ apex {
   file_contexts: ":apex.test-file_contexts",
   key: "com.android.apex.cts.shim.key",
   prebuilts: ["hash_of_dev_null"],
+  installable: false,
+  updatable: false,
+}
+
+// Apex shim for running a new app in an apex
+apex {
+  name: "com.android.apex.cts.shim.v2_add_apk_to_apex",
+  manifest: "manifest_v2.json",
+  file_contexts: ":apex.test-file_contexts",
+  key: "com.android.apex.cts.shim.key",
+  prebuilts: ["hash_of_dev_null"],
+  apps: ["CtsShimAddApkToApex"],
   installable: false,
   updatable: false,
 }
