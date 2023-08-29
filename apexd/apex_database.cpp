@@ -258,9 +258,8 @@ Result<MountedApexData> ResolveMountInfo(
 // Device name can be retrieved from
 // /sys/block/dm-Y/dm/name.
 
-// By synchronizing the mounts info with Database on startup,
-// Apexd serves the correct package list even on the devices
-// which are not ro.apex.updatable.
+// Need to read /proc/mounts on startup since apexd can start
+// at any time (It's a lazy service).
 void MountedApexDatabase::PopulateFromMounts(
     const std::string& active_apex_dir, const std::string& decompression_dir,
     const std::string& apex_hash_tree_dir) REQUIRES(!mounted_apexes_mutex_) {
