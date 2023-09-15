@@ -58,7 +58,7 @@ BinderStatus CheckCallerIsRoot(const std::string& name) {
   if (uid != AID_ROOT) {
     std::string msg = "Only root is allowed to call " + name;
     return BinderStatus::fromExceptionCode(BinderStatus::EX_SECURITY,
-                                           String8(name.c_str()));
+                                           String8(msg.c_str()));
   }
   return BinderStatus::ok();
 }
@@ -68,7 +68,7 @@ BinderStatus CheckCallerSystemOrRoot(const std::string& name) {
   if (uid != AID_ROOT && uid != AID_SYSTEM) {
     std::string msg = "Only root and system_server are allowed to call " + name;
     return BinderStatus::fromExceptionCode(BinderStatus::EX_SECURITY,
-                                           String8(name.c_str()));
+                                           String8(msg.c_str()));
   }
   return BinderStatus::ok();
 }

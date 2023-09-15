@@ -113,7 +113,7 @@ class ApexSessionManager {
       const std::string& old_sessions_base_dir);
 
  private:
-  ApexSessionManager(std::string sessions_base_dir);
+  explicit ApexSessionManager(std::string sessions_base_dir);
   ApexSessionManager(const ApexSessionManager&) = delete;
   ApexSessionManager& operator=(const ApexSessionManager&) = delete;
 

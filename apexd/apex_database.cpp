@@ -265,8 +265,6 @@ void MountedApexDatabase::PopulateFromMounts(
     const std::string& apex_hash_tree_dir) REQUIRES(!mounted_apexes_mutex_) {
   LOG(INFO) << "Populating APEX database from mounts...";
 
-  std::unordered_map<std::string, int> active_versions;
-
   std::ifstream mounts("/proc/mounts");
   std::string line;
   std::lock_guard lock(mounted_apexes_mutex_);
