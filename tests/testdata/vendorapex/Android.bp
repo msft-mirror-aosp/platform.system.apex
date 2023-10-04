@@ -204,7 +204,7 @@ prebuilt_etc {
 
 // Creates wifi test apex where its vintf fragment has invalid XML syntax
 //    (an unclosed tag)
-apex {
+apex_test {
     name: "test.bad2.com.android.hardware.wifi",
     manifest: "wifi_manifest_rebootless.json",
     key: "com.android.hardware.wifi.key",
@@ -230,7 +230,7 @@ prebuilt_etc {
 // Creates wifi test apex that is updating interface for other hardware
 //    (picked an HAL that exists elsewhere, and for hardware that has
 //     updatable-via-apex="true", and still gets caught - good!)
-apex {
+apex_test {
     name: "test.bad3.com.android.hardware.wifi",
     manifest: "wifi_manifest_rebootless.json",
     key: "com.android.hardware.wifi.key",
@@ -276,4 +276,25 @@ prebuilt_etc {
     src: "vintf_fragment_wifi_service.xml",
     installable: false,
     sub_dir: "vintf", // Puts fragment into etc/vintf
+}
+
+prebuilt_etc {
+    name: "apex_vendor_foo_bootstrap.rc",
+    src: "apex_vendor_foo_bootstrap.rc",
+    vendor: true,
+    installable: false,
+}
+
+apex {
+    name: "com.android.apex.vendor.foo.bootstrap",
+    defaults: [
+        "com.android.apex.vendor.foo.defaults",
+    ],
+    binaries: [
+        "apex_vendor_foo",
+    ],
+    prebuilts: [
+        "apex_vendor_foo_bootstrap.rc",
+    ],
+    manifest: "manifest_bootstrap.json",
 }

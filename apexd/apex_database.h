@@ -49,7 +49,7 @@ class MountedApexDatabase {
     // Whether the mount is a temp mount or not.
     bool is_temp_mount;
 
-    MountedApexData() {}
+    MountedApexData() : deleted(false), is_temp_mount(false) {}
     MountedApexData(int version, const std::string& loop_name,
                     const std::string& full_path,
                     const std::string& mount_point,
@@ -62,6 +62,7 @@ class MountedApexDatabase {
           mount_point(mount_point),
           device_name(device_name),
           hashtree_loop_name(hashtree_loop_name),
+          deleted(false),
           is_temp_mount(is_temp_mount) {}
 
     inline bool operator<(const MountedApexData& rhs) const {

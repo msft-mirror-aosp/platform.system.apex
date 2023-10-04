@@ -4,7 +4,12 @@
       "name": "libapexsupport.ffi.tests"
     },
     {
-      "name": "libapexsupport-tests.sh"
+      "name": "libapexsupport-tests-vendor"
+    }
+  ],
+  "postsubmit": [
+    {
+      "name": "libapexsupport-tests-apex"
     }
   ]
 }

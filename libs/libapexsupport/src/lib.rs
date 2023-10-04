@@ -23,10 +23,9 @@ use std::ffi::c_char;
 
 /// NOTE: Keep these constants in sync with apexsupport.h
 const AAPEXINFO_OK: i32 = 0;
-const AAPEXINFO_NULL: i32 = 1;
-const AAPEXINFO_NO_APEX: i32 = 2;
-const AAPEXINFO_ERROR_GET_EXECUTABLE_PATH: i32 = 3;
-const AAPEXINFO_INALID_APEX: i32 = 4;
+const AAPEXINFO_NO_APEX: i32 = 1;
+const AAPEXINFO_ERROR_GET_EXECUTABLE_PATH: i32 = 2;
+const AAPEXINFO_INALID_APEX: i32 = 3;
 
 fn as_error_code(err: &AApexInfoError) -> i32 {
     match err {
@@ -41,17 +40,14 @@ fn as_error_code(err: &AApexInfoError) -> i32 {
 ///
 /// # Safety
 ///
-/// The provided pointer must be a valid object.
+/// The provided pointer must be valid and have no aliases for the duration of the call.
 pub unsafe extern "C" fn AApexInfo_create(out: *mut *mut AApexInfo) -> i32 {
-    if out.is_null() {
-        // TODO(b/271488212): Use Rust logger.
-        eprintln!("AApexInfo_create() is called with nullptr.");
-        return AAPEXINFO_NULL;
-    }
-    let out = unsafe { out.as_mut().unwrap() };
     match AApexInfo::create() {
         Ok(info) => {
-            *out = Box::into_raw(Box::new(info));
+            let ptr = Box::into_raw(Box::new(info));
+            // SAFETY: We have checked that `out` is not null, so the caller guarantees that it is
+            // valid and unaliased.
+            unsafe { *out = ptr };
             AAPEXINFO_OK
         }
         Err(err) => {
@@ -63,43 +59,37 @@ pub unsafe extern "C" fn AApexInfo_create(out: *mut *mut AApexInfo) -> i32 {
 }
 
 #[no_mangle]
-/// Destroys AApexInfo object created by AApexInfo_create(). No-op when called
-/// with null pointer.
+/// Destroys AApexInfo object created by AApexInfo_create().
 ///
 /// # Safety
 ///
-/// The provided pointer must point to a valid object or null pointer.
+/// The provided pointer must point to a valid object previously allocated by
+/// `AApexInfo_create` (and not yet destroyed).
 pub unsafe extern "C" fn AApexInfo_destroy(info: *mut AApexInfo) {
-    if info.is_null() {
-        return;
-    }
+    // SAFETY: The pointer is not null, so the caller guarantees that it was previously returned by
+    // AApexInfo_create. AApexInfo_create got the pointer from `Box::into_raw`, so converting it
+    // back with `Box::from_raw` is valid.
     unsafe { drop(Box::from_raw(info)) };
 }
 
 #[no_mangle]
-/// Returns a C-string for APEX name. Nullptr if null is given as AApexInfo.
+/// Returns a C-string for APEX name.
 ///
 /// # Safety
 ///
-/// The provided pointer must point to a valid object or null pointer.
+/// The provided pointer must point to a valid object.
 pub unsafe extern "C" fn AApexInfo_getName(info: *const AApexInfo) -> *const c_char {
-    if info.is_null() {
-        return std::ptr::null();
-    }
-    let info = unsafe { &*info };
-    info.name.as_ptr()
+    // SAFETY: The pointer is not null, so the caller guarantees that it is valid.
+    unsafe { (*info).name.as_ptr() }
 }
 
 #[no_mangle]
-/// Returns a version of the APEX. -1 if null is given as AApexInfo.
+/// Returns a version of the APEX.
 ///
 /// # Safety
 ///
-/// The provided pointer must point to a valid object or null pointer.
+/// The provided pointer must point to a valid object.
 pub unsafe extern "C" fn AApexInfo_getVersion(info: *const AApexInfo) -> i64 {
-    if info.is_null() {
-        return -1;
-    }
-    let info = unsafe { &*info };
-    info.version
+    // SAFETY: The pointer is not null, so the caller guarantees that it is valid.
+    unsafe { (*info).version }
 }

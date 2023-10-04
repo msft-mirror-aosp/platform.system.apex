@@ -24,6 +24,8 @@ import static org.junit.Assume.assumeTrue;
 import android.cts.install.lib.host.InstallUtilsHost;
 import android.platform.test.annotations.LargeTest;
 
+import com.android.apex.ApexInfo;
+import com.android.apex.XmlParser;
 import com.android.compatibility.common.tradefed.build.CompatibilityBuildHelper;
 import com.android.tradefed.testtype.DeviceJUnit4ClassRunner;
 import com.android.tradefed.testtype.junit4.BaseHostJUnit4Test;
@@ -35,8 +37,12 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import static java.util.stream.Collectors.toList;
+
 import java.io.File;
+import java.io.FileInputStream;
 import java.nio.file.Paths;
+import java.util.List;
 
 @RunWith(DeviceJUnit4ClassRunner.class)
 public class VendorApexTests extends BaseHostJUnit4Test {
@@ -106,6 +112,38 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     public void testRestartServiceAfterRebootlessUpdate() throws Exception {
         pushPreinstalledApex("com.android.apex.vendor.foo.v1_with_service.apex");
         runPhase("testRestartServiceAfterRebootlessUpdate");
+    }
+
+    @Test
+    @LargeTest
+    public void testVendorBootstrapApex() throws Exception {
+        pushPreinstalledApex("com.android.apex.vendor.foo.bootstrap.apex");
+
+        // Now there should be "com.android.apex.vendor.foo" activated as an
+        // bootstrap apex, listed in apex-info-list in the bootstrap mount namespace.
+        try (FileInputStream fis = new FileInputStream(
+                getDevice().pullFile("/bootstrap-apex/apex-info-list.xml"))) {
+            List<String> names = XmlParser.readApexInfoList(fis)
+                    .getApexInfo()
+                    .stream()
+                    .map(ApexInfo::getModuleName)
+                    .collect(toList());
+            assertThat(names).contains("com.android.apex.vendor.foo");
+        }
+
+        // And also the `early_hal` service in the apex (apex_vendor_foo) should
+        // be started in the bootstrap mount namespace.
+        assertThat(getMountNamespaceFor("$(pidof apex_vendor_foo)"))
+            .isEqualTo(getMountNamespaceFor("$(pidof vold)"));
+    }
+
+    private String getMountNamespaceFor(String proc) throws Exception {
+        CommandResult result =
+                getDevice().executeShellV2Command("readlink /proc/" + proc + "/ns/mnt");
+        if (result.getStatus() != CommandStatus.SUCCESS) {
+            throw new RuntimeException("failed to read namespace for " + proc);
+        }
+        return result.getStdout().trim();
     }
 
     private void pushPreinstalledApex(String fileName) throws Exception {

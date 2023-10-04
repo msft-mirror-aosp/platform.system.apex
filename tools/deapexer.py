@@ -258,8 +258,12 @@ class Apex(object):
       subprocess.run([self._fsckerofs, '--extract=%s' % (dest), '--overwrite', self._payload],
                      stdout=subprocess.DEVNULL, check=True)
     elif self._payload_fs_type == 'ext4':
-      subprocess.run([self._debugfs, '-R', 'rdump ./ %s' % (dest), self._payload],
-                     stdout=subprocess.DEVNULL, check=True)
+      # Suppress stderr without failure
+      try:
+        subprocess.run([self._debugfs, '-R', 'rdump ./ %s' % (dest), self._payload],
+                       capture_output=True, check=True)
+      except subprocess.CalledProcessError as e:
+        sys.exit(e.stderr)
     else:
       # TODO(b/279688635) f2fs is not supported yet.
       sys.exit(f"{self._payload_fs_type} is not supported for `extract`.")
