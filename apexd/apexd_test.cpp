@@ -143,8 +143,6 @@ class ApexdUnitTest : public ::testing::Test {
     ota_reserved_dir_ = StringPrintf("%s/ota-reserved", td_.path);
     hash_tree_dir_ = StringPrintf("%s/apex-hash-tree", td_.path);
     staged_session_dir_ = StringPrintf("%s/staged-session-dir", td_.path);
-    metadata_sepolicy_staged_dir_ =
-        StringPrintf("%s/metadata-sepolicy-staged-dir", td_.path);
 
     sessions_metadata_dir_ =
         StringPrintf("%s/metadata-staged-session-dir", td_.path);
@@ -157,7 +155,6 @@ class ApexdUnitTest : public ::testing::Test {
                ota_reserved_dir_.c_str(),
                hash_tree_dir_.c_str(),
                staged_session_dir_.c_str(),
-               metadata_sepolicy_staged_dir_.c_str(),
                kTestVmPayloadMetadataPartitionProp,
                kTestActiveApexSelinuxCtx};
   }
@@ -170,9 +167,6 @@ class ApexdUnitTest : public ::testing::Test {
   const std::string GetStagedDir(int session_id) {
     return StringPrintf("%s/session_%d", staged_session_dir_.c_str(),
                         session_id);
-  }
-  const std::string& GetMetadataSepolicyStagedDir() {
-    return metadata_sepolicy_staged_dir_;
   }
   ApexSessionManager* GetSessionManager() { return session_manager_.get(); }
 
@@ -252,7 +246,6 @@ class ApexdUnitTest : public ::testing::Test {
     ASSERT_EQ(mkdir(ota_reserved_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(hash_tree_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(staged_session_dir_.c_str(), 0755), 0);
-    ASSERT_EQ(mkdir(metadata_sepolicy_staged_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(sessions_metadata_dir_.c_str(), 0755), 0);
 
     // We don't really need for all the test cases, but until we refactor apexd
@@ -274,7 +267,6 @@ class ApexdUnitTest : public ::testing::Test {
   std::string hash_tree_dir_;
 
   std::string staged_session_dir_;
-  std::string metadata_sepolicy_staged_dir_;
   std::string sessions_metadata_dir_;
   std::unique_ptr<ApexSessionManager> session_manager_;
 
@@ -4368,42 +4360,6 @@ TEST_F(ApexdMountTest, AddBlockApexFailsWithCompressedDuplicate) {
   ASSERT_THAT(android::apex::AddBlockApex(instance),
               HasError(WithMessage(HasSubstr(
                   "duplicate of com.android.apex.compressed found"))));
-}
-
-TEST_F(ApexdMountTest, CopySepolicyToMetadata) {
-  std::string file_path = AddPreInstalledApex("com.android.sepolicy.apex");
-  ASSERT_THAT(
-      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
-      Ok());
-  ASSERT_THAT(ActivatePackage(file_path), Ok());
-  UnmountOnTearDown(file_path);
-  ASSERT_THAT(CreateStagedSession("com.android.sepolicy.apex", 666), Ok());
-
-  ASSERT_THAT(
-      SubmitStagedSession(666, {}, /* has_rollback_enabled= */ false,
-                          /* is_rollback= */ false, /* rollback_id= */ -1),
-      Ok());
-
-  auto staged_dir = GetMetadataSepolicyStagedDir();
-  ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip"), HasValue(true));
-  ASSERT_THAT(PathExists(staged_dir + "/SEPolicy.zip.sig"), HasValue(true));
-}
-
-TEST_F(ApexdMountTest, AbortSepolicyApexInstall) {
-  std::string file_path = AddPreInstalledApex("com.android.sepolicy.apex");
-  ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
-  ASSERT_THAT(CreateStagedSession("com.android.sepolicy.apex", 666), Ok());
-  ASSERT_THAT(
-      SubmitStagedSession(666, {}, /* has_rollback_enabled= */ false,
-                          /* is_rollback= */ false, /* rollback_id= */ -1),
-      Ok());
-
-  auto staged_dir = GetMetadataSepolicyStagedDir();
-  ASSERT_THAT(PathExists(staged_dir), HasValue(true));
-  ASSERT_FALSE(IsEmptyDirectory(staged_dir));
-
-  ASSERT_THAT(AbortStagedSession(666), Ok());
-  ASSERT_THAT(PathExists(staged_dir), HasValue(false));
 }
 
 class ApexActivationFailureTests : public ApexdMountTest {};

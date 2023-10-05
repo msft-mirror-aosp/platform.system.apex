@@ -19,6 +19,9 @@
 
 __BEGIN_DECLS
 
+// TODO(b/302088370) Fix this when __ANDROID_API_V__ is released
+#define AAPEXSUPPORT_API __ANDROID_API_FUTURE__
+
 /**
  * AApexInfo represents an information object for an APEX including name
  * and version.
