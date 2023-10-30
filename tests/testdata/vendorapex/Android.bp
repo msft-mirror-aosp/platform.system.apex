@@ -182,8 +182,8 @@ apex {
 apex {
     name: "test.bad1.com.android.hardware.wifi",
     manifest: "wifi_manifest_rebootless.json",
-    key: "com.android.hardware.wifi.key",
-    certificate: ":com.android.hardware.wifi.certificate",
+    key: "com.android.hardware.key",
+    certificate: ":com.android.hardware.certificate",
     file_contexts: "wifi_file_contexts",
     use_vndk_as_stable: true,
     updatable: false,
@@ -207,8 +207,8 @@ prebuilt_etc {
 apex_test {
     name: "test.bad2.com.android.hardware.wifi",
     manifest: "wifi_manifest_rebootless.json",
-    key: "com.android.hardware.wifi.key",
-    certificate: ":com.android.hardware.wifi.certificate",
+    key: "com.android.hardware.key",
+    certificate: ":com.android.hardware.certificate",
     file_contexts: "wifi_file_contexts",
     use_vndk_as_stable: true,
     updatable: false,
@@ -233,8 +233,8 @@ prebuilt_etc {
 apex_test {
     name: "test.bad3.com.android.hardware.wifi",
     manifest: "wifi_manifest_rebootless.json",
-    key: "com.android.hardware.wifi.key",
-    certificate: ":com.android.hardware.wifi.certificate",
+    key: "com.android.hardware.key",
+    certificate: ":com.android.hardware.certificate",
     file_contexts: "wifi_file_contexts",
     use_vndk_as_stable: true,
     updatable: false,
@@ -258,8 +258,8 @@ prebuilt_etc {
 apex {
     name: "test.good1.com.android.hardware.wifi",
     manifest: "wifi_manifest_rebootless.json",
-    key: "com.android.hardware.wifi.key",
-    certificate: ":com.android.hardware.wifi.certificate",
+    key: "com.android.hardware.key",
+    certificate: ":com.android.hardware.certificate",
     file_contexts: "wifi_file_contexts",
     use_vndk_as_stable: true,
     updatable: false,
