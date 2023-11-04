@@ -133,6 +133,9 @@ genrule_defaults {
     tools: apexer_deps_tools + [
         "signapk",
     ],
+    srcs: [
+        ":current_android_jar",
+    ],
 }
 
 genrule {
