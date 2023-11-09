@@ -37,6 +37,23 @@ python_binary_host {
 }
 
 python_binary_host {
+    name: "apex_elf_checker",
+    srcs: [
+        "apex_elf_checker.py",
+    ],
+    version: {
+        py3: {
+            embedded_launcher: true,
+        },
+    },
+    required: [
+        "blkid_static",
+        "debugfs_static",
+        "fsck.erofs",
+    ],
+}
+
+python_binary_host {
     name: "apex_compression_tool",
     srcs: [
         "apex_compression_tool.py",
