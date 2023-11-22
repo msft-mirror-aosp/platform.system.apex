@@ -20,6 +20,7 @@ apexer_tools = [
       "apexer",
       "aapt2",
       "avbtool",
+      "conv_apex_manifest",
       "e2fsdroid",
       "mke2fs",
       "resize2fs",
@@ -112,6 +113,7 @@ python_test_host {
         "testdata/com.android.example.apex.pem",
         "testdata/com.android.example.apex.pk8",
         "testdata/com.android.example.apex.x509.pem",
+        "testdata/manifest.json",
     ],
     test_suites: ["general-tests"],
     libs: [
@@ -132,6 +134,9 @@ genrule_defaults {
     name: "apexer_test_host_tools_list",
     tools: apexer_deps_tools + [
         "signapk",
+    ],
+    srcs: [
+        ":current_android_jar",
     ],
 }
 
@@ -159,6 +164,7 @@ genrule {
         "mkdir -p $$LIB && " +
         "cp $(in) $$BIN && " +
         "cp $(location apexer) $$BIN && " +
+        "cp $(location conv_apex_manifest) $$BIN && " +
         "cp $(location deapexer) $$BIN && " +
         "cp $(location avbtool) $$BIN && " +
         "cp $(location aapt2) $$BIN && " +
