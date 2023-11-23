@@ -113,6 +113,7 @@ python_test_host {
         "testdata/com.android.example.apex.pem",
         "testdata/com.android.example.apex.pk8",
         "testdata/com.android.example.apex.x509.pem",
+        "testdata/manifest.json",
     ],
     test_suites: ["general-tests"],
     libs: [
