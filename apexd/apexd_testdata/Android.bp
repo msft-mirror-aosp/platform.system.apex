@@ -106,9 +106,9 @@ genrule {
   out: ["com.android.apex.compressed_different_key.capex"],
   srcs: [":apex.apexd_test_no_inst_key"],
   tools: ["soong_zip", "zipalign", "conv_apex_manifest", "apex_compression_tool", "avbtool"],
-  cmd: "unzip -q $(in) -d $(genDir) && " +
-       "$(location conv_apex_manifest) setprop name com.android.apex.compressed $(genDir)/apex_manifest.pb && " +
-       "$(location soong_zip) -d -C $(genDir) -D $(genDir) " +
+  cmd: "mkdir $(genDir)/tempdir && unzip -q $(in) -d $(genDir)/tempdir && " +
+       "$(location conv_apex_manifest) setprop name com.android.apex.compressed $(genDir)/tempdir/apex_manifest.pb && " +
+       "$(location soong_zip) -d -C $(genDir)/tempdir -D $(genDir)/tempdir " +
        "-s apex_manifest.pb -s apex_payload.img -s apex_pubkey " +
        "-o $(genDir)/unaligned.apex && " +
        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex " +
