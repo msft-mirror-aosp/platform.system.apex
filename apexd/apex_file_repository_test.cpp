@@ -591,21 +591,32 @@ TEST(ApexFileRepositoryTest, GetPreInstalledApexNoSuchApexAborts) {
 struct ApexFileRepositoryTestAddBlockApex : public ::testing::Test {
   TemporaryDir test_dir;
 
+  struct ApexMetadata {
+    std::string public_key;
+    std::string root_digest;
+    int64_t last_update_seconds;
+    bool is_factory = true;
+    int64_t manifest_version;
+    std::string manifest_name;
+  };
+
   struct PayloadMetadata {
     android::microdroid::Metadata metadata;
     std::string path;
     PayloadMetadata(const std::string& path) : path(path) {}
+    PayloadMetadata& apex(const std::string& name) {
+      return apex(name, ApexMetadata{});
+    }
     PayloadMetadata& apex(const std::string& name,
-                          const std::string& public_key = "",
-                          const std::string& root_digest = "",
-                          int64_t last_update_seconds = 0,
-                          bool is_factory = true) {
+                          const ApexMetadata& apex_metadata) {
       auto apex = metadata.add_apexes();
       apex->set_name(name);
-      apex->set_public_key(public_key);
-      apex->set_root_digest(root_digest);
-      apex->set_last_update_seconds(last_update_seconds);
-      apex->set_is_factory(is_factory);
+      apex->set_public_key(apex_metadata.public_key);
+      apex->set_root_digest(apex_metadata.root_digest);
+      apex->set_last_update_seconds(apex_metadata.last_update_seconds);
+      apex->set_is_factory(apex_metadata.is_factory);
+      apex->set_manifest_version(apex_metadata.manifest_version);
+      apex->set_manifest_name(apex_metadata.manifest_name);
       return *this;
     }
     ~PayloadMetadata() {
@@ -731,8 +742,9 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, GetBlockApexRootDigest) {
       reinterpret_cast<const uint8_t*>(root_digest.data()), root_digest.size());
 
   // metadata lists "foo"
-  PayloadMetadata(metadata_partition_path)
-      .apex(test_apex_foo, /*public_key=*/"", root_digest);
+  ApexMetadata apex_metadata;
+  apex_metadata.root_digest = root_digest;
+  PayloadMetadata(metadata_partition_path).apex(test_apex_foo, apex_metadata);
   auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
 
   // call ApexFileRepository::AddBlockApex()
@@ -756,9 +768,9 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, GetBlockApexLastUpdateSeconds) {
   const int64_t last_update_seconds = 123456789;
 
   // metadata lists "foo"
-  PayloadMetadata(metadata_partition_path)
-      .apex(test_apex_foo, /*public_key=*/"", /*root_digest=*/"",
-            last_update_seconds);
+  ApexMetadata apex_metadata;
+  apex_metadata.last_update_seconds = last_update_seconds;
+  PayloadMetadata(metadata_partition_path).apex(test_apex_foo, apex_metadata);
   auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
 
   // call ApexFileRepository::AddBlockApex()
@@ -768,6 +780,36 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, GetBlockApexLastUpdateSeconds) {
 
   ASSERT_EQ(last_update_seconds,
             instance.GetBlockApexLastUpdateSeconds(apex_foo_path));
+}
+
+TEST_F(ApexFileRepositoryTestAddBlockApex, SucceedsWhenMetadataMatches) {
+  // prepare payload disk
+  //  <test-dir>/vdc1 : metadata with apex.apexd_test.apex only
+  //            /vdc2 : apex.apexd_test.apex
+
+  const auto& test_apex_foo = GetTestFile("apex.apexd_test.apex");
+
+  const std::string metadata_partition_path = test_dir.path + "/vdc1"s;
+  const std::string apex_foo_path = test_dir.path + "/vdc2"s;
+
+  std::string public_key;
+  const auto& key_path =
+      GetTestFile("apexd_testdata/com.android.apex.test_package.avbpubkey");
+  ASSERT_TRUE(android::base::ReadFileToString(key_path, &public_key))
+      << "Failed to read " << key_path;
+
+  // metadata lists "foo"
+  ApexMetadata apex_metadata;
+  apex_metadata.public_key = public_key;
+  apex_metadata.manifest_version = 1;
+  apex_metadata.manifest_name = "com.android.apex.test_package";
+  PayloadMetadata(metadata_partition_path).apex(test_apex_foo, apex_metadata);
+  auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
+
+  // call ApexFileRepository::AddBlockApex()
+  ApexFileRepository instance;
+  auto status = instance.AddBlockApex(metadata_partition_path);
+  ASSERT_TRUE(IsOk(status));
 }
 
 TEST_F(ApexFileRepositoryTestAddBlockApex, VerifyPublicKeyWhenAddingBlockApex) {
@@ -781,8 +823,55 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, VerifyPublicKeyWhenAddingBlockApex) {
   const std::string apex_foo_path = test_dir.path + "/vdc2"s;
 
   // metadata lists "foo"
-  PayloadMetadata(metadata_partition_path)
-      .apex(test_apex_foo, /*public_key=*/"wrong public key");
+  ApexMetadata apex_metadata;
+  apex_metadata.public_key = "wrong public key";
+  PayloadMetadata(metadata_partition_path).apex(test_apex_foo, apex_metadata);
+  auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
+
+  // call ApexFileRepository::AddBlockApex()
+  ApexFileRepository instance;
+  auto status = instance.AddBlockApex(metadata_partition_path);
+  ASSERT_FALSE(IsOk(status));
+}
+
+TEST_F(ApexFileRepositoryTestAddBlockApex,
+       VerifyManifestVersionWhenAddingBlockApex) {
+  // prepare payload disk
+  //  <test-dir>/vdc1 : metadata with apex.apexd_test.apex only
+  //            /vdc2 : apex.apexd_test.apex
+
+  const auto& test_apex_foo = GetTestFile("apex.apexd_test.apex");
+
+  const std::string metadata_partition_path = test_dir.path + "/vdc1"s;
+  const std::string apex_foo_path = test_dir.path + "/vdc2"s;
+
+  // metadata lists "foo"
+  ApexMetadata apex_metadata;
+  apex_metadata.manifest_version = 2;
+  PayloadMetadata(metadata_partition_path).apex(test_apex_foo, apex_metadata);
+  auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
+
+  // call ApexFileRepository::AddBlockApex()
+  ApexFileRepository instance;
+  auto status = instance.AddBlockApex(metadata_partition_path);
+  ASSERT_FALSE(IsOk(status));
+}
+
+TEST_F(ApexFileRepositoryTestAddBlockApex,
+       VerifyManifestNameWhenAddingBlockApex) {
+  // prepare payload disk
+  //  <test-dir>/vdc1 : metadata with apex.apexd_test.apex only
+  //            /vdc2 : apex.apexd_test.apex
+
+  const auto& test_apex_foo = GetTestFile("apex.apexd_test.apex");
+
+  const std::string metadata_partition_path = test_dir.path + "/vdc1"s;
+  const std::string apex_foo_path = test_dir.path + "/vdc2"s;
+
+  // metadata lists "foo"
+  ApexMetadata apex_metadata;
+  apex_metadata.manifest_name = "Wrong name";
+  PayloadMetadata(metadata_partition_path).apex(test_apex_foo, apex_metadata);
   auto block_apex1 = WriteBlockApex(test_apex_foo, apex_foo_path);
 
   // call ApexFileRepository::AddBlockApex()
@@ -804,9 +893,9 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, RespectIsFactoryBitFromMetadata) {
 
   for (const bool is_factory : {true, false}) {
     // metadata lists "foo"
-    PayloadMetadata(metadata_partition_path)
-        .apex(test_apex_foo, /*public_key=*/"", /*root_digest=*/"",
-              /*last_update_seconds=*/0, is_factory);
+    ApexMetadata apex_metadata;
+    apex_metadata.is_factory = is_factory;
+    PayloadMetadata(metadata_partition_path).apex(test_apex_foo, apex_metadata);
 
     // call ApexFileRepository::AddBlockApex()
     ApexFileRepository instance;
