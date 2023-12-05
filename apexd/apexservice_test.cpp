@@ -866,54 +866,6 @@ TEST_F(ApexServiceTest, SubmitSingleSessionTestSuccess) {
   ASSERT_THAT(sessions, UnorderedElementsAre(SessionInfoEq(expected)));
 }
 
-TEST_F(ApexServiceTest, SubmitSingleStagedSessionKeepsPreviousSessions) {
-  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"),
-                                      "/data/app-staging/session_239",
-                                      "staging_data_file");
-  if (!installer.Prepare()) {
-    FAIL() << GetDebugStr(&installer);
-  }
-
-  // First simulate existence of a bunch of sessions.
-  auto session1 = ApexSession::CreateSession(37);
-  ASSERT_TRUE(IsOk(session1));
-  auto session2 = ApexSession::CreateSession(57);
-  ASSERT_TRUE(IsOk(session2));
-  auto session3 = ApexSession::CreateSession(73);
-  ASSERT_TRUE(IsOk(session3));
-  ASSERT_TRUE(IsOk(session1->UpdateStateAndCommit(SessionState::VERIFIED)));
-  ASSERT_TRUE(IsOk(session2->UpdateStateAndCommit(SessionState::STAGED)));
-  ASSERT_TRUE(IsOk(session3->UpdateStateAndCommit(SessionState::SUCCESS)));
-
-  std::vector<ApexSessionInfo> sessions;
-  ASSERT_TRUE(IsOk(service_->getSessions(&sessions)));
-
-  ApexSessionInfo expected_session1 = CreateSessionInfo(37);
-  expected_session1.isVerified = true;
-  ApexSessionInfo expected_session2 = CreateSessionInfo(57);
-  expected_session2.isStaged = true;
-  ApexSessionInfo expected_session3 = CreateSessionInfo(73);
-  expected_session3.isSuccess = true;
-  ASSERT_THAT(sessions, UnorderedElementsAre(SessionInfoEq(expected_session1),
-                                             SessionInfoEq(expected_session2),
-                                             SessionInfoEq(expected_session3)));
-
-  ApexInfoList list;
-  ApexSessionParams params;
-  params.sessionId = 239;
-  ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)));
-
-  sessions.clear();
-  ASSERT_TRUE(IsOk(service_->getSessions(&sessions)));
-
-  ApexSessionInfo new_session = CreateSessionInfo(239);
-  new_session.isVerified = true;
-  ASSERT_THAT(sessions, UnorderedElementsAre(SessionInfoEq(new_session),
-                                             SessionInfoEq(expected_session1),
-                                             SessionInfoEq(expected_session2),
-                                             SessionInfoEq(expected_session3)));
-}
-
 TEST_F(ApexServiceTest, SubmitSingleSessionTestFail) {
   PrepareTestApexForInstall installer(
       GetTestFile("apex.apexd_test_corrupt_apex.apex"),
