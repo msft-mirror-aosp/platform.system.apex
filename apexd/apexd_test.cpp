@@ -76,6 +76,7 @@ using com::android::apex::testing::ApexInfoXmlEq;
 using ::testing::ByRef;
 using ::testing::Contains;
 using ::testing::ElementsAre;
+using ::testing::EndsWith;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
 using ::testing::Not;
@@ -227,11 +228,18 @@ class ApexdUnitTest : public ::testing::Test {
     return PrepareCompressedApex(name, built_in_dir_);
   }
 
-  Result<ApexSession> CreateStagedSession(const std::string& apex_name,
-                                          int session_id) {
+  void PrepareStagedSession(const std::string& apex_name, int session_id) {
     CreateDirIfNeeded(GetStagedDir(session_id), 0755);
     fs::copy(GetTestFile(apex_name), GetStagedDir(session_id));
+  }
+
+  Result<ApexSession> CreateStagedSession(const std::string& apex_name,
+                                          int session_id) {
+    PrepareStagedSession(apex_name, session_id);
     auto result = session_manager_->CreateSession(session_id);
+    if (!result.ok()) {
+      return result.error();
+    }
     result->SetBuildFingerprint(GetProperty("ro.build.fingerprint", ""));
     return result;
   }
@@ -4365,19 +4373,30 @@ TEST_F(ApexdMountTest, AddBlockApexFailsWithCompressedDuplicate) {
 class ApexActivationFailureTests : public ApexdMountTest {};
 
 TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->SetBuildFingerprint("wrong fingerprint");
-  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+  ASSERT_RESULT_OK(apex_session->UpdateStateAndCommit(SessionState::STAGED));
 
   OnStart();
 
   apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("APEX build fingerprint has changed"));
 }
 
 TEST_F(ApexActivationFailureTests, ApexFileMissingInStagingDirectory) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
   // Delete the apex file in staging directory
   DeleteDirContent(GetStagedDir(123));
@@ -4385,58 +4404,83 @@ TEST_F(ApexActivationFailureTests, ApexFileMissingInStagingDirectory) {
   OnStart();
 
   apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("No APEX packages found"));
 }
 
 TEST_F(ApexActivationFailureTests, MultipleApexFileInStagingDirectory) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   CreateStagedSession("com.android.apex.compressed.v1_original.apex", 123);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   OnStart();
 
   apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("More than one APEX package found"));
 }
 
 TEST_F(ApexActivationFailureTests, CorruptedSuperblockApexCannotBeStaged) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto apex_session =
       CreateStagedSession("apex.apexd_test_corrupt_superblock_apex.apex", 123);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
+  ASSERT_RESULT_OK(apex_session);
 
   OnStart();
 
   apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("Couldn't find filesystem magic"));
 }
 
 TEST_F(ApexActivationFailureTests, CorruptedApexCannotBeStaged) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto apex_session = CreateStagedSession("corrupted_b146895998.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   OnStart();
 
   apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("Activation failed for packages"));
 }
 
 TEST_F(ApexActivationFailureTests, ActivatePackageImplFails) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
   auto shim_path = AddPreInstalledApex("com.android.apex.cts.shim.apex");
   auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex({GetBuiltInDir()}));
 
   auto apex_session =
       CreateStagedSession("com.android.apex.cts.shim.v2_wrong_sha.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   UnmountOnTearDown(shim_path);
   OnStart();
 
   apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_THAT(apex_session->GetErrorMessage(),
               HasSubstr("Failed to activate packages"));
   ASSERT_THAT(apex_session->GetErrorMessage(),
@@ -4452,15 +4496,17 @@ TEST_F(ApexActivationFailureTests,
 
   auto pre_installed_apex = AddPreInstalledApex("apex.apexd_test.apex");
   auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex({GetBuiltInDir()}));
 
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   UnmountOnTearDown(pre_installed_apex);
   OnStart();
 
   apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_EQ(apex_session->GetState(), SessionState::ACTIVATION_FAILED);
   ASSERT_THAT(
       apex_session->GetErrorMessage(),
@@ -4476,15 +4522,17 @@ TEST_F(ApexActivationFailureTests, StagedSessionRevertsWhenInFsRollbackMode) {
 
   auto pre_installed_apex = AddPreInstalledApex("apex.apexd_test.apex");
   auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex({GetBuiltInDir()}));
 
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   UnmountOnTearDown(pre_installed_apex);
   OnStart();
 
   apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
   ASSERT_EQ(apex_session->GetState(), SessionState::REVERTED);
 }
 
@@ -4884,6 +4932,54 @@ TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
   auto apex_file = ApexFile::Open(preinstalled_apex);
   ASSERT_THAT(apex_file, Ok());
   ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+}
+
+TEST_F(ApexdMountTest, SubmitSingleStagedSessionKeepsPreviousSessions) {
+  MockCheckpointInterface checkpoint_interface;
+  checkpoint_interface.SetSupportsCheckpoint(true);
+  InitializeVold(&checkpoint_interface);
+
+  std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
+
+  ASSERT_RESULT_OK(
+      ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}));
+
+  UnmountOnTearDown(preinstalled_apex);
+
+  // First simulate existence of a bunch of sessions.
+  auto session1 = GetSessionManager()->CreateSession(37);
+  ASSERT_RESULT_OK(session1);
+  ASSERT_RESULT_OK(session1->UpdateStateAndCommit(SessionState::VERIFIED));
+
+  auto session2 = GetSessionManager()->CreateSession(57);
+  ASSERT_RESULT_OK(session2);
+  ASSERT_RESULT_OK(session2->UpdateStateAndCommit(SessionState::STAGED));
+
+  auto session3 = GetSessionManager()->CreateSession(73);
+  ASSERT_RESULT_OK(session3);
+  ASSERT_RESULT_OK(session3->UpdateStateAndCommit(SessionState::SUCCESS));
+
+  PrepareStagedSession("apex.apexd_test.apex", 239);
+  ASSERT_RESULT_OK(SubmitStagedSession(239, {}, false, false, -1));
+
+  auto sessions = GetSessionManager()->GetSessions();
+  std::sort(
+      sessions.begin(), sessions.end(),
+      [](const auto& s1, const auto& s2) { return s1.GetId() < s2.GetId(); });
+
+  ASSERT_EQ(4u, sessions.size());
+
+  ASSERT_EQ(37, sessions[0].GetId());
+  ASSERT_EQ(SessionState::VERIFIED, sessions[0].GetState());
+
+  ASSERT_EQ(57, sessions[1].GetId());
+  ASSERT_EQ(SessionState::STAGED, sessions[1].GetState());
+
+  ASSERT_EQ(73, sessions[2].GetId());
+  ASSERT_EQ(SessionState::SUCCESS, sessions[2].GetState());
+
+  ASSERT_EQ(239, sessions[3].GetId());
+  ASSERT_EQ(SessionState::VERIFIED, sessions[3].GetState());
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {

@@ -38,7 +38,6 @@ namespace android {
 namespace apex {
 namespace {
 
-using android::apex::testing::IsOk;
 using android::base::Join;
 using android::base::make_scope_guard;
 using android::base::testing::Ok;
@@ -112,17 +111,17 @@ TEST(ApexdSessionTest, MigrateToMetadataSessionsDir) {
   TestApexSession session1(239, SessionState::SUCCESS);
   TestApexSession session2(1543, SessionState::ACTIVATION_FAILED);
 
-  ASSERT_TRUE(IsOk(ApexSession::MigrateToMetadataSessionsDir()));
+  ASSERT_RESULT_OK(ApexSession::MigrateToMetadataSessionsDir());
 
   auto sessions = ApexSession::GetSessions();
   ASSERT_EQ(2u, sessions.size()) << Join(sessions, ',');
 
   auto migrated_session_1 = ApexSession::GetSession(239);
-  ASSERT_TRUE(IsOk(migrated_session_1));
+  ASSERT_RESULT_OK(migrated_session_1);
   ASSERT_EQ(SessionState::SUCCESS, migrated_session_1->GetState());
 
   auto migrated_session_2 = ApexSession::GetSession(1543);
-  ASSERT_TRUE(IsOk(migrated_session_2));
+  ASSERT_RESULT_OK(migrated_session_2);
   ASSERT_EQ(SessionState::ACTIVATION_FAILED, migrated_session_2->GetState());
 }
 

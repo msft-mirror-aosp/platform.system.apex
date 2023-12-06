@@ -48,15 +48,6 @@ namespace android {
 namespace apex {
 namespace testing {
 
-template <typename T>
-inline ::testing::AssertionResult IsOk(const android::base::Result<T>& result) {
-  if (result.ok()) {
-    return ::testing::AssertionSuccess() << " is Ok";
-  } else {
-    return ::testing::AssertionFailure() << " failed with " << result.error();
-  }
-}
-
 inline ::testing::AssertionResult IsOk(const android::binder::Status& status) {
   if (status.isOk()) {
     return ::testing::AssertionSuccess() << " is Ok";
