@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <regex>
+#include <sstream>
 #include <string>
 
 using android::base::GetBoolProperty;
@@ -56,7 +57,31 @@ static constexpr const char LIB[] = "lib64";
 
 static constexpr const char kApexSharedLibsRoot[] = "/apex/sharedlibs";
 
+// Before running the test, make sure that certain libraries are not pre-loaded
+// in the test process.
+void check_preloaded_libraries() {
+  static constexpr const char* unwanted[] = {
+      "libbase.so",
+      "libcrypto.so",
+  };
+
+  std::ifstream f("/proc/self/maps");
+  std::string line;
+  while (std::getline(f, line)) {
+    for (const char* lib : unwanted) {
+      EXPECT_TRUE(line.find(lib) == std::string::npos)
+          << "Library " << lib << " seems preloaded in the test process. "
+          << "This is a potential error. Please remove direct or transitive "
+          << "dependency to this library. You may debug this by running this "
+          << "test with `export LD_DEBUG=1` and "
+          << "`setprop debug.ld.all dlopen,dlerror`.";
+    }
+  }
+}
+
 TEST(apex_shared_libraries, symlink_libraries_loadable) {
+  check_preloaded_libraries();
+
   Fstab fstab;
   ASSERT_TRUE(ReadFstabFromFile("/proc/mounts", &fstab));
 
@@ -99,6 +124,8 @@ TEST(apex_shared_libraries, symlink_libraries_loadable) {
         continue;
       }
 
+      LOG(INFO) << "Checking " << p.path();
+
       // Symlink validity check.
       auto dest = fs::canonical(p.path(), ec);
       EXPECT_FALSE(ec) << "Failed to resolve " << p.path() << " (symlink to "
@@ -112,6 +139,7 @@ TEST(apex_shared_libraries, symlink_libraries_loadable) {
       android_namespace_t* ns =
           android_get_exported_namespace(apex_namespace_name.c_str());
       if (ns == nullptr) {
+        LOG(INFO) << "Creating linker namespace " << apex_namespace_name;
         // In case the apex namespace doesn't exist (actually not accessible),
         // create a new one that can search libraries from the apex directory
         // and can load (but not search) from the shared lib APEX.
@@ -134,14 +162,18 @@ TEST(apex_shared_libraries, symlink_libraries_loadable) {
       }
 
       EXPECT_TRUE(ns != nullptr)
-          << "Cannot find namespace " << apex_namespace_name;
+          << "Cannot find or create namespace " << apex_namespace_name;
       const android_dlextinfo dlextinfo = {
           .flags = ANDROID_DLEXT_USE_NAMESPACE,
           .library_namespace = ns,
       };
 
       void* handle = android_dlopen_ext(p.path().c_str(), RTLD_NOW, &dlextinfo);
-      EXPECT_TRUE(handle != nullptr) << dlerror();
+      EXPECT_TRUE(handle != nullptr)
+          << "Failed to load " << p.path() << " which is a symlink to "
+          << target << ".\n"
+          << "Reason: " << dlerror() << "\n"
+          << "Make sure that the library is accessible.";
       if (handle == nullptr) {
         continue;
       }
