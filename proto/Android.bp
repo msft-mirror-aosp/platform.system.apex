@@ -48,7 +48,6 @@ rust_protobuf {
     protos: ["apex_manifest.proto"],
     crate_name: "apex_manifest",
     source_stem: "apex_manifest",
-    use_protobuf3: true,
 }
 
 python_library_host {
