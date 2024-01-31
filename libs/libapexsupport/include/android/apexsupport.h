@@ -104,4 +104,23 @@ const char *_Nonnull AApexInfo_getName(const AApexInfo *_Nonnull info)
 int64_t AApexInfo_getVersion(const AApexInfo *_Nonnull info)
     __INTRODUCED_IN_LLNDK(202404);
 
+// AApexSupport_loadLibrary is private to platform yet.
+#if !defined(__ANDROID_VENDOR__) && !defined(__ANDROID_PRODUCT__)
+/**
+ * Opens a library from a given apex and returns its handle.
+ *
+ * \param name the name of the library to open
+ *
+ * \param apexName the name of the APEX which to load the library from. Note
+ * that the apex should be visible in linker configuration. You might need to
+ * set `"visible": true` in its etc/linker.config.pb.
+ *
+ * \param flag the same as dlopen() flag.
+ *
+ * \return nonnull handle for the loaded object on success. null otherwise.
+ */
+__attribute__((warn_unused_result)) void *_Nullable AApexSupport_loadLibrary(
+    const char *_Nonnull name, const char *_Nonnull apexName, int flag);
+#endif
+
 __END_DECLS
