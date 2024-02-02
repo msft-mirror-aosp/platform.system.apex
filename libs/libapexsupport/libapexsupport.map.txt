@@ -23,3 +23,10 @@ LIBAPEXSUPPORT {
   local:
     *;
 };
+
+LIBAPEXSUPPORT_PLATFORM {
+  global:
+    AApexSupport_loadLibrary;
+  local:
+    *;
+};
