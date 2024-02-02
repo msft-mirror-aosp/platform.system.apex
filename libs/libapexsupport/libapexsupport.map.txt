@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-LIBAPEXSUPPORT { # introduced=VanillaIceCream
+LIBAPEXSUPPORT {
   global:
     AApexInfo_create; # llndk
     AApexInfo_destroy; # llndk
