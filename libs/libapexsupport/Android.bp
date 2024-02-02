@@ -27,8 +27,15 @@ rust_test {
 
 cc_library {
     name: "libapexsupport",
+    srcs: [
+        "apexsupport.cpp",
+    ],
     whole_static_libs: [
         "libapexsupport.ffi",
+    ],
+    shared_libs: [
+        "libdl_android",
+        "liblog",
     ],
     llndk: {
         symbol_file: "libapexsupport.map.txt",
