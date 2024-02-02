@@ -21,6 +21,7 @@
 #include <android-base/result-gmock.h>
 #include <android-base/scopeguard.h>
 #include <android-base/stringprintf.h>
+#include <android-base/unique_fd.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <libdm/dm.h>
@@ -3984,6 +3985,48 @@ TEST_F(ApexdMountTest, UnmountAllSharedLibsApex) {
 
   auto new_apex_mounts = GetApexMounts();
   ASSERT_EQ(new_apex_mounts.size(), 0u);
+}
+
+TEST_F(ApexdMountTest, UnmountAllRetry) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  std::string apex_path_2 =
+      AddPreInstalledApex("apex.apexd_test_different_app.apex");
+  std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
+
+  auto& instance = ApexFileRepository::GetInstance();
+  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
+
+  ASSERT_THAT(ActivatePackage(apex_path_2), Ok());
+  ASSERT_THAT(ActivatePackage(apex_path_3), Ok());
+  UnmountOnTearDown(apex_path_2);
+  UnmountOnTearDown(apex_path_3);
+
+  auto apex_mounts = GetApexMounts();
+  ASSERT_THAT(apex_mounts,
+              UnorderedElementsAre("/apex/com.android.apex.test_package",
+                                   "/apex/com.android.apex.test_package@2",
+                                   "/apex/com.android.apex.test_package_2",
+                                   "/apex/com.android.apex.test_package_2@1"));
+
+  // Open a file. This should make `UnmountAll` fail.
+  unique_fd fd(
+      open("/apex/com.android.apex.test_package_2/etc/sample_prebuilt_file",
+           O_RDONLY));
+
+  auto& db = GetApexDatabaseForTesting();
+  // UnmountAll expects apex database to empty, hence this reset.
+  db.Reset();
+  ASSERT_NE(0, UnmountAll());
+  apex_mounts = GetApexMounts();
+  ASSERT_THAT(apex_mounts, Not(IsEmpty()));
+
+  // Close the file. `UnmountAll` should succeed after then.
+  fd.reset();
+
+  db.Reset();
+  ASSERT_EQ(0, UnmountAll());
+  apex_mounts = GetApexMounts();
+  ASSERT_THAT(apex_mounts, IsEmpty());
 }
 
 TEST_F(ApexdMountTest, OnStartInVmModeActivatesPreInstalled) {
