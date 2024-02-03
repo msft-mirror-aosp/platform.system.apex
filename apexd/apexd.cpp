@@ -3268,6 +3268,7 @@ int UnmountAll() {
       if (umount2(bind_mount.c_str(), UMOUNT_NOFOLLOW) != 0) {
         PLOG(ERROR) << "Failed to unmount bind-mount " << bind_mount;
         ret = 1;
+        return;
       }
     }
     if (auto status = Unmount(data, /* deferred= */ false); !status.ok()) {

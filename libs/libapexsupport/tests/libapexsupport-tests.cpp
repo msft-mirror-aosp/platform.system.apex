@@ -19,33 +19,9 @@
 
 #include <android/apexsupport.h>
 
-// A utility class to access APIs via dlsym().
-//
-// TODO(b/288341340) Use __ANDROID_API__ instead.
-// #if (__ANDROID_API__ >= __ANDROID_API_V__) is not available for vendor
-// modules yet.
-struct LibApexSupport {
-#define DLSYM(sym)                                                             \
-  decltype(&::sym) sym = (decltype(&::sym))dlsym(RTLD_DEFAULT, #sym);
-  // APIs added in __ANDROID_API_V__
-  DLSYM(AApexInfo_create)
-  DLSYM(AApexInfo_destroy)
-  DLSYM(AApexInfo_getName)
-  DLSYM(AApexInfo_getVersion)
-#undef DLSYM
-};
-
-struct LibApexSupportTest : testing::Test, LibApexSupport {
-  void SetUp() override {
-    if (AApexInfo_create == nullptr) {
-      GTEST_SKIP() << "libapexsupport is not available";
-    }
-  }
-};
-
 #ifdef __ANDROID_APEX__
 
-TEST_F(LibApexSupportTest, AApexInfo) {
+TEST(LibApexSupportTest, AApexInfo) {
   AApexInfo *info;
   EXPECT_EQ(AApexInfo_create(&info), AAPEXINFO_OK);
   ASSERT_NE(info, nullptr);
@@ -60,7 +36,7 @@ TEST_F(LibApexSupportTest, AApexInfo) {
 
 #else // __ANDROID_APEX__
 
-TEST_F(LibApexSupportTest, AApexInfo) {
+TEST(LibApexSupportTest, AApexInfo) {
   AApexInfo *info;
   EXPECT_EQ(AApexInfo_create(&info), AAPEXINFO_NO_APEX);
 }
