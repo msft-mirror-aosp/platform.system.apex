@@ -664,7 +664,7 @@ Result<MountedApexData> VerifyAndTempMountPackage(
 Result<void> Unmount(const MountedApexData& data, bool deferred) {
   LOG(DEBUG) << "Unmounting " << data.full_path << " from mount point "
              << data.mount_point << " deferred = " << deferred;
-  // Lazily try to umount whatever is mounted.
+  // Unmount whatever is mounted.
   if (umount2(data.mount_point.c_str(), UMOUNT_NOFOLLOW) != 0 &&
       errno != EINVAL && errno != ENOENT) {
     return ErrnoError() << "Failed to unmount directory " << data.mount_point;
@@ -3268,6 +3268,7 @@ int UnmountAll() {
       if (umount2(bind_mount.c_str(), UMOUNT_NOFOLLOW) != 0) {
         PLOG(ERROR) << "Failed to unmount bind-mount " << bind_mount;
         ret = 1;
+        return;
       }
     }
     if (auto status = Unmount(data, /* deferred= */ false); !status.ok()) {
