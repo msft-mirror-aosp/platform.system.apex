@@ -84,6 +84,10 @@ class ApexSession {
   android::base::Result<void> DeleteSession() const;
   static void DeleteFinalizedSessions();
 
+  // Returns the directories containing the apexes staged for this session.
+  std::vector<std::string> GetStagedApexDirs(
+      const std::string& staged_session_dir) const;
+
   friend class ApexSessionManager;
 
  private:

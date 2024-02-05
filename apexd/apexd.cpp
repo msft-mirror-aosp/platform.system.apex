@@ -2110,16 +2110,8 @@ void ScanStagedSessionsDirAndStage() {
       continue;
     }
 
-    std::vector<std::string> dirs_to_scan;
-    if (session.GetChildSessionIds().empty()) {
-      dirs_to_scan.push_back(std::string(gConfig->staged_session_dir) +
-                             "/session_" + std::to_string(session_id));
-    } else {
-      for (auto child_session_id : session.GetChildSessionIds()) {
-        dirs_to_scan.push_back(std::string(gConfig->staged_session_dir) +
-                               "/session_" + std::to_string(child_session_id));
-      }
-    }
+    std::vector<std::string> dirs_to_scan =
+        session.GetStagedApexDirs(gConfig->staged_session_dir);
 
     std::vector<std::string> apexes;
     bool scan_successful = true;
