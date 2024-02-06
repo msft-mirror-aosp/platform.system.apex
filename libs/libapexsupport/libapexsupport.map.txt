@@ -14,12 +14,19 @@
 # limitations under the License.
 #
 
-LIBAPEXSUPPORT { # introduced=VanillaIceCream
+LIBAPEXSUPPORT {
   global:
     AApexInfo_create; # llndk
     AApexInfo_destroy; # llndk
     AApexInfo_getName; # llndk
     AApexInfo_getVersion; # llndk
+  local:
+    *;
+};
+
+LIBAPEXSUPPORT_PLATFORM {
+  global:
+    AApexSupport_loadLibrary;
   local:
     *;
 };
