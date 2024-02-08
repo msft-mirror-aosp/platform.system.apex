@@ -31,7 +31,7 @@ namespace {
 
 using android::base::SetDefaultTag;
 
-int HandleSubcommand(char** argv) {
+int HandleSubcommand(int argc, char** argv) {
   if (strcmp("--bootstrap", argv[1]) == 0) {
     SetDefaultTag("apexd-bootstrap");
     return android::apex::OnBootstrap();
@@ -39,12 +39,26 @@ int HandleSubcommand(char** argv) {
 
   if (strcmp("--unmount-all", argv[1]) == 0) {
     SetDefaultTag("apexd-unmount-all");
-    return android::apex::UnmountAll();
+    bool also_include_staged_apexes =
+        argc >= 3 && strcmp("--also-include-staged-apexes", argv[2]) == 0;
+    if (also_include_staged_apexes) {
+      auto session_manager = android::apex::ApexSessionManager::Create(
+          android::apex::GetSessionsDir());
+      android::apex::InitializeSessionManager(session_manager.get());
+    }
+    return android::apex::UnmountAll(also_include_staged_apexes);
   }
 
   if (strcmp("--otachroot-bootstrap", argv[1]) == 0) {
     SetDefaultTag("apexd-otachroot");
-    return android::apex::OnOtaChrootBootstrap();
+    bool also_include_staged_apexes =
+        argc >= 3 && strcmp("--also-include-staged-apexes", argv[2]) == 0;
+    if (also_include_staged_apexes) {
+      auto session_manager = android::apex::ApexSessionManager::Create(
+          android::apex::GetSessionsDir());
+      android::apex::InitializeSessionManager(session_manager.get());
+    }
+    return android::apex::OnOtaChrootBootstrap(also_include_staged_apexes);
   }
 
   if (strcmp("--snapshotde", argv[1]) == 0) {
@@ -109,7 +123,7 @@ void InstallSelinuxLogging() {
 
 }  // namespace
 
-int main(int /*argc*/, char** argv) {
+int main(int argc, char** argv) {
   android::base::InitLogging(argv, &android::base::KernelLogger);
   // TODO(b/158468454): add a -v flag or an external setting to change severity.
   android::base::SetMinimumLogSeverity(android::base::INFO);
@@ -136,7 +150,7 @@ int main(int /*argc*/, char** argv) {
   bool booting = lifecycle.IsBooting();
 
   if (has_subcommand) {
-    return HandleSubcommand(argv);
+    return HandleSubcommand(argc, argv);
   }
 
   // We are running regular apexd, which starts after /metadata/apex/sessions
