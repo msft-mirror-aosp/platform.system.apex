@@ -23,6 +23,7 @@
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 #include <errno.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -43,6 +44,7 @@ using android::base::make_scope_guard;
 using android::base::testing::Ok;
 using ::apex::proto::SessionState;
 using ::testing::Not;
+using ::testing::UnorderedElementsAre;
 
 // TODO(b/170329726): add unit tests for apexd_sessions.h
 
@@ -333,6 +335,34 @@ TEST(ApexSessionManager, MigrateFromOldSessionsDirSameDir) {
 
   ASSERT_EQ(239, old_sessions[2].GetId());
   ASSERT_EQ(SessionState::STAGED, old_sessions[2].GetState());
+}
+
+TEST(ApexSessionManagerTest, GetStagedApexDirsSelf) {
+  TemporaryDir td;
+  auto manager = ApexSessionManager::Create(std::string(td.path));
+
+  auto session = manager->CreateSession(239);
+  ASSERT_RESULT_OK(session);
+
+  ASSERT_THAT(session->GetStagedApexDirs("/path/to/staged_session_dir"),
+              UnorderedElementsAre("/path/to/staged_session_dir/session_239"));
+}
+
+TEST(ApexSessionManagerTest, GetStagedApexDirsChildren) {
+  TemporaryDir td;
+  auto manager = ApexSessionManager::Create(std::string(td.path));
+
+  auto session = manager->CreateSession(239);
+  ASSERT_RESULT_OK(session);
+  auto child_session_1 = manager->CreateSession(240);
+  ASSERT_RESULT_OK(child_session_1);
+  auto child_session_2 = manager->CreateSession(241);
+  ASSERT_RESULT_OK(child_session_2);
+  session->SetChildSessionIds({240, 241});
+
+  ASSERT_THAT(session->GetStagedApexDirs("/path/to/staged_session_dir"),
+              UnorderedElementsAre("/path/to/staged_session_dir/session_240",
+                                   "/path/to/staged_session_dir/session_241"));
 }
 
 }  // namespace
