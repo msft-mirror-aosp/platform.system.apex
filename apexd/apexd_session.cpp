@@ -276,6 +276,22 @@ void ApexSession::DeleteFinalizedSessions() {
   }
 }
 
+std::vector<std::string> ApexSession::GetStagedApexDirs(
+    const std::string& staged_session_dir) const {
+  const google::protobuf::RepeatedField<int>& child_session_ids =
+      state_.child_session_ids();
+  std::vector<std::string> dirs;
+  if (child_session_ids.empty()) {
+    dirs.push_back(staged_session_dir + "/session_" + std::to_string(GetId()));
+  } else {
+    for (auto child_session_id : child_session_ids) {
+      dirs.push_back(staged_session_dir + "/session_" +
+                     std::to_string(child_session_id));
+    }
+  }
+  return dirs;
+}
+
 ApexSessionManager::ApexSessionManager(std::string sessions_base_dir)
     : sessions_base_dir_(std::move(sessions_base_dir)) {}
 

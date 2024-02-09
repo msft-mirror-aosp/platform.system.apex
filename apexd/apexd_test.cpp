@@ -2958,6 +2958,81 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHasDifferentKeyThanCapex) {
                          });
 }
 
+TEST_F(ApexdMountTest, OnOtaChrootBootstrapSystemDataStagedInSameVersion) {
+  // The APEXes on system, data, and staged are all in the same version. The
+  // staged one should be picked.
+  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
+  AddDataApex("apex.apexd_test.apex");
+  auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+  std::string apex_path_3 =
+      GetStagedDir(apex_session->GetId()) + "/" + "apex.apexd_test.apex";
+
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/true), 0);
+
+  UnmountOnTearDown(apex_path_3);
+
+  auto apex_mounts = GetApexMounts();
+  ASSERT_THAT(apex_mounts,
+              UnorderedElementsAre("/apex/com.android.apex.test_package",
+                                   "/apex/com.android.apex.test_package@1"));
+
+  ASSERT_EQ(access("/apex/apex-info-list.xml", F_OK), 0);
+  auto info_list =
+      com::android::apex::readApexInfoList("/apex/apex-info-list.xml");
+  ASSERT_TRUE(info_list.has_value());
+  auto apex_info_xml_1 = com::android::apex::ApexInfo(
+      /* moduleName= */ "com.android.apex.test_package",
+      /* modulePath= */ apex_path_1,
+      /* preinstalledModulePath= */ apex_path_1,
+      /* versionCode= */ 1, /* versionName= */ "1",
+      /* isFactory= */ true, /* isActive= */ false, GetMTime(apex_path_1),
+      /* provideSharedApexLibs= */ false);
+  auto apex_info_xml_2 = com::android::apex::ApexInfo(
+      /* moduleName= */ "com.android.apex.test_package",
+      /* modulePath= */ apex_path_3, /* preinstalledModulePath= */ apex_path_1,
+      /* versionCode= */ 1, /* versionName= */ "1", /* isFactory= */ false,
+      /* isActive= */ true, GetMTime(apex_path_3),
+      /* provideSharedApexLibs= */ false);
+
+  ASSERT_THAT(info_list->getApexInfo(),
+              UnorderedElementsAre(ApexInfoXmlEq(apex_info_xml_1),
+                                   ApexInfoXmlEq(apex_info_xml_2)));
+}
+
+TEST_F(ApexdMountTest, OnOtaChrootBootstrapSystemNewerThanDataStaged) {
+  // The system one is newer than the data one and the staged one. The system
+  // one should be picked.
+  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test_v2.apex");
+  AddDataApex("apex.apexd_test.apex");
+  auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/true), 0);
+
+  UnmountOnTearDown(apex_path_1);
+
+  auto apex_mounts = GetApexMounts();
+  ASSERT_THAT(apex_mounts,
+              UnorderedElementsAre("/apex/com.android.apex.test_package",
+                                   "/apex/com.android.apex.test_package@2"));
+
+  ASSERT_EQ(access("/apex/apex-info-list.xml", F_OK), 0);
+  auto info_list =
+      com::android::apex::readApexInfoList("/apex/apex-info-list.xml");
+  ASSERT_TRUE(info_list.has_value());
+  auto apex_info_xml = com::android::apex::ApexInfo(
+      /* moduleName= */ "com.android.apex.test_package",
+      /* modulePath= */ apex_path_1,
+      /* preinstalledModulePath= */ apex_path_1,
+      /* versionCode= */ 2, /* versionName= */ "2",
+      /* isFactory= */ true, /* isActive= */ true, GetMTime(apex_path_1),
+      /* provideSharedApexLibs= */ false);
+
+  ASSERT_THAT(info_list->getApexInfo(),
+              UnorderedElementsAre(ApexInfoXmlEq(apex_info_xml)));
+}
+
 static std::string GetSelinuxContext(const std::string& file) {
   char* ctx;
   if (getfilecon(file.c_str(), &ctx) < 0) {
@@ -3891,7 +3966,8 @@ TEST_F(ApexdMountTest, PopulateFromMountsChecksPathPrefix) {
   db.Reset();
 
   // Populate from mount
-  db.PopulateFromMounts(GetDataDir(), GetDecompressionDir(), GetHashTreeDir());
+  db.PopulateFromMounts({GetDataDir(), GetDecompressionDir()},
+                        GetHashTreeDir());
 
   // Count number of package and collect package names
   int package_count = 0;
@@ -3941,7 +4017,7 @@ TEST_F(ApexdMountTest, UnmountAll) {
   // UnmountAll expects apex database to empty, hence this reset.
   db.Reset();
 
-  ASSERT_EQ(0, UnmountAll());
+  ASSERT_EQ(0, UnmountAll(/*also_include_staged_apexes=*/false));
 
   auto new_apex_mounts = GetApexMounts();
   ASSERT_EQ(new_apex_mounts.size(), 0u);
@@ -3981,7 +4057,7 @@ TEST_F(ApexdMountTest, UnmountAllSharedLibsApex) {
   // UnmountAll expects apex database to empty, hence this reset.
   db.Reset();
 
-  ASSERT_EQ(0, UnmountAll());
+  ASSERT_EQ(0, UnmountAll(/*also_include_staged_apexes=*/false));
 
   auto new_apex_mounts = GetApexMounts();
   ASSERT_EQ(new_apex_mounts.size(), 0u);
@@ -4016,7 +4092,7 @@ TEST_F(ApexdMountTest, UnmountAllRetry) {
   auto& db = GetApexDatabaseForTesting();
   // UnmountAll expects apex database to empty, hence this reset.
   db.Reset();
-  ASSERT_NE(0, UnmountAll());
+  ASSERT_NE(0, UnmountAll(/*also_include_staged_apexes=*/false));
   apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts, Not(IsEmpty()));
 
@@ -4024,7 +4100,43 @@ TEST_F(ApexdMountTest, UnmountAllRetry) {
   fd.reset();
 
   db.Reset();
-  ASSERT_EQ(0, UnmountAll());
+  ASSERT_EQ(0, UnmountAll(/*also_include_staged_apexes=*/false));
+  apex_mounts = GetApexMounts();
+  ASSERT_THAT(apex_mounts, IsEmpty());
+}
+
+TEST_F(ApexdMountTest, UnmountAllStaged) {
+  // Both a pre-installed apex and a staged apex are mounted. UnmountAll should
+  // unmount both.
+  AddPreInstalledApex("apex.apexd_test.apex");
+  std::string apex_path_2 =
+      AddPreInstalledApex("apex.apexd_test_different_app.apex");
+  AddDataApex("apex.apexd_test_v2.apex");
+  auto apex_session = CreateStagedSession("apex.apexd_test_v2.apex", 123);
+  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+  std::string apex_path_3 =
+      GetStagedDir(apex_session->GetId()) + "/" + "apex.apexd_test_v2.apex";
+
+  auto& instance = ApexFileRepository::GetInstance();
+  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
+
+  ASSERT_THAT(ActivatePackage(apex_path_2), Ok());
+  ASSERT_THAT(ActivatePackage(apex_path_3), Ok());
+  UnmountOnTearDown(apex_path_2);
+  UnmountOnTearDown(apex_path_3);
+
+  auto apex_mounts = GetApexMounts();
+  ASSERT_THAT(apex_mounts,
+              UnorderedElementsAre("/apex/com.android.apex.test_package",
+                                   "/apex/com.android.apex.test_package@2",
+                                   "/apex/com.android.apex.test_package_2",
+                                   "/apex/com.android.apex.test_package_2@1"));
+
+  auto& db = GetApexDatabaseForTesting();
+  // UnmountAll expects apex database to empty, hence this reset.
+  db.Reset();
+
+  ASSERT_EQ(0, UnmountAll(/*also_include_staged_apexes=*/true));
   apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts, IsEmpty());
 }

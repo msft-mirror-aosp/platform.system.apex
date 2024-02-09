@@ -206,8 +206,7 @@ class MountedApexDatabase {
     return ret;
   }
 
-  void PopulateFromMounts(const std::string& active_apex_dir,
-                          const std::string& decompression_dir,
+  void PopulateFromMounts(const std::vector<std::string>& data_dirs,
                           const std::string& apex_hash_tree_dir);
 
   // Resets state of the database. Should only be used in testing.
