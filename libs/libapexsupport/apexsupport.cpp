@@ -13,8 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "ApexSupport"
 
 #include "android/apexsupport.h"
+
+#include <dlfcn.h>
 
 #include <string>
 
@@ -40,5 +43,10 @@ void *AApexSupport_loadLibrary(const char *_Nonnull name,
       .flags = ANDROID_DLEXT_USE_NAMESPACE,
       .library_namespace = ns,
   };
-  return android_dlopen_ext(name, flag, &dlextinfo);
+  void *handle = android_dlopen_ext(name, flag, &dlextinfo);
+  if (!handle) {
+    ALOGE("Could not load %s: %s", name, dlerror());
+    return nullptr;
+  }
+  return handle;
 }
