@@ -127,8 +127,7 @@ bool IsActiveMountPoint(const std::string& mount_point) {
 }
 
 Result<void> PopulateLoopInfo(const BlockDevice& top_device,
-                              const std::string& active_apex_dir,
-                              const std::string& decompression_dir,
+                              const std::vector<std::string>& data_dirs,
                               const std::string& apex_hash_tree_dir,
                               MountedApexData* apex_data) {
   std::vector<BlockDevice> slaves = top_device.GetSlaves();
@@ -152,8 +151,9 @@ Result<void> PopulateLoopInfo(const BlockDevice& top_device,
   //  * slaves[0] always represents a data loop device
   //  * if size = 2 then slaves[1] represents an external hashtree loop device
   auto is_data_loop_device = [&](const std::string& backing_file) {
-    return StartsWith(backing_file, active_apex_dir) ||
-           StartsWith(backing_file, decompression_dir);
+    return std::any_of(
+        data_dirs.begin(), data_dirs.end(),
+        [&](const std::string& dir) { return StartsWith(backing_file, dir); });
   };
   if (slaves.size() == 2) {
     if (!is_data_loop_device(backing_files[0])) {
@@ -198,7 +198,7 @@ void NormalizeIfDeleted(MountedApexData* apex_data) {
 
 Result<MountedApexData> ResolveMountInfo(
     const BlockDevice& block, const std::string& mount_point,
-    const std::string& active_apex_dir, const std::string& decompression_dir,
+    const std::vector<std::string>& data_dirs,
     const std::string& apex_hash_tree_dir) {
   bool temp_mount = EndsWith(mount_point, ".tmp");
   // Now, see if it is dm-verity or loop mounted
@@ -208,10 +208,11 @@ Result<MountedApexData> ResolveMountInfo(
       if (!backing_file.ok()) {
         return backing_file.error();
       }
-      auto result = MountedApexData(block.DevPath(), *backing_file, mount_point,
-                                    /* device_name= */ "",
-                                    /* hashtree_loop_name= */ "",
-                                    /* is_temp_mount */ temp_mount);
+      MountedApexData result;
+      result.loop_name = block.DevPath();
+      result.full_path = *backing_file;
+      result.mount_point = mount_point;
+      result.is_temp_mount = temp_mount;
       NormalizeIfDeleted(&result);
       return result;
     }
@@ -224,8 +225,8 @@ Result<MountedApexData> ResolveMountInfo(
       result.mount_point = mount_point;
       result.device_name = *name;
       result.is_temp_mount = temp_mount;
-      auto status = PopulateLoopInfo(block, active_apex_dir, decompression_dir,
-                                     apex_hash_tree_dir, &result);
+      auto status =
+          PopulateLoopInfo(block, data_dirs, apex_hash_tree_dir, &result);
       if (!status.ok()) {
         return status.error();
       }
@@ -246,8 +247,7 @@ Result<MountedApexData> ResolveMountInfo(
 // - /dev/block/loopX : loop device
 // - /dev/block/dm-X : dm-verity
 
-// In case of loop device, it is from a non-flattened
-// APEX file. This original APEX file can be tracked
+// In case of loop device, the original APEX file can be tracked
 // by /sys/block/loopX/loop/backing_file.
 
 // In case of dm-verity, it is mapped to a loop device.
@@ -258,15 +258,12 @@ Result<MountedApexData> ResolveMountInfo(
 // Device name can be retrieved from
 // /sys/block/dm-Y/dm/name.
 
-// By synchronizing the mounts info with Database on startup,
-// Apexd serves the correct package list even on the devices
-// which are not ro.apex.updatable.
+// Need to read /proc/mounts on startup since apexd can start
+// at any time (It's a lazy service).
 void MountedApexDatabase::PopulateFromMounts(
-    const std::string& active_apex_dir, const std::string& decompression_dir,
+    const std::vector<std::string>& data_dirs,
     const std::string& apex_hash_tree_dir) REQUIRES(!mounted_apexes_mutex_) {
   LOG(INFO) << "Populating APEX database from mounts...";
-
-  std::unordered_map<std::string, int> active_versions;
 
   std::ifstream mounts("/proc/mounts");
   std::string line;
@@ -281,22 +278,17 @@ void MountedApexDatabase::PopulateFromMounts(
       continue;
     }
 
-    auto mount_data =
-        ResolveMountInfo(BlockDevice(block), mount_point, active_apex_dir,
-                         decompression_dir, apex_hash_tree_dir);
+    auto mount_data = ResolveMountInfo(BlockDevice(block), mount_point,
+                                       data_dirs, apex_hash_tree_dir);
     if (!mount_data.ok()) {
       LOG(WARNING) << "Can't resolve mount info " << mount_data.error();
       continue;
     }
 
     auto [package, version] = ParseMountPoint(mount_point);
-    AddMountedApexLocked(package, false, *mount_data);
+    mount_data->version = version;
+    AddMountedApexLocked(package, *mount_data);
 
-    auto active = active_versions[package] < version;
-    if (active) {
-      active_versions[package] = version;
-      SetLatestLocked(package, mount_data->full_path);
-    }
     LOG(INFO) << "Found " << mount_point << " backed by"
               << (mount_data->deleted ? " deleted " : " ") << "file "
               << mount_data->full_path;

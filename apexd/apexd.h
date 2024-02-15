@@ -48,7 +48,6 @@ struct ApexdConfig {
   const char* ota_reserved_dir;
   const char* apex_hash_tree_dir;
   const char* staged_session_dir;
-  const char* metadata_sepolicy_staged_dir;
   // Overrides the path to the "metadata" partition which is by default
   // /dev/block/by-name/payload-metadata It should be a path pointing the first
   // partition of the VM payload disk. So, realpath() of this path is checked if
@@ -66,7 +65,6 @@ static const ApexdConfig kDefaultConfig = {
     kOtaReservedDir,
     kApexHashTreeDir,
     kStagedSessionsDir,
-    kMetadataSepolicyStagedDir,
     kVmPayloadMetadataPartitionProp,
     "u:object_r:staging_data_file",
 };
@@ -140,16 +138,14 @@ android::base::Result<void> DestroyCeSnapshotsNotSpecified(
 int OnBootstrap();
 // Sets the values of gVoldService and gInFsCheckpointMode.
 void InitializeVold(CheckpointInterface* checkpoint_service);
+// Sets the value of gSessionManager.
+void InitializeSessionManager(ApexSessionManager* session_manager);
 // Initializes in-memory state (e.g. pre-installed data, activated apexes).
 // Must be called first before calling any other boot sequence related function.
 void Initialize(CheckpointInterface* checkpoint_service);
 // Initializes data apex as in-memory state. Should be called only if we are
 // not booting, since initialization timing is different when booting
 void InitializeDataApex();
-// Migrates sessions from /data/apex/session to /metadata/session.i
-// Must only be called during boot (i.e apexd.status is not "ready" or
-// "activated").
-android::base::Result<void> MigrateSessionsDirIfNeeded();
 // Apex activation logic. Scans staged apex sessions and activates apexes.
 // Must only be called during boot (i.e apexd.status is not "ready" or
 // "activated").
@@ -181,7 +177,9 @@ void RemoveInactiveDataApex();
 void BootCompletedCleanup();
 int SnapshotOrRestoreDeUserData();
 
-int UnmountAll();
+// Unmounts all apexes.
+// If `also_include_staged_apexes` is true, it's for Pre-reboot Dexopt.
+int UnmountAll(bool also_include_staged_apexes);
 
 android::base::Result<MountedApexDatabase::MountedApexData>
 GetTempMountedApexData(const std::string& package);
@@ -212,18 +210,15 @@ android::base::Result<void> ReserveSpaceForCompressedApex(
 int OnStartInVmMode();
 
 // Activates apexes in otapreot_chroot environment.
-// TODO(b/172911822): support compressed apexes.
-int OnOtaChrootBootstrap();
-
-// Activates flattened apexes
-int ActivateFlattenedApex();
-int ActivateFlattenedApex(const std::vector<std::string>& multi_apex_prefixes);
+// If `also_include_staged_apexes` is true, it's for Pre-reboot Dexopt.
+int OnOtaChrootBootstrap(bool also_include_staged_apexes = false);
 
 android::apex::MountedApexDatabase& GetApexDatabaseForTesting();
 
 // Performs a non-staged install of an APEX specified by |package_path|.
 // TODO(ioffe): add more documentation.
-android::base::Result<ApexFile> InstallPackage(const std::string& package_path);
+android::base::Result<ApexFile> InstallPackage(const std::string& package_path,
+                                               bool force);
 
 // Exposed for testing.
 android::base::Result<int> AddBlockApex(ApexFileRepository& instance);

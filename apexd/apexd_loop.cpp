@@ -434,7 +434,6 @@ Result<void> ConfigureLoopDevice(const int device_fd, const std::string& target,
 }
 
 Result<LoopbackDeviceUniqueFd> WaitForDevice(int num) {
-  std::string opened_device;
   const std::vector<std::string> candidate_devices = {
       StringPrintf("/dev/block/loop%d", num),
       StringPrintf("/dev/loop%d", num),
@@ -498,7 +497,12 @@ Result<LoopbackDeviceUniqueFd> CreateLoopDevice(const std::string& target,
 
   Result<void> configure_status = ConfigureLoopDevice(
       loop_device->device_fd.get(), target, image_offset, image_size);
-  if (!configure_status.ok()) {
+  if (!configure_status.ok() && configure_status.error().code() == EBUSY) {
+    // EBUSY means that loop device was bound to a different process. We need to call
+    // CloseGood() here to ensure that when destroying LoopbackDeviceUniqueFd we
+    // don't call LOOP_CLR_FD ioctl on this loop device, essentially clearing the
+    // loop device while other process is using it.
+    loop_device->CloseGood();
     return configure_status.error();
   }
 
@@ -515,7 +519,16 @@ Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
   // Unfortunately, this will require some refactoring of how we manage loop
   // devices, and probably some new loop-control ioctls, so for the time being
   // we just limit the scope that requires locking.
-  auto loop_device = CreateLoopDevice(target, image_offset, image_size);
+  android::base::Timer timer;
+  Result<LoopbackDeviceUniqueFd> loop_device;
+  while (timer.duration() < 1s) {
+    loop_device = CreateLoopDevice(target, image_offset, image_size);
+    if (loop_device.ok()) {
+      break;
+    }
+    std::this_thread::sleep_for(5ms);
+  }
+
   if (!loop_device.ok()) {
     return loop_device.error();
   }
