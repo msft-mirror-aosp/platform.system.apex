@@ -23,7 +23,7 @@
 #include <android-base/result.h>
 #include <android-base/strings.h>
 #include <apex_file.h>
-#include <builtins.h>
+#include <check_builtins.h>
 #include <getopt.h>
 #include <parser.h>
 #include <pwd.h>
@@ -75,14 +75,6 @@ Options:
 )");
 }
 
-const android::init::BuiltinFunctionMap& ApexInitRcSupportedActionMap() {
-  static const android::init::BuiltinFunctionMap functions = {
-      // Add any init actions supported inside APEXes here.
-      // See system/core/init/builtins.cpp for expected syntax.
-  };
-  return functions;
-}
-
 // Validate any init rc files inside the APEX.
 void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
                  int sdk_version) {
@@ -90,7 +82,7 @@ void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
   init::ServiceList service_list = init::ServiceList();
   parser.AddSectionParser("service", std::make_unique<init::ServiceParser>(
                                          &service_list, nullptr, std::nullopt));
-  const init::BuiltinFunctionMap& function_map = ApexInitRcSupportedActionMap();
+  const init::BuiltinFunctionMap& function_map = init::GetBuiltinFunctionMap();
   init::Action::set_function_map(&function_map);
   init::ActionManager action_manager = init::ActionManager();
   parser.AddSectionParser(
@@ -251,6 +243,8 @@ int main(int argc, char** argv) {
     PrintUsage();
     return EXIT_FAILURE;
   }
+
+  init::InitializeHostPropertyInfoArea({});
 
   for (const auto& p : partition_map) {
     ScanPartitionApexes(deapexer, debugfs, sdk_version, p.second);
