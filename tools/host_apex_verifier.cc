@@ -23,7 +23,7 @@
 #include <android-base/result.h>
 #include <android-base/strings.h>
 #include <apex_file.h>
-#include <builtins.h>
+#include <check_builtins.h>
 #include <getopt.h>
 #include <parser.h>
 #include <pwd.h>
@@ -67,20 +67,16 @@ Options:
   --debugfs=PATH              Use the debugfs binary at this path when extracting APEXes.
   --sdk_version=INT           The active system SDK version used when filtering versioned
                               init.rc files.
+for checking all APEXes:
   --out_system=DIR            Path to the factory APEX directory for the system partition.
   --out_system_ext=DIR        Path to the factory APEX directory for the system_ext partition.
   --out_product=DIR           Path to the factory APEX directory for the product partition.
   --out_vendor=DIR            Path to the factory APEX directory for the vendor partition.
   --out_odm=DIR               Path to the factory APEX directory for the odm partition.
-)");
-}
 
-const android::init::BuiltinFunctionMap& ApexInitRcSupportedActionMap() {
-  static const android::init::BuiltinFunctionMap functions = {
-      // Add any init actions supported inside APEXes here.
-      // See system/core/init/builtins.cpp for expected syntax.
-  };
-  return functions;
+for checking a single APEX:
+  --apex=PATH                 Path to the target APEX.
+)");
 }
 
 // Validate any init rc files inside the APEX.
@@ -90,7 +86,7 @@ void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
   init::ServiceList service_list = init::ServiceList();
   parser.AddSectionParser("service", std::make_unique<init::ServiceParser>(
                                          &service_list, nullptr, std::nullopt));
-  const init::BuiltinFunctionMap& function_map = ApexInitRcSupportedActionMap();
+  const init::BuiltinFunctionMap& function_map = init::GetBuiltinFunctionMap();
   init::Action::set_function_map(&function_map);
   init::ActionManager action_manager = init::ActionManager();
   parser.AddSectionParser(
@@ -191,6 +187,7 @@ int main(int argc, char** argv) {
   std::string deapexer, debugfs;
   int sdk_version = INT_MAX;
   std::map<std::string, std::string> partition_map;
+  std::string apex;
 
   while (true) {
     static const struct option long_options[] = {
@@ -203,6 +200,7 @@ int main(int argc, char** argv) {
         {"out_product", required_argument, nullptr, 0},
         {"out_vendor", required_argument, nullptr, 0},
         {"out_odm", required_argument, nullptr, 0},
+        {"apex", required_argument, nullptr, 0},
         {nullptr, 0, nullptr, 0},
     };
 
@@ -228,6 +226,9 @@ int main(int argc, char** argv) {
             return EXIT_FAILURE;
           }
         }
+        if (name == "apex") {
+          apex = optarg;
+        }
         for (const auto& p : partitions) {
           if (name == "out_" + p) {
             partition_map[p] = optarg;
@@ -251,11 +252,20 @@ int main(int argc, char** argv) {
     PrintUsage();
     return EXIT_FAILURE;
   }
-
-  for (const auto& p : partition_map) {
-    ScanPartitionApexes(deapexer, debugfs, sdk_version, p.second);
+  if (!!apex.empty() + !!partition_map.empty() != 1) {
+    PrintUsage();
+    return EXIT_FAILURE;
   }
 
+  init::InitializeHostPropertyInfoArea({});
+
+  if (!partition_map.empty()) {
+    for (const auto& p : partition_map) {
+      ScanPartitionApexes(deapexer, debugfs, sdk_version, p.second);
+    }
+  } else {
+    ScanApex(deapexer, debugfs, sdk_version, apex);
+  }
   return EXIT_SUCCESS;
 }
 
