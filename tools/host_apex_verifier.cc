@@ -67,11 +67,15 @@ Options:
   --debugfs=PATH              Use the debugfs binary at this path when extracting APEXes.
   --sdk_version=INT           The active system SDK version used when filtering versioned
                               init.rc files.
+for checking all APEXes:
   --out_system=DIR            Path to the factory APEX directory for the system partition.
   --out_system_ext=DIR        Path to the factory APEX directory for the system_ext partition.
   --out_product=DIR           Path to the factory APEX directory for the product partition.
   --out_vendor=DIR            Path to the factory APEX directory for the vendor partition.
   --out_odm=DIR               Path to the factory APEX directory for the odm partition.
+
+for checking a single APEX:
+  --apex=PATH                 Path to the target APEX.
 )");
 }
 
@@ -183,6 +187,7 @@ int main(int argc, char** argv) {
   std::string deapexer, debugfs;
   int sdk_version = INT_MAX;
   std::map<std::string, std::string> partition_map;
+  std::string apex;
 
   while (true) {
     static const struct option long_options[] = {
@@ -195,6 +200,7 @@ int main(int argc, char** argv) {
         {"out_product", required_argument, nullptr, 0},
         {"out_vendor", required_argument, nullptr, 0},
         {"out_odm", required_argument, nullptr, 0},
+        {"apex", required_argument, nullptr, 0},
         {nullptr, 0, nullptr, 0},
     };
 
@@ -220,6 +226,9 @@ int main(int argc, char** argv) {
             return EXIT_FAILURE;
           }
         }
+        if (name == "apex") {
+          apex = optarg;
+        }
         for (const auto& p : partitions) {
           if (name == "out_" + p) {
             partition_map[p] = optarg;
@@ -243,13 +252,20 @@ int main(int argc, char** argv) {
     PrintUsage();
     return EXIT_FAILURE;
   }
+  if (!!apex.empty() + !!partition_map.empty() != 1) {
+    PrintUsage();
+    return EXIT_FAILURE;
+  }
 
   init::InitializeHostPropertyInfoArea({});
 
-  for (const auto& p : partition_map) {
-    ScanPartitionApexes(deapexer, debugfs, sdk_version, p.second);
+  if (!partition_map.empty()) {
+    for (const auto& p : partition_map) {
+      ScanPartitionApexes(deapexer, debugfs, sdk_version, p.second);
+    }
+  } else {
+    ScanApex(deapexer, debugfs, sdk_version, apex);
   }
-
   return EXIT_SUCCESS;
 }
 
