@@ -99,6 +99,7 @@ cc_binary_host {
     name: "host_apex_verifier",
     srcs: ["host_apex_verifier.cc"],
     defaults: [
+        "init_host_defaults",
         "libapex-deps",
     ],
     shared_libs: [
