@@ -109,7 +109,10 @@ void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
   // on the SDK version.
   for (const auto& c :
        init::FilterVersionedConfigs(init_configs, sdk_version)) {
-    parser.ParseConfigFile(c);
+    auto result = parser.ParseConfigFile(c);
+    if (!result.ok()) {
+      LOG(FATAL) << result.error();
+    }
   }
 
   for (const auto& service : service_list) {
@@ -124,7 +127,7 @@ void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
 
   // The parser will fail if there are any unsupported actions.
   if (parser.parse_error_count() > 0) {
-    LOG(FATAL) << "Failed to parse APEX init rc file(s)";
+    exit(EXIT_FAILURE);
   }
 }
 
@@ -180,6 +183,7 @@ void ScanPartitionApexes(const std::string& deapexer, int sdk_version,
 }  // namespace
 
 int main(int argc, char** argv) {
+  android::base::SetMinimumLogSeverity(android::base::ERROR);
   android::base::InitLogging(argv, &android::base::StdioLogger);
 
   std::string deapexer, debugfs, fsckerofs;
