@@ -65,6 +65,7 @@ Tests APEX file(s) for correctness.
 Options:
   --deapexer=PATH             Use the deapexer binary at this path when extracting APEXes.
   --debugfs=PATH              Use the debugfs binary at this path when extracting APEXes.
+  --fsckerofs=PATH            Use the fsck.erofs binary at this path when extracting APEXes.
   --sdk_version=INT           The active system SDK version used when filtering versioned
                               init.rc files.
 for checking all APEXes:
@@ -108,7 +109,10 @@ void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
   // on the SDK version.
   for (const auto& c :
        init::FilterVersionedConfigs(init_configs, sdk_version)) {
-    parser.ParseConfigFile(c);
+    auto result = parser.ParseConfigFile(c);
+    if (!result.ok()) {
+      LOG(FATAL) << result.error();
+    }
   }
 
   for (const auto& service : service_list) {
@@ -123,13 +127,13 @@ void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
 
   // The parser will fail if there are any unsupported actions.
   if (parser.parse_error_count() > 0) {
-    LOG(FATAL) << "Failed to parse APEX init rc file(s)";
+    exit(EXIT_FAILURE);
   }
 }
 
 // Extract and validate a single APEX.
-void ScanApex(const std::string& deapexer, const std::string& debugfs,
-              int sdk_version, const std::string& apex_path) {
+void ScanApex(const std::string& deapexer, int sdk_version,
+              const std::string& apex_path) {
   LOG(INFO) << "Checking APEX " << apex_path;
 
   auto apex = OR_FATAL(ApexFile::Open(apex_path));
@@ -137,9 +141,8 @@ void ScanApex(const std::string& deapexer, const std::string& debugfs,
 
   auto extracted_apex = TemporaryDir();
   std::string extracted_apex_dir = extracted_apex.path;
-  std::string deapexer_command = deapexer + " --debugfs_path " + debugfs +
-                                 " extract " + apex_path + " " +
-                                 extracted_apex_dir;
+  std::string deapexer_command =
+      deapexer + " extract " + apex_path + " " + extracted_apex_dir;
   auto code = system(deapexer_command.c_str());
   if (code != 0) {
     LOG(FATAL) << "Error running deapexer command \"" << deapexer_command
@@ -157,8 +160,7 @@ void ScanApex(const std::string& deapexer, const std::string& debugfs,
 //     APEX may flatten to that path.
 //   - Extracted target_files archives which may not contain
 //     flattened <PARTITON>/apex/ directories.
-void ScanPartitionApexes(const std::string& deapexer,
-                         const std::string& debugfs, int sdk_version,
+void ScanPartitionApexes(const std::string& deapexer, int sdk_version,
                          const std::string& partition_dir) {
   LOG(INFO) << "Scanning partition factory APEX dir " << partition_dir;
 
@@ -173,8 +175,7 @@ void ScanPartitionApexes(const std::string& deapexer,
   while ((entry = readdir(apex_dir.get()))) {
     if (base::EndsWith(entry->d_name, ".apex") ||
         base::EndsWith(entry->d_name, ".capex")) {
-      ScanApex(deapexer, debugfs, sdk_version,
-               partition_dir + "/" + entry->d_name);
+      ScanApex(deapexer, sdk_version, partition_dir + "/" + entry->d_name);
     }
   }
 }
@@ -182,9 +183,17 @@ void ScanPartitionApexes(const std::string& deapexer,
 }  // namespace
 
 int main(int argc, char** argv) {
+  android::base::SetMinimumLogSeverity(android::base::ERROR);
   android::base::InitLogging(argv, &android::base::StdioLogger);
 
-  std::string deapexer, debugfs;
+  std::string deapexer, debugfs, fsckerofs;
+  // Use ANDROID_HOST_OUT for convenience
+  const char* host_out = getenv("ANDROID_HOST_OUT");
+  if (host_out) {
+    deapexer = std::string(host_out) + "/bin/deapexer";
+    debugfs = std::string(host_out) + "/bin/debugfs_static";
+    fsckerofs = std::string(host_out) + "/bin/fsck.erofs";
+  }
   int sdk_version = INT_MAX;
   std::map<std::string, std::string> partition_map;
   std::string apex;
@@ -194,6 +203,7 @@ int main(int argc, char** argv) {
         {"help", no_argument, nullptr, 'h'},
         {"deapexer", required_argument, nullptr, 0},
         {"debugfs", required_argument, nullptr, 0},
+        {"fsckerofs", required_argument, nullptr, 0},
         {"sdk_version", required_argument, nullptr, 0},
         {"out_system", required_argument, nullptr, 0},
         {"out_system_ext", required_argument, nullptr, 0},
@@ -219,6 +229,9 @@ int main(int argc, char** argv) {
         }
         if (name == "debugfs") {
           debugfs = optarg;
+        }
+        if (name == "fsckerofs") {
+          fsckerofs = optarg;
         }
         if (name == "sdk_version") {
           if (!base::ParseInt(optarg, &sdk_version)) {
@@ -248,10 +261,17 @@ int main(int argc, char** argv) {
   argc -= optind;
   argv += optind;
 
-  if (argc != 0 || deapexer.empty() || debugfs.empty()) {
+  if (argc != 0) {
     PrintUsage();
     return EXIT_FAILURE;
   }
+  if (deapexer.empty() || debugfs.empty() || fsckerofs.empty()) {
+    PrintUsage();
+    return EXIT_FAILURE;
+  }
+  deapexer += " --debugfs_path " + debugfs;
+  deapexer += " --fsckerofs_path " + fsckerofs;
+
   if (!!apex.empty() + !!partition_map.empty() != 1) {
     PrintUsage();
     return EXIT_FAILURE;
@@ -261,10 +281,10 @@ int main(int argc, char** argv) {
 
   if (!partition_map.empty()) {
     for (const auto& p : partition_map) {
-      ScanPartitionApexes(deapexer, debugfs, sdk_version, p.second);
+      ScanPartitionApexes(deapexer, sdk_version, p.second);
     }
   } else {
-    ScanApex(deapexer, debugfs, sdk_version, apex);
+    ScanApex(deapexer, sdk_version, apex);
   }
   return EXIT_SUCCESS;
 }
