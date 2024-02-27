@@ -73,7 +73,6 @@ cc_defaults {
   ],
 }
 
-
 cc_defaults {
   name: "libapexd-deps",
   defaults: ["libapex-deps"],
@@ -83,6 +82,7 @@ cc_defaults {
     "libvintf",
   ],
   static_libs: [
+    "lib_microdroid_metadata_proto",
     "libapex",
     "libavb",
     "libdm",
@@ -183,6 +183,7 @@ cc_library_static {
   srcs: [
     "apex_classpath.cpp",
     "apex_database.cpp",
+    "apex_file_repository.cpp",
     "apexd.cpp",
     "apexd_lifecycle.cpp",
     "apexd_loop.cpp",
@@ -246,7 +247,6 @@ cc_defaults {
   static_libs: [
     "lib_apex_session_state_proto",
     "lib_apex_manifest_proto",
-    "lib_microdroid_metadata_proto",
     "libavb",
     "libverity_tree",
   ],
@@ -267,7 +267,6 @@ cc_library_static {
   ],
   srcs: [
     "apex_file.cpp",
-    "apex_file_repository.cpp",
     "apex_manifest.cpp",
     "apex_shim.cpp",
     "apexd_verity.cpp",
