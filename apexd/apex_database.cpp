@@ -127,8 +127,7 @@ bool IsActiveMountPoint(const std::string& mount_point) {
 }
 
 Result<void> PopulateLoopInfo(const BlockDevice& top_device,
-                              const std::string& active_apex_dir,
-                              const std::string& decompression_dir,
+                              const std::vector<std::string>& data_dirs,
                               const std::string& apex_hash_tree_dir,
                               MountedApexData* apex_data) {
   std::vector<BlockDevice> slaves = top_device.GetSlaves();
@@ -152,8 +151,9 @@ Result<void> PopulateLoopInfo(const BlockDevice& top_device,
   //  * slaves[0] always represents a data loop device
   //  * if size = 2 then slaves[1] represents an external hashtree loop device
   auto is_data_loop_device = [&](const std::string& backing_file) {
-    return StartsWith(backing_file, active_apex_dir) ||
-           StartsWith(backing_file, decompression_dir);
+    return std::any_of(
+        data_dirs.begin(), data_dirs.end(),
+        [&](const std::string& dir) { return StartsWith(backing_file, dir); });
   };
   if (slaves.size() == 2) {
     if (!is_data_loop_device(backing_files[0])) {
@@ -198,7 +198,7 @@ void NormalizeIfDeleted(MountedApexData* apex_data) {
 
 Result<MountedApexData> ResolveMountInfo(
     const BlockDevice& block, const std::string& mount_point,
-    const std::string& active_apex_dir, const std::string& decompression_dir,
+    const std::vector<std::string>& data_dirs,
     const std::string& apex_hash_tree_dir) {
   bool temp_mount = EndsWith(mount_point, ".tmp");
   // Now, see if it is dm-verity or loop mounted
@@ -225,8 +225,8 @@ Result<MountedApexData> ResolveMountInfo(
       result.mount_point = mount_point;
       result.device_name = *name;
       result.is_temp_mount = temp_mount;
-      auto status = PopulateLoopInfo(block, active_apex_dir, decompression_dir,
-                                     apex_hash_tree_dir, &result);
+      auto status =
+          PopulateLoopInfo(block, data_dirs, apex_hash_tree_dir, &result);
       if (!status.ok()) {
         return status.error();
       }
@@ -261,7 +261,7 @@ Result<MountedApexData> ResolveMountInfo(
 // Need to read /proc/mounts on startup since apexd can start
 // at any time (It's a lazy service).
 void MountedApexDatabase::PopulateFromMounts(
-    const std::string& active_apex_dir, const std::string& decompression_dir,
+    const std::vector<std::string>& data_dirs,
     const std::string& apex_hash_tree_dir) REQUIRES(!mounted_apexes_mutex_) {
   LOG(INFO) << "Populating APEX database from mounts...";
 
@@ -278,9 +278,8 @@ void MountedApexDatabase::PopulateFromMounts(
       continue;
     }
 
-    auto mount_data =
-        ResolveMountInfo(BlockDevice(block), mount_point, active_apex_dir,
-                         decompression_dir, apex_hash_tree_dir);
+    auto mount_data = ResolveMountInfo(BlockDevice(block), mount_point,
+                                       data_dirs, apex_hash_tree_dir);
     if (!mount_data.ok()) {
       LOG(WARNING) << "Can't resolve mount info " << mount_data.error();
       continue;
