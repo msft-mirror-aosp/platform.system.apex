@@ -22,6 +22,8 @@
 #include <strings.h>
 #include <sys/stat.h>
 
+#include <memory>
+
 #include "apexd.h"
 #include "apexd_checkpoint_vold.h"
 #include "apexd_lifecycle.h"
@@ -41,8 +43,9 @@ int HandleSubcommand(int argc, char** argv) {
     SetDefaultTag("apexd-unmount-all");
     bool also_include_staged_apexes =
         argc >= 3 && strcmp("--also-include-staged-apexes", argv[2]) == 0;
+    std::unique_ptr<android::apex::ApexSessionManager> session_manager;
     if (also_include_staged_apexes) {
-      auto session_manager = android::apex::ApexSessionManager::Create(
+      session_manager = android::apex::ApexSessionManager::Create(
           android::apex::GetSessionsDir());
       android::apex::InitializeSessionManager(session_manager.get());
     }
@@ -53,8 +56,9 @@ int HandleSubcommand(int argc, char** argv) {
     SetDefaultTag("apexd-otachroot");
     bool also_include_staged_apexes =
         argc >= 3 && strcmp("--also-include-staged-apexes", argv[2]) == 0;
+    std::unique_ptr<android::apex::ApexSessionManager> session_manager;
     if (also_include_staged_apexes) {
-      auto session_manager = android::apex::ApexSessionManager::Create(
+      session_manager = android::apex::ApexSessionManager::Create(
           android::apex::GetSessionsDir());
       android::apex::InitializeSessionManager(session_manager.get());
     }

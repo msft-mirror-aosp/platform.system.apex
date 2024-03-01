@@ -1933,7 +1933,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapOnlyPreInstalledApexes) {
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
   UnmountOnTearDown(apex_path_1);
   UnmountOnTearDown(apex_path_2);
 
@@ -1970,7 +1970,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapFailsToScanPreInstalledApexes) {
   AddPreInstalledApex("apex.apexd_test.apex");
   AddPreInstalledApex("apex.apexd_test_corrupt_superblock_apex.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 1);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 1);
 }
 
 TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHasHigherVersion) {
@@ -1979,7 +1979,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHasHigherVersion) {
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
   std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   UnmountOnTearDown(apex_path_2);
   UnmountOnTearDown(apex_path_3);
@@ -2027,7 +2027,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHasSameVersion) {
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
   std::string apex_path_3 = AddDataApex("apex.apexd_test.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   UnmountOnTearDown(apex_path_2);
   UnmountOnTearDown(apex_path_3);
@@ -2075,7 +2075,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSystemHasHigherVersion) {
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
   AddDataApex("apex.apexd_test.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   UnmountOnTearDown(apex_path_1);
   UnmountOnTearDown(apex_path_2);
@@ -2116,7 +2116,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHasSameVersionButDifferentKey) {
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
   AddDataApex("apex.apexd_test_different_key.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   UnmountOnTearDown(apex_path_1);
   UnmountOnTearDown(apex_path_2);
@@ -2165,7 +2165,7 @@ TEST_F(ApexdMountTest,
     ASSERT_EQ(static_cast<uint64_t>(apex->GetManifest().version()), 2ULL);
   }
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   UnmountOnTearDown(apex_path_1);
   UnmountOnTearDown(apex_path_2);
@@ -2204,7 +2204,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataApexWithoutPreInstalledApex) {
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
   AddDataApex("apex.apexd_test_different_app.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   UnmountOnTearDown(apex_path_1);
 
@@ -2235,7 +2235,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapPreInstalledSharedLibsApex) {
       "com.android.apex.test.sharedlibs_generated.v1.libvX.apex");
   std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   UnmountOnTearDown(apex_path_2);
   UnmountOnTearDown(apex_path_3);
@@ -2317,7 +2317,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSharedLibsApexBothVersions) {
   std::string apex_path_4 =
       AddDataApex("com.android.apex.test.sharedlibs_generated.v2.libvY.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   UnmountOnTearDown(apex_path_2);
   UnmountOnTearDown(apex_path_3);
@@ -2414,7 +2414,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapOnlyCompressedApexes) {
   std::string apex_path =
       AddPreInstalledApex("com.android.apex.compressed.v1.capex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // Decompressed APEX should be mounted from decompression_dir
   std::string decompressed_apex =
@@ -2458,7 +2458,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDecompressOnlyOnceMultipleCalls) {
   std::string apex_path =
       AddPreInstalledApex("com.android.apex.compressed.v1.capex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // Decompressed OTA APEX should be mounted
   std::string decompressed_ota_apex =
@@ -2475,7 +2475,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDecompressOnlyOnceMultipleCalls) {
   // Call OnOtaChrootBootstrap again. Since we do not hardlink decompressed APEX
   // to /data/apex/active directory when in chroot, when selecting apex for
   // activation, we will end up selecting compressed APEX again.
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // Compare write time to ensure we did not decompress again
   auto last_write_time_2 = fs::last_write_time(decompressed_ota_apex, ec);
@@ -2493,7 +2493,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapUpgradeCapex) {
   std::string apex_path =
       AddPreInstalledApex("com.android.apex.compressed.v2.capex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // Upgraded decompressed APEX should be mounted from decompression dir
   std::string decompressed_active_apex =
@@ -2542,7 +2542,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSamegradeCapex) {
       StringPrintf("%s/different-name.capex", GetBuiltInDir().c_str());
   fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"), apex_path);
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // Previously decompressed APEX should be mounted from decompression_dir
   std::string decompressed_active_apex = StringPrintf(
@@ -2591,7 +2591,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSamegradeCapexDifferentDigest) {
   // digest
   auto apex_path = AddPreInstalledApex("com.android.apex.compressed.v1.capex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // New decompressed ota APEX should be mounted with kOtaApexPackageSuffix
   std::string decompressed_ota_apex =
@@ -2656,7 +2656,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSamegradeCapexDifferentKey) {
   // Place a same version capex in current built_in_dir, which has different key
   auto apex_path = AddPreInstalledApex("com.android.apex.compressed.v1.capex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // New decompressed APEX should be mounted from ota_reserved directory
   std::string decompressed_active_apex =
@@ -2704,7 +2704,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapCapexToApex) {
   std::string apex_path =
       AddPreInstalledApex("com.android.apex.compressed.v1_original.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // New uncompressed APEX should be mounted
   UnmountOnTearDown(apex_path);
@@ -2740,7 +2740,7 @@ TEST_F(ApexdMountTest,
   std::string apex_path =
       AddPreInstalledApex("com.android.apex.compressed.v1.capex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // Pre-installed CAPEX should be decompressed again and mounted from
   // decompression_dir
@@ -2777,7 +2777,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHigherThanCapex) {
   auto data_apex_path =
       AddDataApex("com.android.apex.compressed.v2_original.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // Data APEX should be mounted
   UnmountOnTearDown(data_apex_path);
@@ -2825,7 +2825,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataLowerThanCapex) {
   auto apex_path = AddPreInstalledApex("com.android.apex.compressed.v2.capex");
   AddDataApex("com.android.apex.compressed.v1_original.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // Decompressed APEX should be mounted from reserved dir
   std::string decompressed_active_apex =
@@ -2871,7 +2871,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataSameAsCapex) {
   auto data_apex_path =
       AddDataApex("com.android.apex.compressed.v1_original.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // Data APEX should be mounted
   UnmountOnTearDown(data_apex_path);
@@ -2919,7 +2919,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHasDifferentKeyThanCapex) {
   // Place a same version capex in current built_in_dir, which has different key
   auto apex_path = AddPreInstalledApex("com.android.apex.compressed.v1.capex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   // New decompressed APEX should be mounted from ota_reserved directory
   std::string decompressed_active_apex =
@@ -3052,7 +3052,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSelinuxLabelsAreCorrect) {
 
   UnmountOnTearDown(apex_path_2);
   UnmountOnTearDown(apex_path_3);
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
   EXPECT_EQ(GetSelinuxContext("/apex/apex-info-list.xml"),
             "u:object_r:apex_info_file:s0");
@@ -3072,7 +3072,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDmDevicesHaveCorrectName) {
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
   std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
   UnmountOnTearDown(apex_path_2);
   UnmountOnTearDown(apex_path_3);
 
@@ -3102,7 +3102,7 @@ TEST_F(ApexdMountTest,
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
   UnmountOnTearDown(apex_path_2);
 
   auto apex_mounts = GetApexMounts();
@@ -3141,7 +3141,7 @@ TEST_F(ApexdMountTest,
   std::string apex_path_3 =
       AddDataApex("apex.apexd_test_manifest_mismatch.apex");
 
-  ASSERT_EQ(OnOtaChrootBootstrap(), 0);
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
   UnmountOnTearDown(apex_path_1);
   UnmountOnTearDown(apex_path_2);
 
