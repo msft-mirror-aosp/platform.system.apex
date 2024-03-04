@@ -211,7 +211,7 @@ int OnStartInVmMode();
 
 // Activates apexes in otapreot_chroot environment.
 // If `also_include_staged_apexes` is true, it's for Pre-reboot Dexopt.
-int OnOtaChrootBootstrap(bool also_include_staged_apexes = false);
+int OnOtaChrootBootstrap(bool also_include_staged_apexes);
 
 android::apex::MountedApexDatabase& GetApexDatabaseForTesting();
 
