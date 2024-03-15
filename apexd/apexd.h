@@ -177,7 +177,9 @@ void RemoveInactiveDataApex();
 void BootCompletedCleanup();
 int SnapshotOrRestoreDeUserData();
 
-int UnmountAll();
+// Unmounts all apexes.
+// If `also_include_staged_apexes` is true, it's for Pre-reboot Dexopt.
+int UnmountAll(bool also_include_staged_apexes);
 
 android::base::Result<MountedApexDatabase::MountedApexData>
 GetTempMountedApexData(const std::string& package);
@@ -208,8 +210,8 @@ android::base::Result<void> ReserveSpaceForCompressedApex(
 int OnStartInVmMode();
 
 // Activates apexes in otapreot_chroot environment.
-// TODO(b/172911822): support compressed apexes.
-int OnOtaChrootBootstrap();
+// If `also_include_staged_apexes` is true, it's for Pre-reboot Dexopt.
+int OnOtaChrootBootstrap(bool also_include_staged_apexes);
 
 android::apex::MountedApexDatabase& GetApexDatabaseForTesting();
 

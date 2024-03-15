@@ -2110,16 +2110,8 @@ void ScanStagedSessionsDirAndStage() {
       continue;
     }
 
-    std::vector<std::string> dirs_to_scan;
-    if (session.GetChildSessionIds().empty()) {
-      dirs_to_scan.push_back(std::string(gConfig->staged_session_dir) +
-                             "/session_" + std::to_string(session_id));
-    } else {
-      for (auto child_session_id : session.GetChildSessionIds()) {
-        dirs_to_scan.push_back(std::string(gConfig->staged_session_dir) +
-                               "/session_" + std::to_string(child_session_id));
-      }
-    }
+    std::vector<std::string> dirs_to_scan =
+        session.GetStagedApexDirs(gConfig->staged_session_dir);
 
     std::vector<std::string> apexes;
     bool scan_successful = true;
@@ -2585,9 +2577,9 @@ void Initialize(CheckpointInterface* checkpoint_service) {
     return;
   }
 
-  gMountedApexes.PopulateFromMounts(gConfig->active_apex_data_dir,
-                                    gConfig->decompression_dir,
-                                    gConfig->apex_hash_tree_dir);
+  gMountedApexes.PopulateFromMounts(
+      {gConfig->active_apex_data_dir, gConfig->decompression_dir},
+      gConfig->apex_hash_tree_dir);
 }
 
 // Note: Pre-installed apex are initialized in Initialize(CheckpointInterface*)
@@ -3244,10 +3236,21 @@ void BootCompletedCleanup() {
   DeleteUnusedVerityDevices();
 }
 
-int UnmountAll() {
-  gMountedApexes.PopulateFromMounts(gConfig->active_apex_data_dir,
-                                    gConfig->decompression_dir,
-                                    gConfig->apex_hash_tree_dir);
+int UnmountAll(bool also_include_staged_apexes) {
+  std::vector<std::string> data_dirs = {gConfig->active_apex_data_dir,
+                                        gConfig->decompression_dir};
+
+  if (also_include_staged_apexes) {
+    for (const ApexSession& session :
+         gSessionManager->GetSessionsInState(SessionState::STAGED)) {
+      std::vector<std::string> dirs_to_scan =
+          session.GetStagedApexDirs(gConfig->staged_session_dir);
+      std::move(dirs_to_scan.begin(), dirs_to_scan.end(),
+                std::back_inserter(data_dirs));
+    }
+  }
+
+  gMountedApexes.PopulateFromMounts(data_dirs, gConfig->apex_hash_tree_dir);
   int ret = 0;
   gMountedApexes.ForallMountedApexes([&](const std::string& /*package*/,
                                          const MountedApexData& data,
@@ -3531,7 +3534,7 @@ int OnStartInVmMode() {
   return 0;
 }
 
-int OnOtaChrootBootstrap() {
+int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
   auto& instance = ApexFileRepository::GetInstance();
   if (auto status = instance.AddPreInstalledApex(gConfig->apex_built_in_dirs);
       !status.ok()) {
@@ -3539,13 +3542,33 @@ int OnOtaChrootBootstrap() {
                << Join(gConfig->apex_built_in_dirs, ',');
     return 1;
   }
+  if (also_include_staged_apexes) {
+    // Scan staged dirs, and then scan the active dir. If a module is in both a
+    // staged dir and the active dir, the APEX with a higher version will be
+    // picked. If the versions are equal, the APEX in staged dir will be picked.
+    //
+    // The result is an approximation of what the active dir will actually have
+    // after the reboot. In case of a downgrade install, it differs from the
+    // actual, but this is not a supported case.
+    for (const ApexSession& session :
+         gSessionManager->GetSessionsInState(SessionState::STAGED)) {
+      std::vector<std::string> dirs_to_scan =
+          session.GetStagedApexDirs(gConfig->staged_session_dir);
+      for (const std::string& dir_to_scan : dirs_to_scan) {
+        if (auto status = instance.AddDataApex(dir_to_scan); !status.ok()) {
+          LOG(ERROR) << "Failed to scan staged apexes from " << dir_to_scan;
+          return 1;
+        }
+      }
+    }
+  }
   if (auto status = instance.AddDataApex(gConfig->active_apex_data_dir);
       !status.ok()) {
     LOG(ERROR) << "Failed to scan upgraded apexes from "
                << gConfig->active_apex_data_dir;
-    // Failing to scan upgraded apexes is not fatal, since we can still try to
-    // run otapreopt using only pre-installed apexes. Worst case, apps will be
-    // re-optimized on next boot.
+    // Fail early because we know we will be wasting cycles generating garbage
+    // if we continue.
+    return 1;
   }
 
   // Create directories for APEX shared libraries.
