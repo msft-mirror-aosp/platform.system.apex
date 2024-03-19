@@ -3675,16 +3675,10 @@ Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file,
     if (force) {
       return Result<void>{};
     }
-    auto dirs = GetSubdirs(mount_point);
-    if (!dirs.ok()) {
-      return dirs.error();
-    }
-    if (std::find(dirs->begin(), dirs->end(), mount_point + "/app") !=
-        dirs->end()) {
+    if (access((mount_point + "/app").c_str(), F_OK) == 0) {
       return Error() << apex_file.GetPath() << " contains app inside";
     }
-    if (std::find(dirs->begin(), dirs->end(), mount_point + "/priv-app") !=
-        dirs->end()) {
+    if (access((mount_point + "/priv-app").c_str(), F_OK) == 0) {
       return Error() << apex_file.GetPath() << " contains priv-app inside";
     }
     if (IsVendorApex(apex_file)) {
