@@ -17,7 +17,6 @@ package {
 }
 
 apexer_tools = [
-      "apexer",
       "aapt2",
       "avbtool",
       "conv_apex_manifest",
@@ -122,6 +121,7 @@ python_test_host {
 }
 
 apexer_deps_minus_go_tools = apexer_tools + [
+    "apexer",
     "deapexer",
     "debugfs_static",
     "blkid",
