@@ -14,22 +14,11 @@
 
 #pragma once
 
+#include <android/llndk-versioning.h>
 #include <stdint.h>
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-
-// TODO(b/302088370) remove this when __INTRODUCED_IN_LLNDK is available
-#ifndef __INTRODUCED_IN_LLNDK
-#ifdef __ANDROID_VENDOR__
-#define __INTRODUCED_IN_LLNDK(vendor_api_level)                                \
-  __attribute__((                                                              \
-      enable_if(__ANDROID_VENDOR_API__ >= vendor_api_level,                    \
-                "available in vendor API level " #vendor_api_level)))
-#else // __ANDROID_VENDOR__
-#define __INTRODUCED_IN_LLNDK(vendor_api_level)
-#endif //__ANDROID_VENDOR__
-#endif // __INTRODUCED_IN_LLNDK
 
 /**
  * AApexInfo represents an information object for an APEX including name
