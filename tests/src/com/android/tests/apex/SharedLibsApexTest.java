@@ -195,9 +195,11 @@ public class SharedLibsApexTest extends BaseHostJUnit4Test {
         String runAsResult = getDevice().executeShellCommand(
                 "/apex/com.android.apex.test.foo/bin/foo_test");
         assertThat(runAsResult).isEqualTo("FOO_VERSION_1 SHARED_LIB_VERSION_X");
-        runAsResult = getDevice().executeShellCommand(
-                "/apex/com.android.apex.test.bar/bin/bar_test32");
-        assertThat(runAsResult).isEqualTo("BAR_VERSION_1 SHARED_LIB_VERSION_X");
+        if (CpuFeatures.isX86_32(getDevice()) || CpuFeatures.isArm32(getDevice())) {
+            runAsResult = getDevice().executeShellCommand(
+                    "/apex/com.android.apex.test.bar/bin/bar_test32");
+            assertThat(runAsResult).isEqualTo("BAR_VERSION_1 SHARED_LIB_VERSION_X");
+        }
         if (CpuFeatures.isX86_64(getDevice()) || CpuFeatures.isArm64(getDevice())) {
             runAsResult = getDevice().executeShellCommand(
                     "/apex/com.android.apex.test.bar/bin/bar_test64");
@@ -220,9 +222,11 @@ public class SharedLibsApexTest extends BaseHostJUnit4Test {
         runAsResult = getDevice().executeShellCommand(
             "/apex/com.android.apex.test.foo/bin/foo_test");
         assertThat(runAsResult).isEqualTo("FOO_VERSION_2 SHARED_LIB_VERSION_Y");
-        runAsResult = getDevice().executeShellCommand(
-            "/apex/com.android.apex.test.bar/bin/bar_test32");
-        assertThat(runAsResult).isEqualTo("BAR_VERSION_2 SHARED_LIB_VERSION_Y");
+        if (CpuFeatures.isX86_32(getDevice()) || CpuFeatures.isArm32(getDevice())) {
+            runAsResult = getDevice().executeShellCommand(
+                "/apex/com.android.apex.test.bar/bin/bar_test32");
+            assertThat(runAsResult).isEqualTo("BAR_VERSION_2 SHARED_LIB_VERSION_Y");
+        }
         if (CpuFeatures.isX86_64(getDevice()) || CpuFeatures.isArm64(getDevice())) {
             runAsResult = getDevice().executeShellCommand(
                 "/apex/com.android.apex.test.bar/bin/bar_test64");
@@ -267,9 +271,11 @@ public class SharedLibsApexTest extends BaseHostJUnit4Test {
         String runAsResult = getDevice().executeShellCommand(
                 "/apex/com.android.apex.test.foo/bin/foo_test");
         assertThat(runAsResult).isEqualTo("FOO_VERSION_1 SHARED_LIB_VERSION_X");
-        runAsResult = getDevice().executeShellCommand(
-                "/apex/com.android.apex.test.bar/bin/bar_test32");
-        assertThat(runAsResult).isEqualTo("BAR_VERSION_1 SHARED_LIB_VERSION_X");
+        if (CpuFeatures.isX86_32(getDevice()) || CpuFeatures.isArm32(getDevice())) {
+            runAsResult = getDevice().executeShellCommand(
+                    "/apex/com.android.apex.test.bar/bin/bar_test32");
+            assertThat(runAsResult).isEqualTo("BAR_VERSION_1 SHARED_LIB_VERSION_X");
+        }
         if (CpuFeatures.isX86_64(getDevice()) || CpuFeatures.isArm64(getDevice())) {
             runAsResult = getDevice().executeShellCommand(
                     "/apex/com.android.apex.test.bar/bin/bar_test64");
@@ -308,9 +314,11 @@ public class SharedLibsApexTest extends BaseHostJUnit4Test {
         runAsResult = getDevice().executeShellCommand(
                 "/apex/com.android.apex.test.foo/bin/foo_test");
         assertThat(runAsResult).isEqualTo("FOO_VERSION_1 SHARED_LIB_VERSION_X");
-        runAsResult = getDevice().executeShellCommand(
-                "/apex/com.android.apex.test.bar/bin/bar_test32");
-        assertThat(runAsResult).isEqualTo("BAR_VERSION_1 SHARED_LIB_VERSION_X");
+        if (CpuFeatures.isX86_32(getDevice()) || CpuFeatures.isArm32(getDevice())) {
+            runAsResult = getDevice().executeShellCommand(
+                    "/apex/com.android.apex.test.bar/bin/bar_test32");
+            assertThat(runAsResult).isEqualTo("BAR_VERSION_1 SHARED_LIB_VERSION_X");
+        }
         if (CpuFeatures.isX86_64(getDevice()) || CpuFeatures.isArm64(getDevice())) {
             runAsResult = getDevice().executeShellCommand(
                     "/apex/com.android.apex.test.bar/bin/bar_test64");
@@ -350,9 +358,11 @@ public class SharedLibsApexTest extends BaseHostJUnit4Test {
         runAsResult = getDevice().executeShellCommand(
             "/apex/com.android.apex.test.foo/bin/foo_test");
         assertThat(runAsResult).isEqualTo("FOO_VERSION_2 SHARED_LIB_VERSION_Y");
-        runAsResult = getDevice().executeShellCommand(
-            "/apex/com.android.apex.test.bar/bin/bar_test32");
-        assertThat(runAsResult).isEqualTo("BAR_VERSION_2 SHARED_LIB_VERSION_Y");
+        if (CpuFeatures.isX86_32(getDevice()) || CpuFeatures.isArm32(getDevice())) {
+            runAsResult = getDevice().executeShellCommand(
+                "/apex/com.android.apex.test.bar/bin/bar_test32");
+            assertThat(runAsResult).isEqualTo("BAR_VERSION_2 SHARED_LIB_VERSION_Y");
+        }
         if (CpuFeatures.isX86_64(getDevice()) || CpuFeatures.isArm64(getDevice())) {
             runAsResult = getDevice().executeShellCommand(
                 "/apex/com.android.apex.test.bar/bin/bar_test64");
@@ -386,9 +396,11 @@ public class SharedLibsApexTest extends BaseHostJUnit4Test {
         runAsResult = getDevice().executeShellCommand(
             "/apex/com.android.apex.test.foo/bin/foo_test");
         assertThat(runAsResult).isEqualTo("FOO_VERSION_2 SHARED_LIB_VERSION_Y");
-        runAsResult = getDevice().executeShellCommand(
-            "/apex/com.android.apex.test.bar/bin/bar_test32");
-        assertThat(runAsResult).isEqualTo("BAR_VERSION_2 SHARED_LIB_VERSION_Y");
+        if (CpuFeatures.isX86_32(getDevice()) || CpuFeatures.isArm32(getDevice())) {
+            runAsResult = getDevice().executeShellCommand(
+                "/apex/com.android.apex.test.bar/bin/bar_test32");
+            assertThat(runAsResult).isEqualTo("BAR_VERSION_2 SHARED_LIB_VERSION_Y");
+        }
         if (CpuFeatures.isX86_64(getDevice()) || CpuFeatures.isArm64(getDevice())) {
             runAsResult = getDevice().executeShellCommand(
                 "/apex/com.android.apex.test.bar/bin/bar_test64");
@@ -430,9 +442,11 @@ public class SharedLibsApexTest extends BaseHostJUnit4Test {
         String runAsResult = getDevice().executeShellCommand(
                 "/apex/com.android.apex.test.foo/bin/foo_test");
         assertThat(runAsResult).isEqualTo("FOO_VERSION_1 SHARED_LIB_VERSION_X");
-        runAsResult = getDevice().executeShellCommand(
-                "/apex/com.android.apex.test.bar/bin/bar_test32");
-        assertThat(runAsResult).isEqualTo("BAR_VERSION_1 SHARED_LIB_VERSION_X");
+        if (CpuFeatures.isX86_32(getDevice()) || CpuFeatures.isArm32(getDevice())) {
+            runAsResult = getDevice().executeShellCommand(
+                    "/apex/com.android.apex.test.bar/bin/bar_test32");
+            assertThat(runAsResult).isEqualTo("BAR_VERSION_1 SHARED_LIB_VERSION_X");
+        }
         if (CpuFeatures.isX86_64(getDevice()) || CpuFeatures.isArm64(getDevice())) {
             runAsResult = getDevice().executeShellCommand(
                     "/apex/com.android.apex.test.bar/bin/bar_test64");
@@ -465,9 +479,11 @@ public class SharedLibsApexTest extends BaseHostJUnit4Test {
         runAsResult = getDevice().executeShellCommand(
                 "/apex/com.android.apex.test.foo/bin/foo_test");
         assertThat(runAsResult).isEqualTo("FOO_VERSION_1 SHARED_LIB_VERSION_X");
-        runAsResult = getDevice().executeShellCommand(
-                "/apex/com.android.apex.test.bar/bin/bar_test32");
-        assertThat(runAsResult).isEqualTo("BAR_VERSION_1 SHARED_LIB_VERSION_X");
+        if (CpuFeatures.isX86_32(getDevice()) || CpuFeatures.isArm32(getDevice())) {
+            runAsResult = getDevice().executeShellCommand(
+                    "/apex/com.android.apex.test.bar/bin/bar_test32");
+            assertThat(runAsResult).isEqualTo("BAR_VERSION_1 SHARED_LIB_VERSION_X");
+        }
         if (CpuFeatures.isX86_64(getDevice()) || CpuFeatures.isArm64(getDevice())) {
             runAsResult = getDevice().executeShellCommand(
                     "/apex/com.android.apex.test.bar/bin/bar_test64");
@@ -524,9 +540,11 @@ public class SharedLibsApexTest extends BaseHostJUnit4Test {
         runAsResult = getDevice().executeShellCommand(
             "/apex/com.android.apex.test.foo/bin/foo_test");
         assertThat(runAsResult).isEqualTo("FOO_VERSION_2 SHARED_LIB_VERSION_Y");
-        runAsResult = getDevice().executeShellCommand(
-            "/apex/com.android.apex.test.bar/bin/bar_test32");
-        assertThat(runAsResult).isEqualTo("BAR_VERSION_2 SHARED_LIB_VERSION_Y");
+        if (CpuFeatures.isX86_32(getDevice()) || CpuFeatures.isArm32(getDevice())) {
+            runAsResult = getDevice().executeShellCommand(
+                "/apex/com.android.apex.test.bar/bin/bar_test32");
+            assertThat(runAsResult).isEqualTo("BAR_VERSION_2 SHARED_LIB_VERSION_Y");
+        }
         if (CpuFeatures.isX86_64(getDevice()) || CpuFeatures.isArm64(getDevice())) {
             runAsResult = getDevice().executeShellCommand(
                 "/apex/com.android.apex.test.bar/bin/bar_test64");
