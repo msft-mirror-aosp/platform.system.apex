@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// TODO: consider removing _prebuilt suffix from module names and make use of
-// 'prefer: true'
-
 package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
@@ -40,7 +37,6 @@ prebuilt_apex {
     },
   },
   filename: "com.android.apex.cts.shim.apex",
-  prefer: true,
   installable: true,
 }
 
