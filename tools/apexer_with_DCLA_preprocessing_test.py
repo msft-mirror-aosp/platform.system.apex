@@ -16,13 +16,13 @@
 
 """Unit tests for apexer_with_DCLA_preprocessing."""
 import hashlib
-import logging
+import importlib.resources
 import os
 import shutil
 import stat
 import subprocess
 import tempfile
-from typing import List
+from typing import List, BinaryIO
 import unittest
 import zipfile
 
@@ -39,11 +39,8 @@ TEST_APEX = 'com.android.example.apex'
 # test.
 DEBUG_TEST = False
 
-def get_current_dir():
-  """returns the current dir, relative to the script dir."""
-  # The script dir is the one we want, which could be different from pwd.
-  current_dir = os.path.dirname(os.path.realpath(__file__))
-  return current_dir
+def resources():
+  return importlib.resources.files('apexer_with_DCLA_preprocessing_test')
 
 # TODO: consolidate these common test utilities into a common python_library_host
 # to be shared across tests under system/apex
@@ -53,43 +50,16 @@ def run_command(cmd: List[str]) -> None:
     if DEBUG_TEST:
       cmd_str = ' '.join(cmd)
       print(f'\nRunning: \n{cmd_str}\n')
-    res = subprocess.run(
+    subprocess.run(
         cmd,
         check=True,
+        text=True,
         stdout=subprocess.PIPE,
-        universal_newlines=True,
         stderr=subprocess.PIPE)
   except subprocess.CalledProcessError as err:
     print(err.stderr)
     print(err.output)
     raise err
-
-def get_apexer_with_DCLA_preprocessing() -> str:
-  tool_binary = os.path.join(get_current_dir(), 'apexer_with_DCLA_preprocessing')
-  if not os.path.isfile(tool_binary):
-    raise FileNotFoundError(f'cannot find tooling apexer with DCLA preprocessing')
-  else:
-    os.chmod(tool_binary, stat.S_IRUSR | stat.S_IXUSR);
-    return tool_binary
-
-def get_host_tool(tool_name: str) -> str:
-  """get host tools."""
-  tool_binary = os.path.join(get_current_dir(), 'bin', tool_name)
-  if not os.path.isfile(tool_binary):
-    host_build_top = os.environ.get('ANDROID_BUILD_TOP')
-    if host_build_top:
-      host_command_dir = os.path.join(host_build_top, 'out/host/linux-x86/bin')
-      tool_binary = os.path.join(host_command_dir, tool_name)
-      if not os.path.isfile(tool_binary):
-        host_command_dir = os.path.join(host_build_top, 'prebuilts/sdk/current/public')
-        tool_binary = os.path.join(host_command_dir, tool_name)
-    else:
-      tool_binary = shutil.which(tool_name)
-
-  if not tool_binary or not os.path.isfile(tool_binary):
-    raise FileNotFoundError(f'cannot find tooling {tool_name}')
-  else:
-    return tool_binary
 
 def get_digest(file_path: str) -> str:
   """Get sha512 digest of a file """
@@ -103,8 +73,7 @@ class ApexerWithDCLAPreprocessingTest(unittest.TestCase):
 
   def setUp(self):
     self._to_cleanup = []
-    tools_zip_file = os.path.join(get_current_dir(), 'apexer_test_host_tools.zip')
-    self.unzip_host_tools(tools_zip_file)
+    self.unzip_host_tools()
 
   def tearDown(self):
     if not DEBUG_TEST:
@@ -122,7 +91,7 @@ class ApexerWithDCLAPreprocessingTest(unittest.TestCase):
     self._to_cleanup.append(tmp_dir)
     return tmp_dir
 
-  def expand_apex(self, apex_file: str) -> None:
+  def expand_apex(self, apex_file: str | BinaryIO) -> None:
     """expand an apex file include apex_payload."""
     apex_dir = self.create_temp_dir()
     with zipfile.ZipFile(apex_file, 'r') as apex_zip:
@@ -130,8 +99,7 @@ class ApexerWithDCLAPreprocessingTest(unittest.TestCase):
     payload_img = os.path.join(apex_dir, 'apex_payload.img')
     extract_dir = os.path.join(apex_dir, 'payload_extract')
     os.mkdir(extract_dir)
-    debugfs = get_host_tool('debugfs_static')
-    run_command([debugfs, payload_img, '-R', f'rdump / {extract_dir}'])
+    run_command([self.debugfs_static, payload_img, '-R', f'rdump / {extract_dir}'])
 
     # remove /etc and /lost+found and /payload_extract/apex_manifest.pb
     lost_and_found = os.path.join(extract_dir, 'lost+found')
@@ -144,23 +112,42 @@ class ApexerWithDCLAPreprocessingTest(unittest.TestCase):
 
     return apex_dir
 
-  def unzip_host_tools(self, host_tools_file_path: str) -> None:
-    dir_name = get_current_dir()
-    if os.path.isfile(host_tools_file_path):
-      with zipfile.ZipFile(host_tools_file_path, 'r') as zip_obj:
-        zip_obj.extractall(dir_name)
+  def unzip_host_tools(self) -> None:
+    host_tools_dir = self.create_temp_dir()
+    with (
+      resources().joinpath('apexer_test_host_tools.zip').open(mode='rb') as host_tools_zip_resource,
+      resources().joinpath(TEST_PRIVATE_KEY).open(mode='rb') as key_file_resource,
+      resources().joinpath('apexer_with_DCLA_preprocessing').open(mode='rb') as apexer_wrapper_resource,
+    ):
+      with zipfile.ZipFile(host_tools_zip_resource, 'r') as zip_obj:
+        zip_obj.extractall(host_tools_dir)
+      apexer_wrapper = os.path.join(host_tools_dir, 'apexer_with_DCLA_preprocessing')
+      with open(apexer_wrapper, 'wb') as f:
+        shutil.copyfileobj(apexer_wrapper_resource, f)
+      key_file = os.path.join(host_tools_dir, 'key.pem')
+      with open(key_file, 'wb') as f:
+        shutil.copyfileobj(key_file_resource, f)
 
-    for i in ["apexer", "deapexer", "avbtool", "mke2fs", "sefcontext_compile", "e2fsdroid",
-      "resize2fs", "soong_zip", "aapt2", "merge_zips", "zipalign", "debugfs_static",
-      "signapk.jar", "android.jar"]:
-      file_path = os.path.join(dir_name, "bin", i)
+
+    self.apexer_tool_path = os.path.join(host_tools_dir, 'bin')
+    self.apexer_wrapper = apexer_wrapper
+    self.key_file = key_file
+    self.debugfs_static = os.path.join(host_tools_dir, 'bin/debugfs_static')
+    self.android_jar = os.path.join(host_tools_dir, 'bin/android.jar')
+    self.apexer = os.path.join(host_tools_dir, 'bin/apexer')
+    os.chmod(apexer_wrapper, stat.S_IRUSR | stat.S_IXUSR);
+    for i in ['apexer', 'deapexer', 'avbtool', 'mke2fs', 'sefcontext_compile', 'e2fsdroid',
+      'resize2fs', 'soong_zip', 'aapt2', 'merge_zips', 'zipalign', 'debugfs_static',
+      'signapk.jar', 'android.jar']:
+      file_path = os.path.join(host_tools_dir, 'bin', i)
       if os.path.exists(file_path):
         os.chmod(file_path, stat.S_IRUSR | stat.S_IXUSR);
 
+
   def test_DCLA_preprocessing(self):
     """test DCLA preprocessing done properly."""
-    apex_file = os.path.join(get_current_dir(), TEST_APEX + '.apex')
-    apex_dir = self.expand_apex(apex_file)
+    with resources().joinpath(TEST_APEX + '.apex').open(mode='rb') as apex_file:
+      apex_dir = self.expand_apex(apex_file)
 
     # create apex canned_fs_config file, TEST_APEX does not come with one
     canned_fs_config_file = os.path.join(apex_dir, 'canned_fs_config')
@@ -174,8 +161,8 @@ class ApexerWithDCLAPreprocessingTest(unittest.TestCase):
       foo_digest = get_digest(foo_file)
 
       # add /lib dir and /lib/foo.so in canned_fs_config
-      f.write(f'/lib 0 2000 0755\n')
-      f.write(f'/lib/foo.so 1000 1000 0644\n')
+      f.write('/lib 0 2000 0755\n')
+      f.write('/lib/foo.so 1000 1000 0644\n')
 
       # add /lib/bar.so file
       lib_dir = os.path.join(apex_dir, 'payload_extract', 'lib64')
@@ -186,29 +173,25 @@ class ApexerWithDCLAPreprocessingTest(unittest.TestCase):
       bar_digest = get_digest(bar_file)
 
       # add /lib dir and /lib/foo.so in canned_fs_config
-      f.write(f'/lib64 0 2000 0755\n')
-      f.write(f'/lib64/bar.so 1000 1000 0644\n')
+      f.write('/lib64 0 2000 0755\n')
+      f.write('/lib64/bar.so 1000 1000 0644\n')
 
-      f.write(f'/ 0 2000 0755\n')
-      f.write(f'/apex_manifest.pb 1000 1000 0644\n')
+      f.write('/ 0 2000 0755\n')
+      f.write('/apex_manifest.pb 1000 1000 0644\n')
 
     # call apexer_with_DCLA_preprocessing
     manifest_file = os.path.join(apex_dir, 'apex_manifest.pb')
     build_info_file = os.path.join(apex_dir, 'apex_build_info.pb')
-    key_file = os.path.join(get_current_dir(), TEST_PRIVATE_KEY)
-    apexer= get_host_tool('apexer')
-    apexer_wrapper = get_apexer_with_DCLA_preprocessing()
-    android_jar = get_host_tool('android.jar')
     apex_out = os.path.join(apex_dir, 'DCLA_preprocessed_output.apex')
-    run_command([apexer_wrapper,
-                 '--apexer', apexer,
+    run_command([self.apexer_wrapper,
+                 '--apexer', self.apexer,
                  '--canned_fs_config', canned_fs_config_file,
                  os.path.join(apex_dir, 'payload_extract'),
                  apex_out,
                  '--',
-                 '--android_jar_path', android_jar,
-                 '--apexer_tool_path', os.path.dirname(apexer),
-                 '--key', key_file,
+                 '--android_jar_path', self.android_jar,
+                 '--apexer_tool_path', self.apexer_tool_path,
+                 '--key', self.key_file,
                  '--manifest', manifest_file,
                  '--build_info', build_info_file,
                  '--payload_fs_type', 'ext4',
