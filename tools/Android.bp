@@ -141,7 +141,7 @@ sh_test_host {
 
 python_library_host {
     name: "apexer_wrapper_utils",
-    srcs: ["apexer_wrapper_utils.py"]
+    srcs: ["apexer_wrapper_utils.py"],
 }
 
 python_binary_host {
@@ -165,6 +165,9 @@ python_test_host {
     srcs: [
         "apexer_with_DCLA_preprocessing_test.py",
     ],
+    // Need to add a pkg_path because importlib.resources
+    // cannot load resources from the root package.
+    pkg_path: "apexer_with_DCLA_preprocessing_test",
     data: [
         ":apexer_test_host_tools",
         ":apexer_with_DCLA_preprocessing",
@@ -174,6 +177,11 @@ python_test_host {
     test_suites: ["general-tests"],
     test_options: {
         unit_test: true,
+    },
+    version: {
+        py3: {
+            embedded_launcher: true,
+        },
     },
 }
 
