@@ -25,6 +25,7 @@ import stat
 import subprocess
 import tempfile
 import unittest
+from importlib import resources
 from zipfile import ZipFile
 
 from apex_manifest import ValidateApexManifest
@@ -125,12 +126,6 @@ def get_sha1sum(file_path):
     return h.hexdigest()
 
 
-def get_current_dir():
-    """Returns the current dir, relative to the script dir."""
-    # The script dir is the one we want, which could be different from pwd.
-    current_dir = os.path.dirname(os.path.realpath(__file__))
-    return current_dir
-
 def round_up(size, unit):
     assert unit & (unit - 1) == 0
     return (size + unit - 1) & (~(unit - 1))
@@ -163,7 +158,7 @@ DEBUG_TEST = False
 class ApexerRebuildTest(unittest.TestCase):
     def setUp(self):
         self._to_cleanup = []
-        self._get_host_tools(os.path.join(get_current_dir(), "apexer_test_host_tools.zip"))
+        self._get_host_tools()
 
     def tearDown(self):
         if not DEBUG_TEST:
@@ -176,11 +171,11 @@ class ApexerRebuildTest(unittest.TestCase):
         else:
             print(self._to_cleanup)
 
-    def _get_host_tools(self, host_tools_file_path):
+    def _get_host_tools(self):
         dir_name = tempfile.mkdtemp(prefix=self._testMethodName+"_host_tools_")
         self._to_cleanup.append(dir_name)
-        if os.path.isfile(host_tools_file_path):
-            with ZipFile(host_tools_file_path, 'r') as zip_obj:
+        with resources.files("apexer_test").joinpath("apexer_test_host_tools.zip").open('rb') as f:
+            with ZipFile(f, 'r') as zip_obj:
                 zip_obj.extractall(path=dir_name)
 
         files = {}
@@ -196,7 +191,7 @@ class ApexerRebuildTest(unittest.TestCase):
         self.host_tools = files
         self.host_tools_path = os.path.join(dir_name, "bin")
 
-        path = os.path.join(dir_name, "bin")
+        path = self.host_tools_path
         if "PATH" in os.environ:
             path += ":" + os.environ["PATH"]
         os.environ["PATH"] = path
@@ -207,6 +202,15 @@ class ApexerRebuildTest(unittest.TestCase):
         if "ANDROID_HOST_OUT" in os.environ:
             ld_library_path += ":" + os.path.join(os.environ["ANDROID_HOST_OUT"], "lib64")
         os.environ["LD_LIBRARY_PATH"] = ld_library_path
+
+    def _extract_resource(self, resource_name):
+        with (
+            resources.files("apexer_test").joinpath(resource_name).open('rb') as f,
+            tempfile.NamedTemporaryFile(prefix=resource_name.replace('/', '_'), delete=False) as f2,
+        ):
+            self._to_cleanup.append(f2.name)
+            shutil.copyfileobj(f, f2)
+            return f2.name
 
     def _get_container_files(self, apex_file_path):
         dir_name = tempfile.mkdtemp(prefix=self._testMethodName+"_container_files_")
@@ -285,8 +289,8 @@ class ApexerRebuildTest(unittest.TestCase):
         if not payload_only and "assets" in container_files:
             cmd.extend(["--assets_dir", container_files["assets"]])
         if not unsigned_payload_only:
-            cmd.extend(["--key", os.path.join(get_current_dir(), TEST_PRIVATE_KEY)])
-            cmd.extend(["--pubkey", os.path.join(get_current_dir(), TEST_AVB_PUBLIC_KEY)])
+            cmd.extend(["--key", self._extract_resource(TEST_PRIVATE_KEY)])
+            cmd.extend(["--pubkey", self._extract_resource(TEST_AVB_PUBLIC_KEY)])
         cmd.extend(args)
 
         # Decide on output file name
@@ -333,8 +337,8 @@ class ApexerRebuildTest(unittest.TestCase):
             "-Djava.library.path=" + java_dep_lib,
             "-jar", self.host_tools['signapk.jar'],
             "-a", "4096", "--align-file-size",
-            os.path.join(get_current_dir(), TEST_X509_KEY),
-            os.path.join(get_current_dir(), TEST_PK8_KEY),
+            self._extract_resource(TEST_X509_KEY),
+            self._extract_resource(TEST_PK8_KEY),
             unsigned_apex, fn]
         run_and_check_output(cmd)
         return fn
@@ -351,7 +355,7 @@ class ApexerRebuildTest(unittest.TestCase):
         cmd.append('--do_not_generate_fec')
         cmd.extend(['--algorithm', 'SHA256_RSA4096'])
         cmd.extend(['--hash_algorithm', 'sha256'])
-        cmd.extend(['--key', os.path.join(get_current_dir(), TEST_PRIVATE_KEY)])
+        cmd.extend(['--key', self._extract_resource(TEST_PRIVATE_KEY)])
         manifest_apex = ParseApexManifest(container_files["apex_manifest.pb"])
         ValidateApexManifest(manifest_apex)
         cmd.extend(['--prop', 'apex.key:' + manifest_apex.name])
@@ -371,7 +375,7 @@ class ApexerRebuildTest(unittest.TestCase):
         run_and_check_output(cmd)
 
     def _run_build_test(self, apex_name):
-        apex_file_path = os.path.join(get_current_dir(), apex_name + ".apex")
+        apex_file_path = self._extract_resource(apex_name + ".apex")
         if DEBUG_TEST:
             fd, fn = tempfile.mkstemp(prefix=self._testMethodName+"_input_", suffix=".apex")
             os.close(fd)
@@ -393,7 +397,7 @@ class ApexerRebuildTest(unittest.TestCase):
         """Assert that payload-only output from apexer is same as the payload we get by unzipping
         apex.
         """
-        apex_file_path = os.path.join(get_current_dir(), TEST_APEX + ".apex")
+        apex_file_path = self._extract_resource(TEST_APEX + ".apex")
         container_files = self._get_container_files(apex_file_path)
         payload_dir = self._extract_payload(apex_file_path)
         payload_only_file_path = self._run_apexer(container_files, payload_dir, ["--payload_only"])
@@ -405,7 +409,7 @@ class ApexerRebuildTest(unittest.TestCase):
         """Assert that when unsigned-payload-only output from apexer is signed by the avb key, it is
         same as the payload we get by unzipping apex.
         """
-        apex_file_path = os.path.join(get_current_dir(), TEST_APEX + ".apex")
+        apex_file_path = self._extract_resource(TEST_APEX + ".apex")
         container_files = self._get_container_files(apex_file_path)
         payload_dir = self._extract_payload(apex_file_path)
         unsigned_payload_only_file_path = self._run_apexer(container_files, payload_dir,
@@ -433,7 +437,7 @@ class ApexerRebuildTest(unittest.TestCase):
 
     def test_conv_apex_manifest(self):
         # .pb generation from json
-        manifest_json_path = os.path.join(get_current_dir(), TEST_MANIFEST_JSON)
+        manifest_json_path = self._extract_resource(TEST_MANIFEST_JSON)
 
         fd, fn = tempfile.mkstemp(prefix=self._testMethodName + "_manifest_", suffix=".pb")
         os.close(fd)
