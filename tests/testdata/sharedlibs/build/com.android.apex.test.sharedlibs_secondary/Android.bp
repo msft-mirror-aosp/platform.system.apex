@@ -33,7 +33,7 @@ apex {
     key: "com.android.apex.test.sharedlibs_secondary.key",
     installable: false,
     // We want to force libc++.so to be available in this stub APEX, so put an empty binary.
-    binaries: [ "noop" ],
+    binaries: ["noop"],
     updatable: false,
 }
 
@@ -55,12 +55,12 @@ genrule {
         "shared_libs_repack",
     ],
     cmd: "$(location shared_libs_repack) " +
-         " --mode sharedlibs" +
-         " --key $(location com.android.apex.test.sharedlibs_secondary.pem)" +
-         " --input $(location :com.android.apex.test.sharedlibs_secondary_stub)" +
-         " --output $(genDir)/com.android.apex.test.sharedlibs_secondary_generated.apex" +
-         " --pk8key $(location com.android.apex.test.sharedlibs_secondary.pk8)" +
-         " --pubkey $(location com.android.apex.test.sharedlibs_secondary.avbpubkey)" +
-         " --x509key $(location com.android.apex.test.sharedlibs_secondary.x509.pem)" +
-         " --tmpdir $(genDir)",
+        " --mode sharedlibs" +
+        " --key $(location com.android.apex.test.sharedlibs_secondary.pem)" +
+        " --input $(location :com.android.apex.test.sharedlibs_secondary_stub)" +
+        " --output $(genDir)/com.android.apex.test.sharedlibs_secondary_generated.apex" +
+        " --pk8key $(location com.android.apex.test.sharedlibs_secondary.pk8)" +
+        " --pubkey $(location com.android.apex.test.sharedlibs_secondary.avbpubkey)" +
+        " --x509key $(location com.android.apex.test.sharedlibs_secondary.x509.pem)" +
+        " --tmpdir $(genDir)",
 }

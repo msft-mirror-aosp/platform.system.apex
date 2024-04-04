@@ -17,26 +17,26 @@ package {
 }
 
 apexer_tools = [
-      "aapt2",
-      "avbtool",
-      "conv_apex_manifest",
-      "e2fsdroid",
-      "mke2fs",
-      "resize2fs",
-      "sefcontext_compile",
-      "zipalign",
-      "make_f2fs",
-      "sload_f2fs",
-      "make_erofs",
-      // TODO(b/124476339) apex doesn't follow 'required' dependencies so we need to include this
-      // manually for 'avbtool'.
-      "fec",
+    "aapt2",
+    "avbtool",
+    "conv_apex_manifest",
+    "e2fsdroid",
+    "mke2fs",
+    "resize2fs",
+    "sefcontext_compile",
+    "zipalign",
+    "make_f2fs",
+    "sload_f2fs",
+    "make_erofs",
+    // TODO(b/124476339) apex doesn't follow 'required' dependencies so we need to include this
+    // manually for 'avbtool'.
+    "fec",
 ]
 
 // TODO(b/157110982): cannot specify "required" dependency on go binary
 apexer_go_tools = [
-      "merge_zips",
-      "soong_zip",
+    "merge_zips",
+    "soong_zip",
 ]
 
 python_library_host {
@@ -55,7 +55,7 @@ genrule {
     name: "mke2fs_conf_for_apexer",
     srcs: [":mke2fs_conf"],
     out: ["mke2fs.conf"],
-    cmd: "cp $(in) $(out)"
+    cmd: "cp $(in) $(out)",
 }
 
 python_binary_host {
