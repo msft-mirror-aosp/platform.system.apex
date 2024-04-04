@@ -98,6 +98,7 @@ python_binary_host {
 // TODO(b/148659029): this test can't run in TEST_MAPPING.
 python_test_host {
     name: "apexer_test",
+    pkg_path: "apexer_test",
     main: "apexer_test.py",
     srcs: [
         "apexer_test.py",
@@ -118,6 +119,11 @@ python_test_host {
     libs: [
         "apex_manifest",
     ],
+    version: {
+        py3: {
+            embedded_launcher: true,
+        },
+    },
 }
 
 apexer_deps_minus_go_tools = apexer_tools + [

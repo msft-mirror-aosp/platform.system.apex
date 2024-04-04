@@ -74,6 +74,7 @@ python_binary_host {
 
 python_test_host {
     name: "apex_compression_test",
+    pkg_path: "apex_compression_test",
     main: "apex_compression_test.py",
     srcs: [
         "apex_compression_test.py",
@@ -92,6 +93,11 @@ python_test_host {
     test_suites: ["general-tests"],
     test_options: {
         unit_test: true,
+    },
+    version: {
+        py3: {
+            embedded_launcher: true,
+        },
     },
 }
 
