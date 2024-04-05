@@ -32,7 +32,7 @@ apex {
     file_contexts: ":apex.test-file_contexts",
     key: "com.android.apex.test.foo.key",
     installable: false,
-    binaries: [ "foo_test" ],
+    binaries: ["foo_test"],
     dist: {
         targets: ["sharedlibs_test"],
     },
@@ -43,9 +43,9 @@ cc_binary {
     name: "foo_test",
     srcs: ["foo_test.cc"],
     shared_libs: [
-      "libsharedlibtest",
+        "libsharedlibtest",
     ],
-    apex_available: [ "com.android.apex.test.foo" ],
+    apex_available: ["com.android.apex.test.foo"],
 }
 
 genrule {
@@ -66,12 +66,12 @@ genrule {
         "shared_libs_repack",
     ],
     cmd: "$(location shared_libs_repack) " +
-         " --mode strip" +
-         " --key $(location com.android.apex.test.foo.pem)" +
-         " --input $(location :com.android.apex.test.foo)" +
-         " --output $(genDir)/com.android.apex.test.foo_stripped.apex" +
-         " --pk8key $(location com.android.apex.test.foo.pk8)" +
-         " --pubkey $(location com.android.apex.test.foo.avbpubkey)" +
-         " --x509key $(location com.android.apex.test.foo.x509.pem)" +
-         " --tmpdir $(genDir)",
+        " --mode strip" +
+        " --key $(location com.android.apex.test.foo.pem)" +
+        " --input $(location :com.android.apex.test.foo)" +
+        " --output $(genDir)/com.android.apex.test.foo_stripped.apex" +
+        " --pk8key $(location com.android.apex.test.foo.pk8)" +
+        " --pubkey $(location com.android.apex.test.foo.avbpubkey)" +
+        " --x509key $(location com.android.apex.test.foo.x509.pem)" +
+        " --tmpdir $(genDir)",
 }

@@ -30,7 +30,7 @@ android_app_certificate {
 apex {
     name: "com.android.apex.product.test",
     manifest: "manifest.json",
-    file_contexts: ":apex.test-file_contexts",  // Default, please edit, see go/android-apex-howto
+    file_contexts: ":apex.test-file_contexts", // Default, please edit, see go/android-apex-howto
     key: "com.android.apex.product.test.key",
     updatable: false,
     apps: ["com.android.apex.product.app.test"],
@@ -43,7 +43,7 @@ android_app {
     privileged: true,
     apex_available: [
         "com.android.apex.product.test",
-    ]
+    ],
 }
 
 filegroup {
