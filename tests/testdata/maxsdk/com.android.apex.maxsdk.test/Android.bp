@@ -30,7 +30,7 @@ android_app_certificate {
 apex_test {
     name: "com.android.apex.maxsdk.test",
     manifest: "manifest.json",
-    file_contexts: ":apex.test-file_contexts",  // Default, please edit, see go/android-apex-howto
+    file_contexts: ":apex.test-file_contexts", // Default, please edit, see go/android-apex-howto
     key: "com.android.apex.maxsdk.test.key",
     certificate: ":com.android.apex.maxsdk.test.certificate",
     updatable: false,
@@ -48,7 +48,7 @@ android_app {
     sdk_version: "31",
     apex_available: [
         "com.android.apex.maxsdk.test",
-    ]
+    ],
 }
 
 android_app {
@@ -57,7 +57,7 @@ android_app {
     sdk_version: "31",
     apex_available: [
         "com.android.apex.maxsdk.test",
-    ]
+    ],
 }
 
 android_app {
@@ -66,5 +66,5 @@ android_app {
     sdk_version: "31",
     apex_available: [
         "com.android.apex.maxsdk.test",
-    ]
+    ],
 }

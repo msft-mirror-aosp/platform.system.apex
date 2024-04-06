@@ -37,7 +37,7 @@ apex {
     key: "com.android.example.apex.key",
     certificate: ":com.android.example.apex.certificate",
     installable: false,
-    updatable:false,
+    updatable: false,
     generate_hashtree: false,
 }
 

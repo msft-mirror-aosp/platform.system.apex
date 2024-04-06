@@ -34,7 +34,7 @@ cc_library_static {
     name: "libapexutil",
     defaults: ["libapexutil-deps"],
     export_include_dirs: ["."],
-    srcs: [ "apexutil.cpp" ],
+    srcs: ["apexutil.cpp"],
     host_supported: true,
     apex_available: [
         "//apex_available:platform",

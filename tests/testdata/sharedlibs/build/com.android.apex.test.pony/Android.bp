@@ -32,7 +32,7 @@ apex {
     file_contexts: ":apex.test-file_contexts",
     key: "com.android.apex.test.pony.key",
     installable: false,
-    binaries: [ "pony_test" ],
+    binaries: ["pony_test"],
     dist: {
         targets: ["sharedlibs_test"],
     },
@@ -43,9 +43,9 @@ cc_binary {
     name: "pony_test",
     srcs: ["pony_test.cc"],
     shared_libs: [
-      "libsharedlibtest",
+        "libsharedlibtest",
     ],
-    apex_available: [ "com.android.apex.test.pony" ],
+    apex_available: ["com.android.apex.test.pony"],
 }
 
 genrule {
@@ -66,12 +66,12 @@ genrule {
         "shared_libs_repack",
     ],
     cmd: "$(location shared_libs_repack) " +
-         " --mode strip" +
-         " --key $(location com.android.apex.test.pony.pem)" +
-         " --input $(location :com.android.apex.test.pony)" +
-         " --output $(genDir)/com.android.apex.test.pony_stripped.apex" +
-         " --pk8key $(location com.android.apex.test.pony.pk8)" +
-         " --pubkey $(location com.android.apex.test.pony.avbpubkey)" +
-         " --x509key $(location com.android.apex.test.pony.x509.pem)" +
-         " --tmpdir $(genDir)",
+        " --mode strip" +
+        " --key $(location com.android.apex.test.pony.pem)" +
+        " --input $(location :com.android.apex.test.pony)" +
+        " --output $(genDir)/com.android.apex.test.pony_stripped.apex" +
+        " --pk8key $(location com.android.apex.test.pony.pk8)" +
+        " --pubkey $(location com.android.apex.test.pony.avbpubkey)" +
+        " --x509key $(location com.android.apex.test.pony.x509.pem)" +
+        " --tmpdir $(genDir)",
 }
