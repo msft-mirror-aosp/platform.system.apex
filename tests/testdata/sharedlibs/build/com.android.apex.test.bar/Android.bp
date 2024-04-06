@@ -32,7 +32,7 @@ apex {
     file_contexts: ":apex.test-file_contexts",
     key: "com.android.apex.test.bar.key",
     installable: false,
-    binaries: [ "bar_test" ],
+    binaries: ["bar_test"],
     dist: {
         targets: ["sharedlibs_test"],
     },
@@ -51,7 +51,7 @@ cc_binary {
     name: "bar_test",
     srcs: ["bar_test.cc"],
     shared_libs: [
-      "libsharedlibtest",
+        "libsharedlibtest",
     ],
     multilib: {
         lib32: {
@@ -64,7 +64,7 @@ cc_binary {
 
     compile_multilib: "both",
 
-    apex_available: [ "com.android.apex.test.bar" ],
+    apex_available: ["com.android.apex.test.bar"],
 }
 
 genrule {
@@ -85,12 +85,12 @@ genrule {
         "shared_libs_repack",
     ],
     cmd: "$(location shared_libs_repack) " +
-         " --mode strip" +
-         " --key $(location com.android.apex.test.bar.pem)" +
-         " --input $(location :com.android.apex.test.bar)" +
-         " --output $(genDir)/com.android.apex.test.bar_stripped.apex" +
-         " --pk8key $(location com.android.apex.test.bar.pk8)" +
-         " --pubkey $(location com.android.apex.test.bar.avbpubkey)" +
-         " --x509key $(location com.android.apex.test.bar.x509.pem)" +
-         " --tmpdir $(genDir)",
+        " --mode strip" +
+        " --key $(location com.android.apex.test.bar.pem)" +
+        " --input $(location :com.android.apex.test.bar)" +
+        " --output $(genDir)/com.android.apex.test.bar_stripped.apex" +
+        " --pk8key $(location com.android.apex.test.bar.pk8)" +
+        " --pubkey $(location com.android.apex.test.bar.avbpubkey)" +
+        " --x509key $(location com.android.apex.test.bar.x509.pem)" +
+        " --tmpdir $(genDir)",
 }
