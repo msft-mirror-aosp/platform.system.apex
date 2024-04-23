@@ -167,11 +167,21 @@ static const std::vector<std::string> kBootstrapApexes = ([]() {
 static constexpr const int kNumRetriesWhenCheckpointingEnabled = 1;
 
 bool IsBootstrapApex(const ApexFile& apex) {
+  static std::vector<std::string> additional = []() {
+    std::vector<std::string> ret;
+    if (android::base::GetBoolProperty("ro.boot.apex.early_adbd", false)) {
+      ret.push_back("com.android.adbd");
+    }
+    return ret;
+  }();
+
   if (IsVendorApex(apex) && apex.GetManifest().vendorbootstrap()) {
     return true;
   }
   return std::find(kBootstrapApexes.begin(), kBootstrapApexes.end(),
-                   apex.GetManifest().name()) != kBootstrapApexes.end();
+                   apex.GetManifest().name()) != kBootstrapApexes.end() ||
+         std::find(additional.begin(), additional.end(),
+                   apex.GetManifest().name()) != additional.end();
 }
 
 void ReleaseF2fsCompressedBlocks(const std::string& file_path) {

@@ -19,9 +19,11 @@ import hashlib
 import logging
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
+from importlib import resources
 from zipfile import ZipFile, ZIP_STORED, ZIP_DEFLATED
 
 import apex_manifest_pb2
@@ -68,15 +70,6 @@ def run(args, verbose=None, **kwargs):
   if verbose:
     logger.info('  Running: \'%s\'', ' '.join(args))
   return subprocess.Popen(args, **kwargs)
-
-
-def run_host_command(args, verbose=None, **kwargs):
-  host_build_top = os.environ.get('ANDROID_BUILD_TOP')
-  if host_build_top:
-    host_command_dir = os.path.join(host_build_top,
-                                    'out/host/linux-x86/bin')
-    args[0] = os.path.join(host_command_dir, args[0])
-  return run_and_check_output(args, verbose, **kwargs)
 
 
 def run_and_check_output(args, verbose=None, **kwargs):
@@ -135,6 +128,7 @@ def get_sha1sum(file_path):
 class ApexCompressionTest(unittest.TestCase):
   def setUp(self):
     self._to_cleanup = []
+    self._get_host_tools()
 
   def tearDown(self):
     if not DEBUG_TEST:
@@ -147,18 +141,33 @@ class ApexCompressionTest(unittest.TestCase):
     else:
       print('Cleanup: ' + str(self._to_cleanup))
 
-  def _run_apex_compression_tool(self, args):
-    cmd = ['apex_compression_tool']
-    host_build_top = os.environ.get('ANDROID_BUILD_TOP')
-    if host_build_top:
-      os.environ['APEX_COMPRESSION_TOOL_PATH'] = (
-          os.path.join(host_build_top, 'out/host/linux-x86/bin')
-          + ':' + os.path.join(host_build_top, 'prebuilts/sdk/tools/linux/bin'))
-    else:
-      os.environ['APEX_COMPRESSION_TOOL_PATH'] = os.path.dirname(
-        shutil.which('apex_compression_tool'))
-    cmd.extend(args)
-    run_host_command(cmd, True)
+  def _get_host_tools(self):
+    dir_name = tempfile.mkdtemp(prefix=self._testMethodName+"_host_tools_")
+    self._to_cleanup.append(dir_name)
+    for tool in ["avbtool", "conv_apex_manifest", "apex_compression_tool", "deapexer", "soong_zip"]:
+      with (
+        resources.files("apex_compression_test").joinpath(tool).open('rb') as tool_resource,
+        open(os.path.join(dir_name, tool), 'wb') as f
+      ):
+        shutil.copyfileobj(tool_resource, f)
+      os.chmod(os.path.join(dir_name, tool), stat.S_IRUSR | stat.S_IXUSR)
+    os.environ['APEX_COMPRESSION_TOOL_PATH'] = dir_name
+    path = dir_name
+    if "PATH" in os.environ:
+        path += ":" + os.environ["PATH"]
+    os.environ["PATH"] = path
+
+  def _get_test_apex(self):
+    tmpdir = tempfile.mkdtemp()
+    self._to_cleanup.append(tmpdir)
+    apexPath = os.path.join(tmpdir, TEST_APEX + '.apex')
+    with (
+      resources.files('apex_compression_test').joinpath(TEST_APEX + '.apex').open('rb') as f,
+      open(apexPath, 'wb') as f2,
+    ):
+      shutil.copyfileobj(f, f2)
+
+    return apexPath
 
   def _get_container_files(self, apex_file_path):
     dir_name = tempfile.mkdtemp(
@@ -183,7 +192,7 @@ class ApexCompressionTest(unittest.TestCase):
       avbtool_cmd = ['avbtool',
         'print_partition_digests', '--image', files['apex_payload']]
       # avbtool_cmd output has format "<name>: <value>"
-      files['digest'] = run_host_command(
+      files['digest'] = run_and_check_output(
         avbtool_cmd, True).split(': ')[1].strip()
 
     return files
@@ -194,7 +203,7 @@ class ApexCompressionTest(unittest.TestCase):
         'print',
         manifest_path
     ])
-    return run_host_command(cmd, 'True')
+    return run_and_check_output(cmd, 'True')
 
   # Mutates the manifest located at |manifest_path|
   def _unset_original_apex_digest(self, manifest_path):
@@ -213,7 +222,8 @@ class ApexCompressionTest(unittest.TestCase):
         suffix='.capex')
     os.close(fd)
     self._to_cleanup.append(compressed_apex_fp)
-    self._run_apex_compression_tool([
+    run_and_check_output([
+        'apex_compression_tool',
         'compress',
         '--input', uncompressed_apex_fp,
         '--output', compressed_apex_fp
@@ -232,7 +242,7 @@ class ApexCompressionTest(unittest.TestCase):
         '--input', compressed_apex_fp,
         '--output', decompressed_apex_fp
     ])
-    run_host_command(cmd, True)
+    run_and_check_output(cmd, True)
 
     self.assertTrue(os.path.exists(decompressed_apex_fp),
                     'Decompressed APEX does not exist')
@@ -241,10 +251,10 @@ class ApexCompressionTest(unittest.TestCase):
 
   def _get_type(self, apex_file_path):
     cmd = ['deapexer', 'info', '--print-type', apex_file_path]
-    return run_host_command(cmd, True).strip()
+    return run_and_check_output(cmd, True).strip()
 
   def test_compression(self):
-    uncompressed_apex_fp = os.path.join(get_current_dir(), TEST_APEX + '.apex')
+    uncompressed_apex_fp = self._get_test_apex()
     # TODO(samiul): try compressing a compressed APEX
     compressed_apex_fp = self._compress_apex(uncompressed_apex_fp)
 
@@ -284,7 +294,7 @@ class ApexCompressionTest(unittest.TestCase):
 
   def test_decompression(self):
     # setup: create compressed APEX
-    uncompressed_apex_fp = os.path.join(get_current_dir(), TEST_APEX + '.apex')
+    uncompressed_apex_fp = self._get_test_apex()
     compressed_apex_fp = self._compress_apex(uncompressed_apex_fp)
 
     # Decompress it
@@ -306,7 +316,7 @@ class ApexCompressionTest(unittest.TestCase):
                   + ' is not a compressed APEX', str(error.exception))
 
   def test_only_original_apex_is_compressed(self):
-    uncompressed_apex_fp = os.path.join(get_current_dir(), TEST_APEX + '.apex')
+    uncompressed_apex_fp = self._get_test_apex()
     compressed_apex_fp = self._compress_apex(uncompressed_apex_fp)
 
     with ZipFile(compressed_apex_fp, 'r') as zip_obj:
