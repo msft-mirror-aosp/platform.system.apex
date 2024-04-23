@@ -76,6 +76,7 @@
 #include "apex_file.h"
 #include "apex_file_repository.h"
 #include "apex_manifest.h"
+#include "apex_sha.h"
 #include "apex_shim.h"
 #include "apexd_checkpoint.h"
 #include "apexd_lifecycle.h"
@@ -87,6 +88,7 @@
 #include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
 #include "com_android_apex.h"
+#include "statslog_apex.h"
 
 using android::base::boot_clock;
 using android::base::ConsumePrefix;
@@ -712,6 +714,56 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
   }
 
   return {};
+}
+
+void SendApexInstallationRequestedAtom(const std::string& package_path,
+                                       const bool is_rollback,
+                                       const unsigned int install_type) {
+  auto apex_file = ApexFile::Open(package_path);
+  if (!apex_file.ok()) {
+    LOG(WARNING) << "Unable to send Apex Atom; Failed to open ApexFile "
+                 << package_path << ": " << apex_file.error();
+    return;
+  }
+  const std::string& module_name = apex_file->GetManifest().name();
+  struct stat stat_buf;
+  intmax_t apex_file_size;
+  if (stat(package_path.c_str(), &stat_buf) == 0) {
+    apex_file_size = stat_buf.st_size;
+  } else {
+    PLOG(WARNING) << "Failed to stat " << package_path;
+    apex_file_size = 0;
+  }
+  Result<std::string> apex_file_sha256_str = CalculateSha256(package_path);
+  if (!apex_file_sha256_str.ok()) {
+    LOG(WARNING) << "Unable to get sha256 of ApexFile: "
+                 << apex_file_sha256_str.error();
+  }
+  const std::vector<const char*> hal_cstr_list;
+  int ret = stats::apex::stats_write(
+      stats::apex::APEX_INSTALLATION_REQUESTED, module_name.c_str(),
+      apex_file->GetManifest().version(), apex_file_size,
+      apex_file_sha256_str->c_str(), GetPreinstallPartitionEnum(*apex_file),
+      install_type, is_rollback,
+      apex_file->GetManifest().providesharedapexlibs(), hal_cstr_list);
+  if (ret < 0) {
+    LOG(WARNING) << "Failed to report apex_installation_requested stats";
+  }
+}
+
+void SendApexInstallationEndedAtom(const std::string apex_package_path,
+                                   int install_result) {
+  Result<std::string> apex_file_sha256_str = CalculateSha256(apex_package_path);
+  if (!apex_file_sha256_str.ok()) {
+    LOG(WARNING) << "Unable to get sha256 of ApexFile: "
+                 << apex_file_sha256_str.error();
+  }
+  int ret =
+      stats::apex::stats_write(stats::apex::APEX_INSTALLATION_ENDED,
+                               apex_file_sha256_str->c_str(), install_result);
+  if (ret < 0) {
+    LOG(WARNING) << "Failed to report apex_installation_ended stats";
+  }
 }
 
 namespace {
@@ -3845,6 +3897,23 @@ Result<void> LoadApexFromInit(const std::string& apex_name) {
 
 Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
   LOG(INFO) << "Installing " << package_path;
+  SendApexInstallationRequestedAtom(
+      package_path, /* is_rollback */ false,
+      stats::apex::APEX_INSTALLATION_REQUESTED__INSTALLATION_TYPE__REBOOTLESS);
+  // TODO: Add error-enums
+  Result<ApexFile> ret = InstallPackageImpl(package_path, force);
+  SendApexInstallationEndedAtom(
+      package_path,
+      ret.ok()
+          ? stats::apex::
+                APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_SUCCESSFUL
+          : stats::apex::
+                APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
+  return ret;
+}
+
+Result<ApexFile> InstallPackageImpl(const std::string& package_path,
+                                    bool force) {
   auto temp_apex = ApexFile::Open(package_path);
   if (!temp_apex.ok()) {
     return temp_apex.error();
