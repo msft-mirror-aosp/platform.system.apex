@@ -169,7 +169,7 @@ cc_binary {
     // and the bootstrap bionic libraries.
     bootstrap: true,
     // This variant is for microdroid.
-    installable: false,
+    no_full_install: true,
     // init depends on the name "apexd".
     stem: "apexd",
 }
