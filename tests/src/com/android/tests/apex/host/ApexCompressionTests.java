@@ -52,7 +52,7 @@ import java.util.stream.Collectors;
 public class ApexCompressionTests extends BaseHostJUnit4Test {
     private static final String COMPRESSED_APEX_PACKAGE_NAME = "com.android.apex.compressed";
     private static final String ORIGINAL_APEX_FILE_NAME =
-            COMPRESSED_APEX_PACKAGE_NAME + ".v1_original.apex";
+            COMPRESSED_APEX_PACKAGE_NAME + ".v1.apex";
     private static final String DECOMPRESSED_DIR_PATH = "/data/apex/decompressed/";
     private static final String APEX_ACTIVE_DIR = "/data/apex/active/";
     private static final String OTA_RESERVED_DIR = "/data/apex/ota_reserved/";
@@ -415,7 +415,7 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
     @LargeTest
     public void testOrphanedDecompressedApexInActiveDirIsIgnored() throws Exception {
         final File apex = mHostUtils.getTestFile(
-                COMPRESSED_APEX_PACKAGE_NAME + ".v1_original.apex");
+                COMPRESSED_APEX_PACKAGE_NAME + ".v1.apex");
         // Prepare an APEX in active directory with .decompressed.apex suffix.
         // Place the same apex in system too. When booting, system APEX should
         // be mounted while the decomrpessed APEX in active direcotyr should

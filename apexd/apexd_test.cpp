@@ -441,8 +441,8 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexRunsVerification) {
 TEST_F(ApexdUnitTest, ValidateDecompressedApex) {
   auto capex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
-  auto decompressed_v1 = ApexFile::Open(
-      AddDataApex("com.android.apex.compressed.v1_original.apex"));
+  auto decompressed_v1 =
+      ApexFile::Open(AddDataApex("com.android.apex.compressed.v1.apex"));
 
   auto result =
       ValidateDecompressedApex(std::cref(*capex), std::cref(*decompressed_v1));
@@ -556,8 +556,7 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexReuseOtaApex) {
   auto ota_apex_path =
       StringPrintf("%s/com.android.apex.compressed@1%s",
                    GetDecompressionDir().c_str(), kOtaApexPackageSuffix);
-  fs::copy(GetTestFile("com.android.apex.compressed.v1_original.apex"),
-           ota_apex_path);
+  fs::copy(GetTestFile("com.android.apex.compressed.v1.apex"), ota_apex_path);
   return_value =
       ProcessCompressedApex(compressed_apex_list, /* is_ota_chroot= */ false);
   ASSERT_EQ(return_value.size(), 1u);
@@ -765,8 +764,7 @@ TEST_F(ApexdUnitTest, ReserveSpaceForCapexCleansOtaApex) {
       "%s/ota_apex%s", GetDecompressionDir().c_str(), kOtaApexPackageSuffix);
   auto create_ota_apex = [&]() {
     // Create an ota_apex first
-    fs::copy(GetTestFile("com.android.apex.compressed.v1_original.apex"),
-             ota_apex_path);
+    fs::copy(GetTestFile("com.android.apex.compressed.v1.apex"), ota_apex_path);
     ASSERT_THAT(PathExists(ota_apex_path), HasValue(true));
   };
   create_ota_apex();
@@ -1891,7 +1889,7 @@ TEST_F(ApexdMountTest, RemoveInactiveDataApex) {
   auto decompressed_apex = StringPrintf("%s/com.android.apex.compressed@1%s",
                                         GetDecompressionDir().c_str(),
                                         kDecompressedApexPackageSuffix);
-  fs::copy(GetTestFile("com.android.apex.compressed.v1_original.apex"),
+  fs::copy(GetTestFile("com.android.apex.compressed.v1.apex"),
            decompressed_apex);
   // Add a decompressed apex that will be mounted, so should be not be removed
   auto active_decompressed_apex = StringPrintf(
@@ -2702,7 +2700,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapCapexToApex) {
                         previous_built_in_dir.path);
   // Place a uncompressed version apex in current built_in_dir
   std::string apex_path =
-      AddPreInstalledApex("com.android.apex.compressed.v1_original.apex");
+      AddPreInstalledApex("com.android.apex.compressed.v1.apex");
 
   ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
@@ -2823,7 +2821,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHigherThanCapex) {
 // Test when we update CAPEX and there is a lower version present in data
 TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataLowerThanCapex) {
   auto apex_path = AddPreInstalledApex("com.android.apex.compressed.v2.capex");
-  AddDataApex("com.android.apex.compressed.v1_original.apex");
+  AddDataApex("com.android.apex.compressed.v1.apex");
 
   ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
@@ -2868,8 +2866,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataLowerThanCapex) {
 TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataSameAsCapex) {
   auto system_apex_path =
       PrepareCompressedApex("com.android.apex.compressed.v1.capex");
-  auto data_apex_path =
-      AddDataApex("com.android.apex.compressed.v1_original.apex");
+  auto data_apex_path = AddDataApex("com.android.apex.compressed.v1.apex");
 
   ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
 
@@ -3478,8 +3475,7 @@ TEST_F(ApexdMountTest, OnStartDataHasSameVersionAsCapex) {
   InitializeVold(&checkpoint_interface);
 
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
-  std::string apex_path_2 =
-      AddDataApex("com.android.apex.compressed.v1_original.apex");
+  std::string apex_path_2 = AddDataApex("com.android.apex.compressed.v1.apex");
 
   ASSERT_THAT(
       ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
@@ -3514,7 +3510,7 @@ TEST_F(ApexdMountTest, OnStartSystemHasHigherVersionCapexThanData) {
 
   std::string apex_path_1 =
       AddPreInstalledApex("com.android.apex.compressed.v2.capex");
-  AddDataApex("com.android.apex.compressed.v1_original.apex");
+  AddDataApex("com.android.apex.compressed.v1.apex");
 
   ASSERT_THAT(
       ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
@@ -3669,8 +3665,7 @@ TEST_F(ApexdMountTest, OnStartCapexToApex) {
   TemporaryDir previous_built_in_dir;
   PrepareCompressedApex("com.android.apex.compressed.v1.capex",
                         previous_built_in_dir.path);
-  auto apex_path =
-      AddPreInstalledApex("com.android.apex.compressed.v1_original.apex");
+  auto apex_path = AddPreInstalledApex("com.android.apex.compressed.v1.apex");
 
   ASSERT_THAT(
       ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
@@ -3708,10 +3703,9 @@ TEST_F(ApexdMountTest, OnStartOrphanedDecompressedApexInActiveDirectory) {
   auto decompressed_apex_in_active_dir =
       StringPrintf("%s/com.android.apex.compressed@1%s", GetDataDir().c_str(),
                    kDecompressedApexPackageSuffix);
-  fs::copy(GetTestFile("com.android.apex.compressed.v1_original.apex"),
+  fs::copy(GetTestFile("com.android.apex.compressed.v1.apex"),
            decompressed_apex_in_active_dir);
-  auto apex_path =
-      AddPreInstalledApex("com.android.apex.compressed.v1_original.apex");
+  auto apex_path = AddPreInstalledApex("com.android.apex.compressed.v1.apex");
 
   ASSERT_THAT(
       ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),
@@ -4515,7 +4509,7 @@ TEST_F(ApexdMountTest, AddBlockApexFailsWithCompressedDuplicate) {
   SetBlockApexEnabled(true);
 
   auto path1 = AddPreInstalledApex("com.android.apex.compressed.v1.capex");
-  auto path2 = AddBlockApex("com.android.apex.compressed.v1_original.apex");
+  auto path2 = AddBlockApex("com.android.apex.compressed.v1.apex");
 
   auto& instance = ApexFileRepository::GetInstance();
 
@@ -4571,7 +4565,7 @@ TEST_F(ApexActivationFailureTests, MultipleApexFileInStagingDirectory) {
 
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
   ASSERT_RESULT_OK(apex_session);
-  CreateStagedSession("com.android.apex.compressed.v1_original.apex", 123);
+  CreateStagedSession("com.android.apex.compressed.v1.apex", 123);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
 
   OnStart();
@@ -4953,7 +4947,7 @@ TEST_F(ApexdMountTest, OnStartNoApexUpdated) {
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
   std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
   std::string apex_path_4 =
-      AddDecompressedApex("com.android.apex.compressed.v1_original.apex");
+      AddDecompressedApex("com.android.apex.compressed.v1.apex");
 
   ASSERT_THAT(
       ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()}),

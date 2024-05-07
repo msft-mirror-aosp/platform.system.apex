@@ -368,7 +368,7 @@ TEST(ApexFileRepositoryTest, IsDecompressedApex) {
   ApexFileRepository instance(decompression_dir.path);
 
   // Prepare decompressed apex
-  std::string filename = "com.android.apex.compressed.v1_original.apex";
+  std::string filename = "com.android.apex.compressed.v1.apex";
   fs::copy(GetTestFile(filename), decompression_dir.path);
   auto decompressed_path =
       StringPrintf("%s/%s", decompression_dir.path, filename.c_str());
@@ -396,7 +396,7 @@ TEST(ApexFileRepositoryTest, AddAndGetDataApex) {
   PrepareCompressedApex("com.android.apex.compressed.v1.capex",
                         built_in_dir.path, decompression_dir.path);
   // Add a data apex that has kDecompressedApexPackageSuffix
-  fs::copy(GetTestFile("com.android.apex.compressed.v1_original.apex"),
+  fs::copy(GetTestFile("com.android.apex.compressed.v1.apex"),
            StringPrintf("%s/com.android.apex.compressed@1%s", data_dir.path,
                         kDecompressedApexPackageSuffix));
 
