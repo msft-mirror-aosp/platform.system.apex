@@ -183,17 +183,6 @@ genrule {
 }
 
 apex {
-    name: "com.android.apex.compressed.v1_original",
-    manifest: "manifest_compressed.json",
-    file_contexts: ":apex.test-file_contexts",
-    prebuilts: ["sample_prebuilt_file"],
-    key: "com.android.apex.compressed.key",
-    installable: false,
-    compressible: false,
-    updatable: false,
-}
-
-apex {
     name: "com.android.apex.compressed.v1_different_digest_original",
     manifest: "manifest_compressed.json",
     file_contexts: ":apex.test-file_contexts",
