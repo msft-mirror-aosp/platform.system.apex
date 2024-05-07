@@ -169,7 +169,7 @@ cc_binary {
     // and the bootstrap bionic libraries.
     bootstrap: true,
     // This variant is for microdroid.
-    installable: false,
+    no_full_install: true,
     // init depends on the name "apexd".
     stem: "apexd",
 }
@@ -528,7 +528,7 @@ cc_test {
         ":com.android.apex.compressed.v1",
         ":com.android.apex.compressed.v1_different_digest",
         ":com.android.apex.compressed.v1_different_digest_original",
-        ":com.android.apex.compressed.v1_original",
+        ":com.android.apex.compressed.v1{.apex}",
         ":com.android.apex.compressed.v2",
         ":com.android.apex.compressed.v2_original",
         ":gen_manifest_mismatch_compressed_apex_v2",
@@ -633,7 +633,7 @@ cc_test {
         ":com.android.apex.compressed.v1",
         ":com.android.apex.compressed.v1_different_digest",
         ":com.android.apex.compressed.v1_different_digest_original",
-        ":com.android.apex.compressed.v1_original",
+        ":com.android.apex.compressed.v1{.apex}",
         ":com.android.apex.compressed.v2",
         ":com.android.apex.compressed.v2_original",
         ":gen_manifest_mismatch_compressed_apex_v2",
