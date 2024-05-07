@@ -45,7 +45,7 @@ public class ApexCompressionTests {
 
     private static final TestApp UNCOMPRESSED_APEX_V1 = new TestApp(
             "TestAppUncompressedApexV1", COMPRESSED_APEX_PACKAGE_NAME, 2, /*isApex*/ true,
-            "com.android.apex.compressed.v1_original.apex");
+            "com.android.apex.compressed.v1.apex");
     private static final TestApp UNCOMPRESSED_APEX_V2 = new TestApp(
             "TestAppUncompressedApexV2", COMPRESSED_APEX_PACKAGE_NAME, 2, /*isApex*/ true,
             "com.android.apex.compressed.v2_original.apex");
