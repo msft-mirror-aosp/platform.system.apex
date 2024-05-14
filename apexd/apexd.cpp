@@ -39,6 +39,7 @@
 #include <linux/f2fs.h>
 #include <linux/loop.h>
 #include <selinux/android.h>
+#include <statssocket_lazy.h>
 #include <stdlib.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
@@ -719,6 +720,10 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
 void SendApexInstallationRequestedAtom(const std::string& package_path,
                                        const bool is_rollback,
                                        const unsigned int install_type) {
+  if (!statssocket::lazy::IsAvailable()) {
+    LOG(WARNING) << "Unable to send Apex Atom; libstatssocket is not available";
+    return;
+  }
   auto apex_file = ApexFile::Open(package_path);
   if (!apex_file.ok()) {
     LOG(WARNING) << "Unable to send Apex Atom; Failed to open ApexFile "
@@ -753,6 +758,10 @@ void SendApexInstallationRequestedAtom(const std::string& package_path,
 
 void SendApexInstallationEndedAtom(const std::string apex_package_path,
                                    int install_result) {
+  if (!statssocket::lazy::IsAvailable()) {
+    LOG(WARNING) << "Unable to send Apex Atom; libstatssocket is not available";
+    return;
+  }
   Result<std::string> apex_file_sha256_str = CalculateSha256(apex_package_path);
   if (!apex_file_sha256_str.ok()) {
     LOG(WARNING) << "Unable to get sha256 of ApexFile: "
