@@ -21,6 +21,7 @@
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 #include <openssl/sha.h>
+
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -28,6 +29,7 @@
 
 #include "apex_constants.h"
 #include "apex_file.h"
+#include "apex_sha.h"
 #include "string_log.h"
 
 using android::base::ErrnoError;
@@ -45,7 +47,6 @@ namespace {
 
 static constexpr const char* kApexCtsShimPackage = "com.android.apex.cts.shim";
 static constexpr const char* kHashFilePath = "etc/hash.txt";
-static constexpr const int kBufSize = 1024;
 static constexpr const fs::perms kForbiddenFilePermissions =
     fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec;
 static constexpr const char* kExpectedCtsShimFiles[] = {
@@ -77,33 +78,6 @@ static constexpr const char* kExpectedCtsShimFiles[] = {
     "priv-app/CtsShimPriv@AOSP.MASTER/CtsShimPriv.apk",
     "priv-app/CtsShimPriv@MASTER/CtsShimPriv.apk",
 };
-
-Result<std::string> CalculateSha512(const std::string& path) {
-  LOG(DEBUG) << "Calculating SHA512 of " << path;
-  SHA512_CTX ctx;
-  SHA512_Init(&ctx);
-  std::ifstream apex(path, std::ios::binary);
-  if (apex.bad()) {
-    return Error() << "Failed to open " << path;
-  }
-  char buf[kBufSize];
-  while (!apex.eof()) {
-    apex.read(buf, kBufSize);
-    if (apex.bad()) {
-      return Error() << "Failed to read " << path;
-    }
-    int bytes_read = apex.gcount();
-    SHA512_Update(&ctx, buf, bytes_read);
-  }
-  uint8_t hash[SHA512_DIGEST_LENGTH];
-  SHA512_Final(hash, &ctx);
-  std::stringstream ss;
-  ss << std::hex;
-  for (int i = 0; i < SHA512_DIGEST_LENGTH; i++) {
-    ss << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
-  }
-  return ss.str();
-}
 
 Result<std::vector<std::string>> GetAllowedHashes(const std::string& path) {
   using android::base::ReadFileToString;
