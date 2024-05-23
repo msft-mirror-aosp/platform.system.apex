@@ -91,6 +91,8 @@ cc_defaults {
         "libtinyxml2",
         "libverity_tree",
         "libvold_binder",
+        "libstatslog_apex",
+        "libstatssocket_lazy",
     ],
     whole_static_libs: ["libcom.android.sysprop.apex"],
 }
@@ -169,7 +171,7 @@ cc_binary {
     // and the bootstrap bionic libraries.
     bootstrap: true,
     // This variant is for microdroid.
-    installable: false,
+    no_full_install: true,
     // init depends on the name "apexd".
     stem: "apexd",
 }
@@ -268,6 +270,7 @@ cc_library_static {
     srcs: [
         "apex_file.cpp",
         "apex_manifest.cpp",
+        "apex_sha.cpp",
         "apex_shim.cpp",
         "apexd_verity.cpp",
     ],
@@ -528,7 +531,7 @@ cc_test {
         ":com.android.apex.compressed.v1",
         ":com.android.apex.compressed.v1_different_digest",
         ":com.android.apex.compressed.v1_different_digest_original",
-        ":com.android.apex.compressed.v1_original",
+        ":com.android.apex.compressed.v1{.apex}",
         ":com.android.apex.compressed.v2",
         ":com.android.apex.compressed.v2_original",
         ":gen_manifest_mismatch_compressed_apex_v2",
@@ -571,11 +574,13 @@ cc_test {
         "libapexd",
         "libfstab",
         "libgmock",
+        "libstatslog_apex",
     ],
     shared_libs: [
         "libbinder",
         "libfs_mgr",
         "libutils",
+        "libstatssocket",
     ],
     generated_sources: ["apex-info-list-tinyxml"],
     test_suites: ["device-tests"],
@@ -633,7 +638,7 @@ cc_test {
         ":com.android.apex.compressed.v1",
         ":com.android.apex.compressed.v1_different_digest",
         ":com.android.apex.compressed.v1_different_digest_original",
-        ":com.android.apex.compressed.v1_original",
+        ":com.android.apex.compressed.v1{.apex}",
         ":com.android.apex.compressed.v2",
         ":com.android.apex.compressed.v2_original",
         ":gen_manifest_mismatch_compressed_apex_v2",
@@ -696,4 +701,39 @@ xsd_config {
     gen_writer: true,
     tinyxml: true,
     root_elements: ["apex-info-list"],
+}
+
+cc_library_static {
+    name: "libstatslog_apex",
+    generated_sources: ["statslog_apex.cpp"],
+    generated_headers: ["statslog_apex.h"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
+    export_generated_headers: ["statslog_apex.h"],
+    static_libs: [
+        "libcutils",
+        "liblog",
+        "libstatssocket_lazy",
+        "libutils",
+    ],
+}
+
+genrule {
+    name: "statslog_apex.h",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_apex.h --module apex --namespace stats,apex",
+    out: [
+        "statslog_apex.h",
+    ],
+}
+
+genrule {
+    name: "statslog_apex.cpp",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_apex.cpp --module apex --namespace stats,apex --importHeader statslog_apex.h",
+    out: [
+        "statslog_apex.cpp",
+    ],
 }
