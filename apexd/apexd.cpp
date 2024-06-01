@@ -3054,6 +3054,9 @@ void OnStart() {
     }
   }
 
+  // Clean up inactive APEXes on /data. We don't need them anyway.
+  RemoveInactiveDataApex();
+
   // Now that APEXes are mounted, snapshot or restore DE_sys data.
   SnapshotOrRestoreDeSysData();
 
@@ -3291,8 +3294,6 @@ void DeleteUnusedVerityDevices() {
 }
 
 void BootCompletedCleanup() {
-  RemoveInactiveDataApex();
-
   auto sessions = gSessionManager->GetSessions();
   for (const ApexSession& session : sessions) {
     if (!session.IsFinalized()) {
