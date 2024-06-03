@@ -39,6 +39,7 @@
 #include <linux/f2fs.h>
 #include <linux/loop.h>
 #include <selinux/android.h>
+#include <statssocket_lazy.h>
 #include <stdlib.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
@@ -76,6 +77,7 @@
 #include "apex_file.h"
 #include "apex_file_repository.h"
 #include "apex_manifest.h"
+#include "apex_sha.h"
 #include "apex_shim.h"
 #include "apexd_checkpoint.h"
 #include "apexd_lifecycle.h"
@@ -87,6 +89,7 @@
 #include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
 #include "com_android_apex.h"
+#include "statslog_apex.h"
 
 using android::base::boot_clock;
 using android::base::ConsumePrefix;
@@ -167,11 +170,21 @@ static const std::vector<std::string> kBootstrapApexes = ([]() {
 static constexpr const int kNumRetriesWhenCheckpointingEnabled = 1;
 
 bool IsBootstrapApex(const ApexFile& apex) {
+  static std::vector<std::string> additional = []() {
+    std::vector<std::string> ret;
+    if (android::base::GetBoolProperty("ro.boot.apex.early_adbd", false)) {
+      ret.push_back("com.android.adbd");
+    }
+    return ret;
+  }();
+
   if (IsVendorApex(apex) && apex.GetManifest().vendorbootstrap()) {
     return true;
   }
   return std::find(kBootstrapApexes.begin(), kBootstrapApexes.end(),
-                   apex.GetManifest().name()) != kBootstrapApexes.end();
+                   apex.GetManifest().name()) != kBootstrapApexes.end() ||
+         std::find(additional.begin(), additional.end(),
+                   apex.GetManifest().name()) != additional.end();
 }
 
 void ReleaseF2fsCompressedBlocks(const std::string& file_path) {
@@ -705,6 +718,64 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
 }
 
 namespace {
+
+void SendApexInstallationRequestedAtom(const std::string& package_path,
+                                       const bool is_rollback,
+                                       const unsigned int install_type) {
+  if (!statssocket::lazy::IsAvailable()) {
+    LOG(WARNING) << "Unable to send Apex Atom; libstatssocket is not available";
+    return;
+  }
+  auto apex_file = ApexFile::Open(package_path);
+  if (!apex_file.ok()) {
+    LOG(WARNING) << "Unable to send Apex Atom; Failed to open ApexFile "
+                 << package_path << ": " << apex_file.error();
+    return;
+  }
+  const std::string& module_name = apex_file->GetManifest().name();
+  struct stat stat_buf;
+  intmax_t apex_file_size;
+  if (stat(package_path.c_str(), &stat_buf) == 0) {
+    apex_file_size = stat_buf.st_size;
+  } else {
+    PLOG(WARNING) << "Failed to stat " << package_path;
+    apex_file_size = 0;
+  }
+  Result<std::string> apex_file_sha256_str = CalculateSha256(package_path);
+  if (!apex_file_sha256_str.ok()) {
+    LOG(WARNING) << "Unable to get sha256 of ApexFile: "
+                 << apex_file_sha256_str.error();
+  }
+  const std::vector<const char*> hal_cstr_list;
+  int ret = stats::apex::stats_write(
+      stats::apex::APEX_INSTALLATION_REQUESTED, module_name.c_str(),
+      apex_file->GetManifest().version(), apex_file_size,
+      apex_file_sha256_str->c_str(), GetPreinstallPartitionEnum(*apex_file),
+      install_type, is_rollback,
+      apex_file->GetManifest().providesharedapexlibs(), hal_cstr_list);
+  if (ret < 0) {
+    LOG(WARNING) << "Failed to report apex_installation_requested stats";
+  }
+}
+
+void SendApexInstallationEndedAtom(const std::string& package_path,
+                                   int install_result) {
+  if (!statssocket::lazy::IsAvailable()) {
+    LOG(WARNING) << "Unable to send Apex Atom; libstatssocket is not available";
+    return;
+  }
+  Result<std::string> apex_file_sha256_str = CalculateSha256(package_path);
+  if (!apex_file_sha256_str.ok()) {
+    LOG(WARNING) << "Unable to get sha256 of ApexFile: "
+                 << apex_file_sha256_str.error();
+  }
+  int ret =
+      stats::apex::stats_write(stats::apex::APEX_INSTALLATION_ENDED,
+                               apex_file_sha256_str->c_str(), install_result);
+  if (ret < 0) {
+    LOG(WARNING) << "Failed to report apex_installation_ended stats";
+  }
+}
 
 template <typename VerifyFn>
 Result<void> RunVerifyFnInsideTempMount(const ApexFile& apex,
@@ -2983,6 +3054,9 @@ void OnStart() {
     }
   }
 
+  // Clean up inactive APEXes on /data. We don't need them anyway.
+  RemoveInactiveDataApex();
+
   // Now that APEXes are mounted, snapshot or restore DE_sys data.
   SnapshotOrRestoreDeSysData();
 
@@ -3220,8 +3294,6 @@ void DeleteUnusedVerityDevices() {
 }
 
 void BootCompletedCleanup() {
-  RemoveInactiveDataApex();
-
   auto sessions = gSessionManager->GetSessions();
   for (const ApexSession& session : sessions) {
     if (!session.IsFinalized()) {
@@ -3833,8 +3905,8 @@ Result<void> LoadApexFromInit(const std::string& apex_name) {
   return {};
 }
 
-Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
-  LOG(INFO) << "Installing " << package_path;
+Result<ApexFile> InstallPackageImpl(const std::string& package_path,
+                                    bool force) {
   auto temp_apex = ApexFile::Open(package_path);
   if (!temp_apex.ok()) {
     return temp_apex.error();
@@ -3955,6 +4027,23 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
   ReleaseF2fsCompressedBlocks(target_file);
 
   return new_apex;
+}
+
+Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
+  LOG(INFO) << "Installing " << package_path;
+  SendApexInstallationRequestedAtom(
+      package_path, /* is_rollback */ false,
+      stats::apex::APEX_INSTALLATION_REQUESTED__INSTALLATION_TYPE__REBOOTLESS);
+  // TODO: Add error-enums
+  Result<ApexFile> ret = InstallPackageImpl(package_path, force);
+  SendApexInstallationEndedAtom(
+      package_path,
+      ret.ok()
+          ? stats::apex::
+                APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_SUCCESSFUL
+          : stats::apex::
+                APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
+  return ret;
 }
 
 bool IsActiveApexChanged(const ApexFile& apex) {

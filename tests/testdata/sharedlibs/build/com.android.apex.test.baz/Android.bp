@@ -32,7 +32,7 @@ apex {
     file_contexts: ":apex.test-file_contexts",
     key: "com.android.apex.test.baz.key",
     installable: false,
-    binaries: [ "baz_test" ],
+    binaries: ["baz_test"],
     dist: {
         targets: ["sharedlibs_test"],
     },
@@ -43,9 +43,9 @@ cc_binary {
     name: "baz_test",
     srcs: ["baz_test.cc"],
     shared_libs: [
-      "libsharedlibtest",
+        "libsharedlibtest",
     ],
-    apex_available: [ "com.android.apex.test.baz" ],
+    apex_available: ["com.android.apex.test.baz"],
 }
 
 genrule {
@@ -66,12 +66,12 @@ genrule {
         "shared_libs_repack",
     ],
     cmd: "$(location shared_libs_repack) " +
-         " --mode strip" +
-         " --key $(location com.android.apex.test.baz.pem)" +
-         " --input $(location :com.android.apex.test.baz)" +
-         " --output $(genDir)/com.android.apex.test.baz_stripped.apex" +
-         " --pk8key $(location com.android.apex.test.baz.pk8)" +
-         " --pubkey $(location com.android.apex.test.baz.avbpubkey)" +
-         " --x509key $(location com.android.apex.test.baz.x509.pem)" +
-         " --tmpdir $(genDir)",
+        " --mode strip" +
+        " --key $(location com.android.apex.test.baz.pem)" +
+        " --input $(location :com.android.apex.test.baz)" +
+        " --output $(genDir)/com.android.apex.test.baz_stripped.apex" +
+        " --pk8key $(location com.android.apex.test.baz.pk8)" +
+        " --pubkey $(location com.android.apex.test.baz.avbpubkey)" +
+        " --x509key $(location com.android.apex.test.baz.x509.pem)" +
+        " --tmpdir $(genDir)",
 }
