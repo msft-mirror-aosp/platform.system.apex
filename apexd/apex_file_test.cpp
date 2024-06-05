@@ -278,7 +278,7 @@ TEST(ApexFileTest, DecompressCompressedApex) {
 
 TEST(ApexFileTest, DecompressFailForNormalApex) {
   const std::string file_path =
-      kTestDataDir + "com.android.apex.compressed.v1_original.apex";
+      kTestDataDir + "com.android.apex.compressed.v1.apex";
   Result<ApexFile> apex_file = ApexFile::Open(file_path);
   ASSERT_RESULT_OK(apex_file);
 
@@ -344,7 +344,7 @@ TEST(ApexFileTest, OriginalApexDigest) {
   auto capex = ApexFile::Open(capex_path);
   ASSERT_TRUE(capex.ok());
   const std::string decompressed_apex_path =
-      kTestDataDir + "com.android.apex.compressed.v1_original.apex";
+      kTestDataDir + "com.android.apex.compressed.v1.apex";
   auto decompressed_apex = ApexFile::Open(decompressed_apex_path);
   ASSERT_TRUE(decompressed_apex.ok());
   // Validate root digest

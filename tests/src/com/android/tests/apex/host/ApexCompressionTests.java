@@ -52,7 +52,7 @@ import java.util.stream.Collectors;
 public class ApexCompressionTests extends BaseHostJUnit4Test {
     private static final String COMPRESSED_APEX_PACKAGE_NAME = "com.android.apex.compressed";
     private static final String ORIGINAL_APEX_FILE_NAME =
-            COMPRESSED_APEX_PACKAGE_NAME + ".v1_original.apex";
+            COMPRESSED_APEX_PACKAGE_NAME + ".v1.apex";
     private static final String DECOMPRESSED_DIR_PATH = "/data/apex/decompressed/";
     private static final String APEX_ACTIVE_DIR = "/data/apex/active/";
     private static final String OTA_RESERVED_DIR = "/data/apex/ota_reserved/";
@@ -334,11 +334,18 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
     @Test
     @LargeTest
     public void testFailsToActivateApexOnDataFallbacksToPreInstalled() throws Exception {
+        // Need to make /system writable before pushing an apex to /data/apex/active/.
+        // Otherwise, `pushTestApex()` below reboots the device to make /system writable
+        // to push an apex to /system/apex. The data apex is removed during that reboot
+        // because it doesn't have a pre-installed system apex yet.
+        getDevice().remountSystemWritable();
+
         // Push a data apex that will fail to activate
         final File file =
                 mHostUtils.getTestFile("com.android.apex.compressed.v2_manifest_mismatch.apex");
         getDevice().pushFile(file, APEX_ACTIVE_DIR + COMPRESSED_APEX_PACKAGE_NAME + "@2.apex");
         // Push a CAPEX which should act as the fallback
+        // Note that this reboots the device.
         pushTestApex(COMPRESSED_APEX_PACKAGE_NAME + ".v2.capex");
         assertWithMessage("Timed out waiting for device to boot").that(
                 getDevice().waitForBootComplete(Duration.ofMinutes(2).toMillis())).isTrue();
@@ -415,7 +422,7 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
     @LargeTest
     public void testOrphanedDecompressedApexInActiveDirIsIgnored() throws Exception {
         final File apex = mHostUtils.getTestFile(
-                COMPRESSED_APEX_PACKAGE_NAME + ".v1_original.apex");
+                COMPRESSED_APEX_PACKAGE_NAME + ".v1.apex");
         // Prepare an APEX in active directory with .decompressed.apex suffix.
         // Place the same apex in system too. When booting, system APEX should
         // be mounted while the decomrpessed APEX in active direcotyr should
