@@ -172,8 +172,12 @@ void OnAllPackagesActivated(bool is_bootstrap);
 // "activated").
 void OnAllPackagesReady();
 void OnBootCompleted();
-// Exposed for testing
+
+// Removes inactivate apexes on /data after activation.
+// This can happen when prebuilt APEXes are newer than /data apexes with OTA.
+// Exposed for testing.
 void RemoveInactiveDataApex();
+
 void BootCompletedCleanup();
 int SnapshotOrRestoreDeUserData();
 
