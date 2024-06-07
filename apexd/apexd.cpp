@@ -3525,13 +3525,23 @@ Result<void> ReserveSpaceForCompressedApex(int64_t size,
                         << file_path.c_str();
   }
 
-  // Resize to required size
+  // Resize to required size, posix_fallocate will not shrink files so resize
+  // is needed.
   std::error_code ec;
   std::filesystem::resize_file(file_path, size, ec);
   if (ec) {
     RemoveFileIfExists(file_path);
     return ErrnoError() << "Failed to resize file " << file_path.c_str()
                         << " : " << ec.message();
+  }
+
+  // Allocate blocks for the requested size.
+  // resize_file will create sparse file with 0 blocks on filesystems that
+  // supports sparse files.
+  if ((errno = posix_fallocate(dest_fd.get(), 0, size))) {
+    RemoveFileIfExists(file_path);
+    return ErrnoError() << "Failed to allocate blocks for file "
+                        << file_path.c_str();
   }
 
   return {};
