@@ -1,4 +1,5 @@
 ./apex_manifest.pb
-./app/CtsShim/CtsShim.apk
+./app/CtsShim@MAIN/CtsShim.apk
 ./etc/hash.txt
-./priv-app/CtsShimPriv/CtsShimPriv.apk
+./etc/permissions/signature-permission-allowlist.xml
+./priv-app/CtsShimPriv@MAIN/CtsShimPriv.apk
