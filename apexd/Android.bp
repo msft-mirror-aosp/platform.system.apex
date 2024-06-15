@@ -252,13 +252,7 @@ cc_defaults {
         "libavb",
         "libverity_tree",
     ],
-    static: {
-        whole_static_libs: ["libc++fs"],
-    },
     cpp_std: "experimental",
-    shared: {
-        static_libs: ["libc++fs"],
-    },
 }
 
 cc_library_static {
