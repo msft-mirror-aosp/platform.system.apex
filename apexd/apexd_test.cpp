@@ -101,6 +101,15 @@ static int64_t GetMTime(const std::string& path) {
   return st_buf.st_mtime;
 }
 
+static int64_t GetSizeByBlocks(const std::string& path) {
+  struct stat st_buf;
+  if (stat(path.c_str(), &st_buf) != 0) {
+    PLOG(ERROR) << "Failed to stat " << path;
+    return 0;
+  }
+  return st_buf.st_blocks * st_buf.st_blksize;
+}
+
 // A very basic mock of CheckpointInterface.
 class MockCheckpointInterface : public CheckpointInterface {
  public:
@@ -706,6 +715,7 @@ TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexCreatesSingleFile) {
   ASSERT_THAT(files, Ok());
   ASSERT_EQ(files->size(), 1u);
   EXPECT_EQ(fs::file_size((*files)[0]), 100u);
+  EXPECT_GE(GetSizeByBlocks((*files)[0]), 100u);
 }
 
 TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexSafeToCallMultipleTimes) {
@@ -718,6 +728,7 @@ TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexSafeToCallMultipleTimes) {
   ASSERT_THAT(files, Ok());
   ASSERT_EQ(files->size(), 1u);
   EXPECT_EQ(fs::file_size((*files)[0]), 100u);
+  EXPECT_GE(GetSizeByBlocks((*files)[0]), 100u);
 }
 
 TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexShrinkAndGrow) {
@@ -733,12 +744,14 @@ TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexShrinkAndGrow) {
   ASSERT_THAT(files, Ok());
   ASSERT_EQ(files->size(), 1u);
   EXPECT_EQ(fs::file_size((*files)[0]), 1000u);
+  EXPECT_GE(GetSizeByBlocks((*files)[0]), 1000u);
 
   ASSERT_THAT(ReserveSpaceForCompressedApex(10, dest_dir.path), Ok());
   files = ReadDir(dest_dir.path, [](auto _) { return true; });
   ASSERT_THAT(files, Ok());
   ASSERT_EQ(files->size(), 1u);
   EXPECT_EQ(fs::file_size((*files)[0]), 10u);
+  EXPECT_GE(GetSizeByBlocks((*files)[0]), 10u);
 }
 
 TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexDeallocateIfPassedZero) {
