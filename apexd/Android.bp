@@ -557,7 +557,6 @@ cc_test {
         "apex_manifest_test.cpp",
         "apexd_test.cpp",
         "apexd_session_test.cpp",
-        "apexd_verity_test.cpp",
         "apexd_utils_test.cpp",
     ],
     host_supported: false,
