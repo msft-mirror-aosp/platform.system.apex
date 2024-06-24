@@ -364,7 +364,6 @@ class ApexerRebuildTest(unittest.TestCase):
         salt = hashlib.sha256(manifest_apex.SerializeToString()).hexdigest()
         cmd.extend(['--salt', salt])
         cmd.extend(['--image', signed_payload])
-        cmd.append('--no_hashtree')
         run_and_check_output(cmd)
 
         return signed_payload
