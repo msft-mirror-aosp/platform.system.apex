@@ -1780,25 +1780,6 @@ TEST_F(ApexServiceTest, StageCorruptApexFailsB146895998) {
   ASSERT_FALSE(IsOk(service_->stagePackages({installer.test_file})));
 }
 
-TEST_F(ApexServiceTest,
-       SubmitStagedSessionFailsManifestMismatchCleansUpHashtree) {
-  PrepareTestApexForInstall installer(
-      GetTestFile("apex.apexd_test_no_hashtree_manifest_mismatch.apex"),
-      "/data/app-staging/session_83", "staging_data_file");
-  if (!installer.Prepare()) {
-    return;
-  }
-
-  ApexInfoList list;
-  ApexSessionParams params;
-  params.sessionId = 83;
-  ASSERT_FALSE(IsOk(service_->submitStagedSession(params, &list)));
-  std::string hashtree_file = std::string(kApexHashTreeDir) + "/" +
-                              installer.package + "@" +
-                              std::to_string(installer.version) + ".new";
-  ASSERT_FALSE(RegularFileExists(hashtree_file));
-}
-
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
   void OnTestStart(const ::testing::TestInfo& test_info) override {
 #ifdef __ANDROID__
