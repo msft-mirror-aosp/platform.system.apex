@@ -101,6 +101,15 @@ static int64_t GetMTime(const std::string& path) {
   return st_buf.st_mtime;
 }
 
+static int64_t GetSizeByBlocks(const std::string& path) {
+  struct stat st_buf;
+  if (stat(path.c_str(), &st_buf) != 0) {
+    PLOG(ERROR) << "Failed to stat " << path;
+    return 0;
+  }
+  return st_buf.st_blocks * st_buf.st_blksize;
+}
+
 // A very basic mock of CheckpointInterface.
 class MockCheckpointInterface : public CheckpointInterface {
  public:
@@ -706,6 +715,7 @@ TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexCreatesSingleFile) {
   ASSERT_THAT(files, Ok());
   ASSERT_EQ(files->size(), 1u);
   EXPECT_EQ(fs::file_size((*files)[0]), 100u);
+  EXPECT_GE(GetSizeByBlocks((*files)[0]), 100u);
 }
 
 TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexSafeToCallMultipleTimes) {
@@ -718,6 +728,7 @@ TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexSafeToCallMultipleTimes) {
   ASSERT_THAT(files, Ok());
   ASSERT_EQ(files->size(), 1u);
   EXPECT_EQ(fs::file_size((*files)[0]), 100u);
+  EXPECT_GE(GetSizeByBlocks((*files)[0]), 100u);
 }
 
 TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexShrinkAndGrow) {
@@ -733,12 +744,14 @@ TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexShrinkAndGrow) {
   ASSERT_THAT(files, Ok());
   ASSERT_EQ(files->size(), 1u);
   EXPECT_EQ(fs::file_size((*files)[0]), 1000u);
+  EXPECT_GE(GetSizeByBlocks((*files)[0]), 1000u);
 
   ASSERT_THAT(ReserveSpaceForCompressedApex(10, dest_dir.path), Ok());
   files = ReadDir(dest_dir.path, [](auto _) { return true; });
   ASSERT_THAT(files, Ok());
   ASSERT_EQ(files->size(), 1u);
   EXPECT_EQ(fs::file_size((*files)[0]), 10u);
+  EXPECT_GE(GetSizeByBlocks((*files)[0]), 10u);
 }
 
 TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexDeallocateIfPassedZero) {
@@ -973,21 +986,6 @@ TEST_F(ApexdMountTest, InstallPackageRejectsNoPreInstalledApex) {
   ASSERT_THAT(
       ret, HasError(WithMessage(HasSubstr(
                "No active version found for package test.apex.rebootless"))));
-}
-
-TEST_F(ApexdMountTest, InstallPackageRejectsNoHashtree) {
-  std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
-  ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
-
-  ASSERT_THAT(ActivatePackage(file_path), Ok());
-  UnmountOnTearDown(file_path);
-
-  auto ret =
-      InstallPackage(GetTestFile("test.rebootless_apex_v2_no_hashtree.apex"),
-                     /* force= */ false);
-  ASSERT_THAT(
-      ret,
-      HasError(WithMessage(HasSubstr(" does not have an embedded hash tree"))));
 }
 
 TEST_F(ApexdMountTest, InstallPackageRejectsNoActiveApex) {
@@ -1657,73 +1655,18 @@ TEST_F(ApexdMountTest, ActivatePackageShowsUpInMountedApexDatabase) {
       << "mounted apexes";
 }
 
-TEST_F(ApexdMountTest, ActivatePackageNoHashtree) {
-  AddPreInstalledApex("apex.apexd_test.apex");
-  ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
-
-  std::string file_path = AddDataApex("apex.apexd_test_no_hashtree.apex");
-  ASSERT_THAT(ActivatePackage(file_path), Ok());
-  UnmountOnTearDown(file_path);
-
-  // Check that hashtree was generated
-  std::string hashtree_path =
-      GetHashTreeDir() + "/com.android.apex.test_package@1";
-  ASSERT_EQ(0, access(hashtree_path.c_str(), F_OK));
-
-  // Check that block device can be read.
-  auto block_device = GetBlockDeviceForApex("com.android.apex.test_package@1");
-  ASSERT_THAT(block_device, Ok());
-  ASSERT_THAT(ReadDevice(*block_device), Ok());
-}
-
-TEST_F(ApexdMountTest, ActivatePackageNoHashtreeShowsUpInMountedDatabase) {
-  AddPreInstalledApex("apex.apexd_test.apex");
-  ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
-
-  std::string file_path = AddDataApex("apex.apexd_test_no_hashtree.apex");
-  ASSERT_THAT(ActivatePackage(file_path), Ok());
-  UnmountOnTearDown(file_path);
-
-  // Get loop devices that were used to mount APEX.
-  auto children = ListChildLoopDevices("com.android.apex.test_package@1");
-  ASSERT_THAT(children, Ok());
-  ASSERT_EQ(2u, children->size())
-      << "Unexpected number of children: " << Join(*children, ",");
-
-  auto& db = GetApexDatabaseForTesting();
-  std::optional<MountedApexData> mounted_apex;
-  db.ForallMountedApexes("com.android.apex.test_package",
-                         [&](const MountedApexData& d, bool active) {
-                           if (active) {
-                             mounted_apex.emplace(d);
-                           }
-                         });
-  ASSERT_TRUE(mounted_apex)
-      << "Haven't found com.android.apex.test_package@1  in the database of "
-      << "mounted apexes";
-
-  ASSERT_EQ(file_path, mounted_apex->full_path);
-  ASSERT_EQ("/apex/com.android.apex.test_package@1", mounted_apex->mount_point);
-  ASSERT_EQ("com.android.apex.test_package@1", mounted_apex->device_name);
-  // For loops we only check that both loop_name and hashtree_loop_name are
-  // children of the top device mapper device.
-  ASSERT_THAT(*children, Contains(mounted_apex->loop_name));
-  ASSERT_THAT(*children, Contains(mounted_apex->hashtree_loop_name));
-  ASSERT_NE(mounted_apex->loop_name, mounted_apex->hashtree_loop_name);
-}
-
 TEST_F(ApexdMountTest, DeactivePackageFreesLoopDevices) {
   AddPreInstalledApex("apex.apexd_test.apex");
   ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
 
-  std::string file_path = AddDataApex("apex.apexd_test_no_hashtree.apex");
+  std::string file_path = AddDataApex("apex.apexd_test_v2.apex");
   ASSERT_THAT(ActivatePackage(file_path), Ok());
   UnmountOnTearDown(file_path);
 
   // Get loop devices that were used to mount APEX.
-  auto children = ListChildLoopDevices("com.android.apex.test_package@1");
+  auto children = ListChildLoopDevices("com.android.apex.test_package@2");
   ASSERT_THAT(children, Ok());
-  ASSERT_EQ(2u, children->size())
+  ASSERT_EQ(1u, children->size())
       << "Unexpected number of children: " << Join(*children, ",");
 
   ASSERT_THAT(DeactivatePackage(file_path), Ok());
@@ -1735,103 +1678,6 @@ TEST_F(ApexdMountTest, DeactivePackageFreesLoopDevices) {
     EXPECT_EQ(-1, ioctl(fd.get(), LOOP_GET_STATUS, &li))
         << loop << " is still alive";
     EXPECT_EQ(ENXIO, errno) << "Unexpected errno : " << strerror(errno);
-  }
-}
-
-TEST_F(ApexdMountTest, NoHashtreeApexNewSessionDoesNotImpactActivePackage) {
-  MockCheckpointInterface checkpoint_interface;
-  checkpoint_interface.SetSupportsCheckpoint(true);
-  InitializeVold(&checkpoint_interface);
-
-  AddPreInstalledApex("apex.apexd_test_no_hashtree.apex");
-  ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
-
-  std::string file_path = AddDataApex("apex.apexd_test_no_hashtree.apex");
-  ASSERT_THAT(ActivatePackage(file_path), Ok());
-  UnmountOnTearDown(file_path);
-
-  ASSERT_THAT(CreateStagedSession("apex.apexd_test_no_hashtree_2.apex", 239),
-              Ok());
-  auto status =
-      SubmitStagedSession(239, {}, /* has_rollback_enabled= */ false,
-                          /* is_rollback= */ false, /* rollback_id= */ -1);
-  ASSERT_THAT(status, Ok());
-
-  // Check that new hashtree file was created.
-  {
-    std::string hashtree_path =
-        GetHashTreeDir() + "/com.android.apex.test_package@1.new";
-    ASSERT_THAT(PathExists(hashtree_path), HasValue(true))
-        << hashtree_path << " does not exist";
-  }
-  // Check that active hashtree is still there.
-  {
-    std::string hashtree_path =
-        GetHashTreeDir() + "/com.android.apex.test_package@1";
-    ASSERT_THAT(PathExists(hashtree_path), HasValue(true))
-        << hashtree_path << " does not exist";
-  }
-
-  // Check that block device of active APEX can still be read.
-  auto block_device = GetBlockDeviceForApex("com.android.apex.test_package@1");
-  ASSERT_THAT(block_device, Ok());
-  ASSERT_THAT(ReadDevice(*block_device), Ok());
-}
-
-TEST_F(ApexdMountTest, NoHashtreeApexStagePackagesMovesHashtree) {
-  MockCheckpointInterface checkpoint_interface;
-  checkpoint_interface.SetSupportsCheckpoint(true);
-  InitializeVold(&checkpoint_interface);
-
-  AddPreInstalledApex("apex.apexd_test_no_hashtree.apex");
-  ApexFileRepository::GetInstance().AddPreInstalledApex({GetBuiltInDir()});
-
-  auto read_fn = [](const std::string& path) -> std::vector<uint8_t> {
-    static constexpr size_t kBufSize = 4096;
-    std::vector<uint8_t> buffer(kBufSize);
-    unique_fd fd(TEMP_FAILURE_RETRY(open(path.c_str(), O_RDONLY | O_CLOEXEC)));
-    if (fd.get() == -1) {
-      PLOG(ERROR) << "Failed to open " << path;
-      ADD_FAILURE();
-      return buffer;
-    }
-    if (!ReadFully(fd.get(), buffer.data(), kBufSize)) {
-      PLOG(ERROR) << "Failed to read " << path;
-      ADD_FAILURE();
-    }
-    return buffer;
-  };
-
-  ASSERT_THAT(CreateStagedSession("apex.apexd_test_no_hashtree_2.apex", 37),
-              Ok());
-  auto status =
-      SubmitStagedSession(37, {}, /* has_rollback_enabled= */ false,
-                          /* is_rollback= */ false, /* rollback_id= */ -1);
-  ASSERT_THAT(status, Ok());
-  auto staged_apex = std::move((*status)[0]);
-
-  // Check that new hashtree file was created.
-  std::vector<uint8_t> original_hashtree_data;
-  {
-    std::string hashtree_path =
-        GetHashTreeDir() + "/com.android.apex.test_package@1.new";
-    ASSERT_THAT(PathExists(hashtree_path), HasValue(true));
-    original_hashtree_data = read_fn(hashtree_path);
-  }
-
-  ASSERT_THAT(StagePackages({staged_apex.GetPath()}), Ok());
-  // Check that hashtree file was moved.
-  {
-    std::string hashtree_path =
-        GetHashTreeDir() + "/com.android.apex.test_package@1.new";
-    ASSERT_THAT(PathExists(hashtree_path), HasValue(false));
-  }
-  {
-    std::string hashtree_path =
-        GetHashTreeDir() + "/com.android.apex.test_package@1";
-    ASSERT_THAT(PathExists(hashtree_path), HasValue(true));
-    std::vector<uint8_t> moved_hashtree_data = read_fn(hashtree_path);
-    ASSERT_EQ(moved_hashtree_data, original_hashtree_data);
   }
 }
 
