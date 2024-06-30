@@ -25,19 +25,5 @@ namespace apex {
 
 std::string BytesToHex(const uint8_t* bytes, size_t len);
 
-enum PrepareHashTreeResult {
-  kReuse = 0,
-  KRegenerate = 1,
-};
-
-// Generates a dm-verity hashtree of a given |apex| if |hashtree_file| doesn't
-// exist or it's root_digest doesn't match |verity_data.root_digest|. Otherwise
-// does nothing.
-android::base::Result<PrepareHashTreeResult> PrepareHashTree(
-    const ApexFile& apex, const ApexVerityData& verity_data,
-    const std::string& hashtree_file);
-
-void RemoveObsoleteHashTrees();
-
 }  // namespace apex
 }  // namespace android
