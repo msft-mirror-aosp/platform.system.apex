@@ -131,23 +131,6 @@ apex {
 }
 
 apex {
-    name: "com.android.apex.cts.shim.v2_no_hashtree",
-    manifest: "manifest_v2.json",
-    androidManifest: "AndroidManifest.xml",
-    file_contexts: ":apex.test-file_contexts",
-    key: "com.android.apex.cts.shim.key",
-    prebuilts: ["hash_of_dev_null"],
-    apps: [
-        "CtsShim",
-        "CtsShimPriv",
-    ],
-    installable: false,
-    allowed_files: "default_shim_allowed_list.txt",
-    generate_hashtree: false,
-    updatable: false,
-}
-
-apex {
     name: "com.android.apex.cts.shim.v2_unsigned_payload",
     // Use manifest_v2_rebootless to also re-use this APEX in the rebootless update test case.
     manifest: "manifest_v2_rebootless.json",
@@ -276,7 +259,6 @@ genrule {
         ":com.android.apex.cts.shim.v2_additional_folder",
         ":com.android.apex.cts.shim.v2_different_certificate",
         ":com.android.apex.cts.shim.v2_different_package_name",
-        ":com.android.apex.cts.shim.v2_no_hashtree",
         ":com.android.apex.cts.shim.v2_signed_bob",
         ":com.android.apex.cts.shim.v2_signed_bob_rot",
         ":com.android.apex.cts.shim.v2_signed_bob_rot_rollback",
@@ -305,13 +287,25 @@ prebuilt_etc {
     installable: false,
 }
 
+prebuilt_etc {
+    name: "allowlist",
+    srcs: [
+        "signature-permission-allowlist.xml",
+    ],
+    sub_dir: "permissions",
+    installable: false,
+}
+
 apex {
     name: "com.android.apex.cts.shim.v1",
     manifest: "manifest.json",
     androidManifest: "AndroidManifest.xml",
     file_contexts: ":apex.test-file_contexts",
     key: "com.android.apex.cts.shim.key",
-    prebuilts: ["hash_v1"],
+    prebuilts: [
+        "hash_v1",
+        "allowlist",
+    ],
     apps: [
         "CtsShim",
         "CtsShimPriv",
