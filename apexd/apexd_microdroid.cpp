@@ -32,7 +32,6 @@ static const android::apex::ApexdConfig kMicrodroidConfig = {
     nullptr, /* active_apex_data_dir */
     nullptr, /* decompression_dir */
     nullptr, /* ota_reserved_dir */
-    nullptr, /* apex_hashtree_dir */
     nullptr, /* staged_session_dir */
     android::apex::kVmPayloadMetadataPartitionProp,
     nullptr, /* active_apex_selinux_ctx */

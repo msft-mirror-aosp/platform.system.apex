@@ -387,7 +387,6 @@ class ApexServiceTest : public ::testing::Test {
   void CleanUp() {
     DeleteDirContent(kActiveApexPackagesDataDir);
     DeleteDirContent(kApexBackupDir);
-    DeleteDirContent(kApexHashTreeDir);
     DeleteDirContent(GetSessionsDir());
 
     DeleteIfExists("/data/misc_ce/0/apexdata/apex.apexd_test");

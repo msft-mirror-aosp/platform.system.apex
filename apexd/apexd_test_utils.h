@@ -463,6 +463,20 @@ inline android::base::Result<std::vector<std::string>> ListChildLoopDevices(
   return children;
 }
 
+inline android::base::Result<struct loop_info64> GetLoopDeviceStatus(
+    const std::string& loop_device) {
+  android::base::unique_fd loop_fd(
+      open(loop_device.c_str(), O_RDONLY | O_CLOEXEC));
+  if (loop_fd < 0) {
+    return ErrnoErrorf("Failed to open loop device '{}'", loop_device);
+  }
+  struct loop_info64 loop_info;
+  if (ioctl(loop_fd, LOOP_GET_STATUS64, &loop_info) != 0) {
+    return ErrnoErrorf("Failed to get loop device status '{}'", loop_device);
+  }
+  return loop_info;
+}
+
 }  // namespace apex
 }  // namespace android
 
