@@ -543,7 +543,6 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   MountedApexData apex_data(apex.GetManifest().version(), loopback_device.name,
                             apex.GetPath(), mount_point,
                             /* device_name = */ "",
-                            /* hashtree_loop_name = */ "",
                             /* is_temp_mount */ temp_mount);
 
   // for APEXes in immutable partitions, we don't need to mount them on
@@ -673,9 +672,6 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
   // mount are freed).
   if (!data.loop_name.empty() && !deferred) {
     loop::DestroyLoopDevice(data.loop_name, log_fn);
-  }
-  if (!data.hashtree_loop_name.empty() && !deferred) {
-    loop::DestroyLoopDevice(data.hashtree_loop_name, log_fn);
   }
 
   return {};
@@ -2592,8 +2588,7 @@ void Initialize(CheckpointInterface* checkpoint_service) {
   }
 
   gMountedApexes.PopulateFromMounts(
-      {gConfig->active_apex_data_dir, gConfig->decompression_dir},
-      gConfig->apex_hash_tree_dir);
+      {gConfig->active_apex_data_dir, gConfig->decompression_dir});
 }
 
 // Note: Pre-installed apex are initialized in Initialize(CheckpointInterface*)
@@ -3265,7 +3260,7 @@ int UnmountAll(bool also_include_staged_apexes) {
     }
   }
 
-  gMountedApexes.PopulateFromMounts(data_dirs, gConfig->apex_hash_tree_dir);
+  gMountedApexes.PopulateFromMounts(data_dirs);
   int ret = 0;
   gMountedApexes.ForallMountedApexes([&](const std::string& /*package*/,
                                          const MountedApexData& data,

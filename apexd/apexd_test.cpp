@@ -152,7 +152,6 @@ class ApexdUnitTest : public ::testing::Test {
     data_dir_ = StringPrintf("%s/data-apex", td_.path);
     decompression_dir_ = StringPrintf("%s/decompressed-apex", td_.path);
     ota_reserved_dir_ = StringPrintf("%s/ota-reserved", td_.path);
-    hash_tree_dir_ = StringPrintf("%s/apex-hash-tree", td_.path);
     staged_session_dir_ = StringPrintf("%s/staged-session-dir", td_.path);
 
     sessions_metadata_dir_ =
@@ -164,7 +163,6 @@ class ApexdUnitTest : public ::testing::Test {
                data_dir_.c_str(),
                decompression_dir_.c_str(),
                ota_reserved_dir_.c_str(),
-               hash_tree_dir_.c_str(),
                staged_session_dir_.c_str(),
                kTestVmPayloadMetadataPartitionProp,
                kTestActiveApexSelinuxCtx};
@@ -174,7 +172,6 @@ class ApexdUnitTest : public ::testing::Test {
   const std::string& GetDataDir() { return data_dir_; }
   const std::string& GetDecompressionDir() { return decompression_dir_; }
   const std::string& GetOtaReservedDir() { return ota_reserved_dir_; }
-  const std::string& GetHashTreeDir() { return hash_tree_dir_; }
   const std::string GetStagedDir(int session_id) {
     return StringPrintf("%s/session_%d", staged_session_dir_.c_str(),
                         session_id);
@@ -262,7 +259,6 @@ class ApexdUnitTest : public ::testing::Test {
     ASSERT_EQ(mkdir(data_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(decompression_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(ota_reserved_dir_.c_str(), 0755), 0);
-    ASSERT_EQ(mkdir(hash_tree_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(staged_session_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(sessions_metadata_dir_.c_str(), 0755), 0);
 
@@ -282,7 +278,6 @@ class ApexdUnitTest : public ::testing::Test {
   std::string data_dir_;
   std::string decompression_dir_;
   std::string ota_reserved_dir_;
-  std::string hash_tree_dir_;
 
   std::string staged_session_dir_;
   std::string sessions_metadata_dir_;
@@ -3806,8 +3801,7 @@ TEST_F(ApexdMountTest, PopulateFromMountsChecksPathPrefix) {
   db.Reset();
 
   // Populate from mount
-  db.PopulateFromMounts({GetDataDir(), GetDecompressionDir()},
-                        GetHashTreeDir());
+  db.PopulateFromMounts({GetDataDir(), GetDecompressionDir()});
 
   // Count number of package and collect package names
   int package_count = 0;
