@@ -28,10 +28,13 @@
 #include <microdroid/metadata.h>
 #include <selinux/selinux.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
+#include <chrono>
 #include <functional>
 #include <optional>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <unordered_set>
 #include <vector>
@@ -70,6 +73,7 @@ using android::base::WriteStringToFile;
 using android::base::testing::HasError;
 using android::base::testing::HasValue;
 using android::base::testing::Ok;
+using android::base::testing::WithCode;
 using android::base::testing::WithMessage;
 using android::dm::DeviceMapper;
 using ::apex::proto::SessionState;
@@ -3897,7 +3901,7 @@ TEST_F(ApexdMountTest, UnmountAllSharedLibsApex) {
   ASSERT_EQ(new_apex_mounts.size(), 0u);
 }
 
-TEST_F(ApexdMountTest, UnmountAllRetry) {
+TEST_F(ApexdMountTest, UnmountAllDeferred) {
   AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -3911,32 +3915,49 @@ TEST_F(ApexdMountTest, UnmountAllRetry) {
   UnmountOnTearDown(apex_path_2);
   UnmountOnTearDown(apex_path_3);
 
-  auto apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts,
+  ASSERT_THAT(GetApexMounts(),
               UnorderedElementsAre("/apex/com.android.apex.test_package",
                                    "/apex/com.android.apex.test_package@2",
                                    "/apex/com.android.apex.test_package_2",
                                    "/apex/com.android.apex.test_package_2@1"));
 
-  // Open a file. This should make `UnmountAll` fail.
+  const std::string kDeviceName = "com.android.apex.test_package@2";
+  Result<std::vector<std::string>> loop_devices =
+      ListChildLoopDevices(kDeviceName);
+  ASSERT_THAT(loop_devices, HasValue(Not(IsEmpty())));
+
+  // Open a file. This should make unmounting in `UnmountAll` deferred.
   unique_fd fd(
-      open("/apex/com.android.apex.test_package_2/etc/sample_prebuilt_file",
+      open("/apex/com.android.apex.test_package/etc/sample_prebuilt_file",
            O_RDONLY));
+  ASSERT_GE(fd, 0) << strerror(errno);
 
   auto& db = GetApexDatabaseForTesting();
   // UnmountAll expects apex database to empty, hence this reset.
   db.Reset();
-  ASSERT_NE(0, UnmountAll(/*also_include_staged_apexes=*/false));
-  apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts, Not(IsEmpty()));
+  // UnmountAll should succeed despite the open file.
+  ASSERT_EQ(UnmountAll(/*also_include_staged_apexes=*/false), 0);
 
-  // Close the file. `UnmountAll` should succeed after then.
+  // The mount should still be there, but it should be detached from the
+  // filesystem, so the mount point should be gone.
+  EXPECT_THAT(GetApexMounts(), IsEmpty());
+  // The DM device and the loop device should still be there.
+  auto& dm = DeviceMapper::Instance();
+  EXPECT_EQ(dm.GetState(kDeviceName), dm::DmDeviceState::ACTIVE);
+  for (const std::string& loop_device : *loop_devices) {
+    EXPECT_THAT(GetLoopDeviceStatus(loop_device), Ok());
+  }
+
+  // Close the file. Unmounting should be automatically performed after then.
   fd.reset();
+  // Wait for the kernel to clean things up.
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
-  db.Reset();
-  ASSERT_EQ(0, UnmountAll(/*also_include_staged_apexes=*/false));
-  apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts, IsEmpty());
+  // The DM device and the loop device should be gone.
+  EXPECT_EQ(dm.GetState(kDeviceName), dm::DmDeviceState::INVALID);
+  for (const std::string& loop_device : *loop_devices) {
+    EXPECT_THAT(GetLoopDeviceStatus(loop_device), HasError(WithCode(ENXIO)));
+  }
 }
 
 TEST_F(ApexdMountTest, UnmountAllStaged) {
