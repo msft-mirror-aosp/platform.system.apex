@@ -252,13 +252,7 @@ cc_defaults {
         "libavb",
         "libverity_tree",
     ],
-    static: {
-        whole_static_libs: ["libc++fs"],
-    },
     cpp_std: "experimental",
-    shared: {
-        static_libs: ["libc++fs"],
-    },
 }
 
 cc_library_static {
@@ -307,26 +301,6 @@ genrule {
         "-o $(genDir)/unaligned.apex && " +
         "$(location zipalign) -f 4096 $(genDir)/unaligned.apex " +
         "$(genDir)/apex.apexd_test_manifest_mismatch.apex",
-}
-
-genrule {
-    // Generates an apex which has a different manifest outside the filesystem
-    // image.
-    name: "gen_manifest_mismatch_apex_no_hashtree",
-    out: ["apex.apexd_test_no_hashtree_manifest_mismatch.apex"],
-    srcs: [":apex.apexd_test_no_hashtree"],
-    tools: [
-        "soong_zip",
-        "zipalign",
-        "conv_apex_manifest",
-    ],
-    cmd: "unzip -q $(in) -d $(genDir) && " +
-        "$(location conv_apex_manifest) setprop version 137 $(genDir)/apex_manifest.pb && " +
-        "$(location soong_zip) -d -C $(genDir) -D $(genDir) " +
-        "-s apex_manifest.pb -s apex_payload.img -s apex_pubkey " +
-        "-o $(genDir)/unaligned.apex && " +
-        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex " +
-        "$(genDir)/apex.apexd_test_no_hashtree_manifest_mismatch.apex",
 }
 
 genrule {
@@ -501,8 +475,6 @@ cc_test {
         ":apex.apexd_test_f2fs_digest",
         ":apex.apexd_test_classpath",
         ":apex.apexd_test_different_app",
-        ":apex.apexd_test_no_hashtree",
-        ":apex.apexd_test_no_hashtree_2",
         ":apex.apexd_test_no_inst_key",
         ":apex.apexd_test_f2fs_no_inst_key",
         ":apex.apexd_test_nocode",
@@ -513,7 +485,6 @@ cc_test {
         ":gen_key_mismatch_apex_v2",
         ":gen_key_mismatch_capex",
         ":gen_manifest_mismatch_apex",
-        ":gen_manifest_mismatch_apex_no_hashtree",
         ":gen_corrupt_superblock_apex",
         ":gen_corrupt_apex",
         ":gen_capex_not_decompressible",
@@ -541,7 +512,6 @@ cc_test {
         ":com.android.apex.test.sharedlibs_generated.v2.libvY_prebuilt",
         ":test.rebootless_apex_v1",
         ":test.rebootless_apex_v2",
-        ":test.rebootless_apex_v2_no_hashtree",
         ":test.rebootless_apex_service_v1",
         ":test.rebootless_apex_service_v2",
         ":gen_manifest_mismatch_rebootless_apex",
@@ -563,7 +533,6 @@ cc_test {
         "apex_manifest_test.cpp",
         "apexd_test.cpp",
         "apexd_session_test.cpp",
-        "apexd_verity_test.cpp",
         "apexd_utils_test.cpp",
     ],
     host_supported: false,
@@ -608,8 +577,6 @@ cc_test {
         ":apex.apexd_test_f2fs_digest",
         ":apex.apexd_test_classpath",
         ":apex.apexd_test_different_app",
-        ":apex.apexd_test_no_hashtree",
-        ":apex.apexd_test_no_hashtree_2",
         ":apex.apexd_test_no_inst_key",
         ":apex.apexd_test_f2fs_no_inst_key",
         ":apex.apexd_test_nocode",
@@ -620,7 +587,6 @@ cc_test {
         ":gen_key_mismatch_apex_v2",
         ":gen_key_mismatch_capex",
         ":gen_manifest_mismatch_apex",
-        ":gen_manifest_mismatch_apex_no_hashtree",
         ":gen_corrupt_superblock_apex",
         ":gen_corrupt_apex",
         ":gen_capex_not_decompressible",
@@ -648,7 +614,6 @@ cc_test {
         ":com.android.apex.test.sharedlibs_generated.v2.libvY_prebuilt",
         ":test.rebootless_apex_v1",
         ":test.rebootless_apex_v2",
-        ":test.rebootless_apex_v2_no_hashtree",
         ":test.rebootless_apex_service_v1",
         ":test.rebootless_apex_service_v2",
         ":gen_manifest_mismatch_rebootless_apex",
