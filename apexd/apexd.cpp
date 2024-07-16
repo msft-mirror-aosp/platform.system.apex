@@ -3278,13 +3278,13 @@ int UnmountAll(bool also_include_staged_apexes) {
       auto pos = data.mount_point.find('@');
       CHECK(pos != std::string::npos);
       std::string bind_mount = data.mount_point.substr(0, pos);
-      if (umount2(bind_mount.c_str(), UMOUNT_NOFOLLOW) != 0) {
+      if (umount2(bind_mount.c_str(), UMOUNT_NOFOLLOW | MNT_DETACH) != 0) {
         PLOG(ERROR) << "Failed to unmount bind-mount " << bind_mount;
         ret = 1;
         return;
       }
     }
-    if (auto status = Unmount(data, /* deferred= */ false); !status.ok()) {
+    if (auto status = Unmount(data, /* deferred= */ true); !status.ok()) {
       LOG(ERROR) << "Failed to unmount " << data.mount_point << " : "
                  << status.error();
       ret = 1;
