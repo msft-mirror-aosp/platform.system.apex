@@ -95,8 +95,12 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
                    << apex_file->GetPath();
         continue;
       }
+      // If BOARD_USES_VENDORIMAGE is false, then /vendor will be a symlink to
+      // /system/vendor. path is a realpath to the apex, so we must check
+      // against both.
       if (enforce_multi_install_partition_ &&
-          !android::base::StartsWith(path, "/vendor/apex/")) {
+          !android::base::StartsWith(path, "/vendor/apex/") &&
+          !android::base::StartsWith(path, "/system/vendor/apex/")) {
         LOG(ERROR) << "Multi-install APEX " << path
                    << " can only be preinstalled on /vendor/apex/.";
         continue;
