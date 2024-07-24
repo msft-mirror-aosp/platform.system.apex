@@ -14,6 +14,7 @@
 
 package {
     default_applicable_licenses: ["Android-Apache-2.0"],
+    default_team: "trendy_team_treble",
 }
 
 cc_test {
@@ -40,7 +41,6 @@ cc_test {
 
     static_libs: [
         "libbase",
-        "libc++fs",
         "libfs_mgr",
     ],
 

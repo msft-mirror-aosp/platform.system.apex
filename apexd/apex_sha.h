@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,16 +14,13 @@
  * limitations under the License.
  */
 
-#pragma once
-
-#include <string>
-
-#include "apex_file.h"
+#include <android-base/result.h>
 
 namespace android {
 namespace apex {
 
-std::string BytesToHex(const uint8_t* bytes, size_t len);
+android::base::Result<std::string> CalculateSha512(const std::string& path);
+android::base::Result<std::string> CalculateSha256(const std::string& path);
 
 }  // namespace apex
 }  // namespace android

@@ -32,6 +32,7 @@ import com.android.cts.install.lib.Install;
 import com.android.cts.install.lib.InstallUtils;
 import com.android.cts.install.lib.TestApp;
 
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -63,11 +64,16 @@ public class VendorApexTests {
             "com.android.apex.vendor.foo.v2_with_wrong_vndk_version", APEX_PACKAGE_NAME, 2,
             /*isApex*/true, "com.android.apex.vendor.foo.v2_with_wrong_vndk_version.apex");
 
+    @Before
+    public void setUp() {
+        InstallUtils.dropShellPermissionIdentity();
+        InstallUtils.adoptShellPermissionIdentity(
+                Manifest.permission.INSTALL_PACKAGE_UPDATES,
+                Manifest.permission.INSTALL_TEST_ONLY_PACKAGE);
+    }
+
     @Test
     public void testRebootlessUpdate() throws Exception {
-        InstallUtils.dropShellPermissionIdentity();
-        InstallUtils.adoptShellPermissionIdentity(Manifest.permission.INSTALL_PACKAGE_UPDATES);
-
         final PackageManager pm =
                 InstrumentationRegistry.getInstrumentation().getContext().getPackageManager();
         {
@@ -87,9 +93,6 @@ public class VendorApexTests {
 
     @Test
     public void testGenerateLinkerConfigurationOnUpdate() throws Exception {
-        InstallUtils.dropShellPermissionIdentity();
-        InstallUtils.adoptShellPermissionIdentity(Manifest.permission.INSTALL_PACKAGE_UPDATES);
-
         // There's no ld.config.txt for v1 (preinstalled, empty)
         final Path ldConfigTxt = Paths.get("/linkerconfig", APEX_PACKAGE_NAME, "ld.config.txt");
         assertTrue(Files.notExists(ldConfigTxt));
@@ -114,9 +117,6 @@ public class VendorApexTests {
 
     @Test
     public void testRestartServiceAfterRebootlessUpdate() throws Exception {
-        InstallUtils.dropShellPermissionIdentity();
-        InstallUtils.adoptShellPermissionIdentity(Manifest.permission.INSTALL_PACKAGE_UPDATES);
-
         assertThat(SystemProperties.get("init.svc.apex_vendor_foo_v1", ""))
             .isEqualTo("running");
         assertThat(SystemProperties.get("init.svc.apex_vendor_foo_v2", ""))
@@ -136,9 +136,6 @@ public class VendorApexTests {
 
     @Test
     public void testInstallAbortsWhenVndkVersionMismatches() throws Exception {
-        InstallUtils.dropShellPermissionIdentity();
-        InstallUtils.adoptShellPermissionIdentity(Manifest.permission.INSTALL_PACKAGE_UPDATES);
-
         InstallUtils.commitExpectingFailure(
                 AssertionError.class,
                 "vndkVersion\\(WrongVndkVersion\\) doesn't match with device VNDK version",
@@ -147,9 +144,6 @@ public class VendorApexTests {
 
     @Test
     public void testInstallAbortsWhenVndkVersionMismatches_Staged() throws Exception {
-        InstallUtils.dropShellPermissionIdentity();
-        InstallUtils.adoptShellPermissionIdentity(Manifest.permission.INSTALL_PACKAGE_UPDATES);
-
         InstallUtils.commitExpectingFailure(
                 AssertionError.class,
                 "vndkVersion\\(WrongVndkVersion\\) doesn't match with device VNDK version",
