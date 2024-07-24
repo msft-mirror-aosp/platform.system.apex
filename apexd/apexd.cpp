@@ -154,6 +154,9 @@ static const std::vector<std::string> kBootstrapApexes = ([]() {
       "com.android.i18n",
       "com.android.runtime",
       "com.android.tzdata",
+#ifdef RELEASE_AVF_ENABLE_EARLY_VM
+      "com.android.virt",
+#endif
   };
 
   auto vendor_vndk_ver = GetProperty("ro.vndk.version", "");
