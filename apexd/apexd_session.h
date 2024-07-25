@@ -116,6 +116,8 @@ class ApexSessionManager {
   android::base::Result<void> MigrateFromOldSessionsDir(
       const std::string& old_sessions_base_dir);
 
+  bool HasActiveSession();
+
  private:
   explicit ApexSessionManager(std::string sessions_base_dir);
   ApexSessionManager(const ApexSessionManager&) = delete;

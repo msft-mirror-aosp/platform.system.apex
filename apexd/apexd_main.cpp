@@ -204,7 +204,7 @@ int main(int argc, char** argv) {
     // the "--snapshotde" subcommand is received and snapshot/restore is
     // complete.
     android::apex::OnAllPackagesActivated(/*is_bootstrap=*/false);
-    lifecycle.WaitForBootStatus(android::apex::RevertActiveSessionsAndReboot);
+    lifecycle.WaitForBootStatus(session_manager->HasActiveSession());
     // Run cleanup routine on boot complete.
     // This should run before AllowServiceShutdown() to prevent
     // service_manager killing apexd in the middle of the cleanup.
