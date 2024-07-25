@@ -17,6 +17,7 @@
 #include <chrono>
 #include <thread>
 
+#include "apexd.h"
 #include "apexd_lifecycle.h"
 
 #include <android-base/logging.h>
@@ -28,6 +29,10 @@ using android::base::GetProperty;
 using android::base::Result;
 using android::base::WaitForProperty;
 
+constexpr int MAX_WAIT_COUNT = 60;
+constexpr int WAIT_DURATION_SECONDS = 10;
+static const char* BOOT_TIMEOUT = "BootTimeout"; // NOLINT
+
 namespace android {
 namespace apex {
 
@@ -36,8 +41,25 @@ bool ApexdLifecycle::IsBooting() {
   return status != kApexStatusReady && status != kApexStatusActivated;
 }
 
-void ApexdLifecycle::WaitForBootStatus(
-    Result<void> (&revert_fn)(const std::string&, const std::string&)) {
+void ApexdLifecycle::RevertActiveSessions(const std::string& process,
+                                          const std::string& error) {
+  auto result = RevertActiveSessionsAndReboot(process, error);
+  if (!result.ok()) {
+    if (error != BOOT_TIMEOUT) {
+      LOG(ERROR) << "Revert failed : " << result.error();
+      // Can not anything more but loop until boot successfully
+      while (!boot_completed_) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+      }
+      return;
+    }
+  }
+  // This should never be reached
+  LOG(FATAL) << "Active sessions were reverted, but reboot wasn't triggered.";
+}
+
+void ApexdLifecycle::WaitForBootStatus(const bool has_active_session) {
+  int wait_count = 0;
   while (!boot_completed_) {
     // Check for change in either crashing property or sys.boot_completed
     // Wait for updatable_crashing property change for most of the time
@@ -46,27 +68,19 @@ void ApexdLifecycle::WaitForBootStatus(
     // We use this strategy so that we can quickly detect if an updatable
     // process is crashing.
     if (WaitForProperty("sys.init.updatable_crashing", "1",
-                        std::chrono::seconds(10))) {
+                        std::chrono::seconds(WAIT_DURATION_SECONDS))) {
       auto name = GetProperty("sys.init.updatable_crashing_process_name", "");
       LOG(ERROR) << "Native process '" << (name.empty() ? "[unknown]" : name)
                  << "' is crashing. Attempting a revert";
-      auto result = revert_fn(name, "");
-      if (!result.ok()) {
-        LOG(ERROR) << "Revert failed : " << result.error();
-        return WaitForBootStatus();
-      } else {
-        // This should never be reached, since revert_fn should've rebooted
-        // the device.
-        LOG(FATAL) << "Active sessions were reverted, but reboot wasn't "
-                      "triggered.";
-      }
+      RevertActiveSessions(name, "");
     }
-  }
-}
-
-void ApexdLifecycle::WaitForBootStatus() {
-  while (!boot_completed_) {
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    // Check if system stuck in boot screen and revert the staging apex once
+    if (has_active_session && ++wait_count == MAX_WAIT_COUNT) {
+      LOG(ERROR) << "System didn't finish boot in "
+                 << (WAIT_DURATION_SECONDS * MAX_WAIT_COUNT)
+                 << " seconds. Attempting a revert";
+      RevertActiveSessions("", BOOT_TIMEOUT);
+    }
   }
 }
 
