@@ -63,7 +63,10 @@ cc_defaults {
         "-Wunreachable-code-return",
         "-Wunused",
         "-Wused-but-marked-unused",
-    ],
+    ] + select(release_flag("RELEASE_AVF_ENABLE_EARLY_VM"), {
+        true: ["-DRELEASE_AVF_ENABLE_EARLY_VM"],
+        default: [],
+    }),
     tidy: true,
     tidy_checks: tidy_errors,
     tidy_checks_as_errors: tidy_errors,
