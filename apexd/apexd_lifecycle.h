@@ -32,8 +32,8 @@ class ApexdLifecycle {
   ApexdLifecycle& operator=(const ApexdLifecycle&) = delete;
   ApexdLifecycle& operator=(ApexdLifecycle&&) = delete;
 
-  void WaitForBootStatus();
-
+  void RevertActiveSessions(const std::string& process,
+                            const std::string& error);
  public:
   static ApexdLifecycle& GetInstance() {
     static ApexdLifecycle instance;
@@ -41,8 +41,7 @@ class ApexdLifecycle {
   }
   bool IsBooting();
   void MarkBootCompleted();
-  void WaitForBootStatus(android::base::Result<void> (&rollback_fn)(
-      const std::string&, const std::string&));
+  void WaitForBootStatus(const bool has_active_session);
 };
 }  // namespace apex
 }  // namespace android
