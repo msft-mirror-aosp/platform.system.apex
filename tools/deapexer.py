@@ -355,6 +355,10 @@ def RunDecompress(args):
       args.input: file path to compressed APEX
       args.output: file path to where decompressed APEX will be placed
   """
+  if GetType(args.input) == ApexType.UNCOMPRESSED and args.copy_if_uncompressed:
+    shutil.copyfile(args.input, args.output)
+    return
+
   compressed_apex_fp = args.input
   decompressed_apex_fp = args.output
   return decompress(compressed_apex_fp, decompressed_apex_fp)
@@ -422,8 +426,10 @@ def main(argv):
                                  help='path to compressed APEX file that '
                                       'will be decompressed')
   parser_decompress.add_argument('--output', type=str, required=True,
-                                 help='output directory path where '
-                                      'decompressed APEX will be extracted')
+                                 help='path to the output APEX file')
+  parser_decompress.add_argument('--copy-if-uncompressed',
+                                 help='just copy the input if not compressed',
+                                 action='store_true')
   parser_decompress.set_defaults(func=RunDecompress)
 
   args = parser.parse_args(argv)
