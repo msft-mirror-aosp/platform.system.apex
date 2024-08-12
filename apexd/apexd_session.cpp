@@ -350,10 +350,10 @@ std::vector<ApexSession> ApexSessionManager::GetSessions() const {
 
   if (!walk_status.ok()) {
     LOG(WARNING) << walk_status.error();
-    return std::move(sessions);
+    return sessions;
   }
 
-  return std::move(sessions);
+  return sessions;
 }
 
 std::vector<ApexSession> ApexSessionManager::GetSessionsInState(
