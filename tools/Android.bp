@@ -134,7 +134,6 @@ sh_test_host {
     data_libs: [
         "libbase",
         "libc++",
-        "libcgrouprc",
         "libcrypto",
         "libcutils",
         "liblog",
