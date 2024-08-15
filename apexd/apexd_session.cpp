@@ -350,10 +350,10 @@ std::vector<ApexSession> ApexSessionManager::GetSessions() const {
 
   if (!walk_status.ok()) {
     LOG(WARNING) << walk_status.error();
-    return std::move(sessions);
+    return sessions;
   }
 
-  return std::move(sessions);
+  return sessions;
 }
 
 std::vector<ApexSession> ApexSessionManager::GetSessionsInState(
@@ -378,6 +378,16 @@ Result<void> ApexSessionManager::MigrateFromOldSessionsDir(
   }
 
   return MoveDir(old_sessions_base_dir, sessions_base_dir_);
+}
+
+bool ApexSessionManager::HasActiveSession() {
+  for (auto& s : GetSessions()) {
+    if (!s.IsFinalized() &&
+        s.GetState() != ::apex::proto::SessionState::UNKNOWN) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace apex
