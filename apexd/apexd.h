@@ -46,7 +46,6 @@ struct ApexdConfig {
   const char* active_apex_data_dir;
   const char* decompression_dir;
   const char* ota_reserved_dir;
-  const char* apex_hash_tree_dir;
   const char* staged_session_dir;
   // Overrides the path to the "metadata" partition which is by default
   // /dev/block/by-name/payload-metadata It should be a path pointing the first
@@ -63,7 +62,6 @@ static const ApexdConfig kDefaultConfig = {
     kActiveApexPackagesDataDir,
     kApexDecompressedDir,
     kOtaReservedDir,
-    kApexHashTreeDir,
     kStagedSessionsDir,
     kVmPayloadMetadataPartitionProp,
     "u:object_r:staging_data_file",
@@ -172,8 +170,12 @@ void OnAllPackagesActivated(bool is_bootstrap);
 // "activated").
 void OnAllPackagesReady();
 void OnBootCompleted();
-// Exposed for testing
+
+// Removes inactivate apexes on /data after activation.
+// This can happen when prebuilt APEXes are newer than /data apexes with OTA.
+// Exposed for testing.
 void RemoveInactiveDataApex();
+
 void BootCompletedCleanup();
 int SnapshotOrRestoreDeUserData();
 
