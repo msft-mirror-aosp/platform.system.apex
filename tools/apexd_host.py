@@ -42,7 +42,7 @@ import apex_manifest
 
 # This should be in sync with kApexPackageBuiltinDirs in
 # system/apex/apexd/apex_constants.h
-PARTITIONS = ['system', 'system_ext', 'product', 'vendor']
+PARTITIONS = ['system', 'system_ext', 'product', 'vendor', 'odm']
 
 
 def DirectoryType(path):
