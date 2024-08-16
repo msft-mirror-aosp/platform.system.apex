@@ -95,8 +95,12 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
                    << apex_file->GetPath();
         continue;
       }
+      // If BOARD_USES_VENDORIMAGE is false, then /vendor will be a symlink to
+      // /system/vendor. path is a realpath to the apex, so we must check
+      // against both.
       if (enforce_multi_install_partition_ &&
-          !android::base::StartsWith(path, "/vendor/apex/")) {
+          !android::base::StartsWith(path, "/vendor/apex/") &&
+          !android::base::StartsWith(path, "/system/vendor/apex/")) {
         LOG(ERROR) << "Multi-install APEX " << path
                    << " can only be preinstalled on /vendor/apex/.";
         continue;
@@ -475,7 +479,7 @@ std::vector<ApexFileRef> ApexFileRepository::GetPreInstalledApexFiles() const {
   for (const auto& it : pre_installed_store_) {
     result.emplace_back(std::cref(it.second));
   }
-  return std::move(result);
+  return result;
 }
 
 std::vector<ApexFileRef> ApexFileRepository::GetDataApexFiles() const {
@@ -484,7 +488,7 @@ std::vector<ApexFileRef> ApexFileRepository::GetDataApexFiles() const {
   for (const auto& it : data_store_) {
     result.emplace_back(std::cref(it.second));
   }
-  return std::move(result);
+  return result;
 }
 
 // Group pre-installed APEX and data APEX by name
@@ -510,7 +514,7 @@ ApexFileRepository::AllApexFilesByName() const {
     result[package_name].emplace_back(apex_file_ref);
   }
 
-  return std::move(result);
+  return result;
 }
 
 ApexFileRef ApexFileRepository::GetDataApex(const std::string& name) const {
