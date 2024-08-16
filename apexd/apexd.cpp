@@ -154,6 +154,9 @@ static const std::vector<std::string> kBootstrapApexes = ([]() {
       "com.android.i18n",
       "com.android.runtime",
       "com.android.tzdata",
+#ifdef RELEASE_AVF_ENABLE_EARLY_VM
+      "com.android.virt",
+#endif
   };
 
   auto vendor_vndk_ver = GetProperty("ro.vndk.version", "");
@@ -1522,7 +1525,7 @@ std::vector<ApexFile> CalculateInactivePackages(
                            });
       });
   inactive.erase(new_end, inactive.end());
-  return std::move(inactive);
+  return inactive;
 }
 
 Result<void> EmitApexInfoList(bool is_bootstrap) {
@@ -2872,7 +2875,7 @@ std::vector<ApexFile> ProcessCompressedApex(
     LOG(ERROR) << "Failed to process compressed APEX: "
                << decompressed_apex.error();
   }
-  return std::move(decompressed_apex_list);
+  return decompressed_apex_list;
 }
 
 Result<void> ValidateDecompressedApex(const ApexFile& capex,
