@@ -346,14 +346,13 @@ def ValidateArgs(args):
       return False
 
   if not args.canned_fs_config:
-    if not args.canned_fs_config:
-      if build_info is not None:
-        with tempfile.NamedTemporaryFile(delete=False) as temp:
-          temp.write(build_info.canned_fs_config)
-          args.canned_fs_config = temp.name
-      else:
-        print('Missing ----canned_fs_config {config} argument, or a --build_info argument!')
-        return False
+    if build_info is not None:
+      with tempfile.NamedTemporaryFile(delete=False) as temp:
+        temp.write(build_info.canned_fs_config)
+        args.canned_fs_config = temp.name
+    else:
+      print('Missing --canned_fs_config {config} argument, or a --build_info argument!')
+      return False
 
   if not args.target_sdk_version:
     if build_info is not None:
