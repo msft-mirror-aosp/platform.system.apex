@@ -85,8 +85,8 @@ void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
                  int sdk_version) {
   init::Parser parser;
   init::ServiceList service_list = init::ServiceList();
-  parser.AddSectionParser("service", std::make_unique<init::ServiceParser>(
-                                         &service_list, nullptr, std::nullopt));
+  parser.AddSectionParser(
+      "service", std::make_unique<init::ServiceParser>(&service_list, nullptr));
   const init::BuiltinFunctionMap& function_map = init::GetBuiltinFunctionMap();
   init::Action::set_function_map(&function_map);
   init::ActionManager action_manager = init::ActionManager();
