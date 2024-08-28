@@ -23,7 +23,6 @@
 #include <android-base/result.h>
 #include <android-base/strings.h>
 #include <apex_file.h>
-#include <check_builtins.h>
 #include <getopt.h>
 #include <parser.h>
 #include <pwd.h>
@@ -276,8 +275,6 @@ int main(int argc, char** argv) {
     PrintUsage();
     return EXIT_FAILURE;
   }
-
-  init::InitializeHostPropertyInfoArea({});
 
   if (!partition_map.empty()) {
     for (const auto& p : partition_map) {
