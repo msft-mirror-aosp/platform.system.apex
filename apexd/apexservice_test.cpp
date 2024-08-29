@@ -1553,7 +1553,7 @@ TEST_F(ApexServiceTest, ApexdIsInSameMountNamespaceAsInit) {
 }
 
 // These are NOT exhaustive list of early processes be should be enough
-static const std::vector<const std::string> kEarlyProcesses = {
+static const std::vector<std::string> kEarlyProcesses = {
     "vold",
     "logd",
 };
@@ -1598,7 +1598,7 @@ TEST(ApexdTest, ApexIsAPrivateMountPoint) {
   ASSERT_TRUE(found_apex_mountpoint);
 }
 
-static const std::vector<const std::string> kEarlyApexes = {
+static const std::vector<std::string> kEarlyApexes = {
     "/apex/com.android.runtime",
     "/apex/com.android.tzdata",
 };
