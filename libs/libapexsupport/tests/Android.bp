@@ -2,7 +2,7 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-apex {
+apex_test {
     name: "com.android.libapexsupport.tests",
     vendor: true,
     installable: false,
