@@ -23,7 +23,6 @@
 #include <android-base/result.h>
 #include <android-base/strings.h>
 #include <apex_file.h>
-#include <check_builtins.h>
 #include <getopt.h>
 #include <parser.h>
 #include <pwd.h>
@@ -85,8 +84,8 @@ void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
                  int sdk_version) {
   init::Parser parser;
   init::ServiceList service_list = init::ServiceList();
-  parser.AddSectionParser("service", std::make_unique<init::ServiceParser>(
-                                         &service_list, nullptr, std::nullopt));
+  parser.AddSectionParser(
+      "service", std::make_unique<init::ServiceParser>(&service_list, nullptr));
   const init::BuiltinFunctionMap& function_map = init::GetBuiltinFunctionMap();
   init::Action::set_function_map(&function_map);
   init::ActionManager action_manager = init::ActionManager();
@@ -276,8 +275,6 @@ int main(int argc, char** argv) {
     PrintUsage();
     return EXIT_FAILURE;
   }
-
-  init::InitializeHostPropertyInfoArea({});
 
   if (!partition_map.empty()) {
     for (const auto& p : partition_map) {
