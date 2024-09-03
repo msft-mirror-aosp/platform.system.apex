@@ -15,6 +15,9 @@
       "path": "system/apex/tests"
     },
     {
+      "path": "system/apex/tools"
+    },
+    {
       "path": "vendor/xts/gts-tests/hostsidetests/stagedinstall"
     },
     {
