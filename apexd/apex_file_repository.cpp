@@ -479,7 +479,7 @@ std::vector<ApexFileRef> ApexFileRepository::GetPreInstalledApexFiles() const {
   for (const auto& it : pre_installed_store_) {
     result.emplace_back(std::cref(it.second));
   }
-  return std::move(result);
+  return result;
 }
 
 std::vector<ApexFileRef> ApexFileRepository::GetDataApexFiles() const {
@@ -488,7 +488,7 @@ std::vector<ApexFileRef> ApexFileRepository::GetDataApexFiles() const {
   for (const auto& it : data_store_) {
     result.emplace_back(std::cref(it.second));
   }
-  return std::move(result);
+  return result;
 }
 
 // Group pre-installed APEX and data APEX by name
@@ -514,7 +514,7 @@ ApexFileRepository::AllApexFilesByName() const {
     result[package_name].emplace_back(apex_file_ref);
   }
 
-  return std::move(result);
+  return result;
 }
 
 ApexFileRef ApexFileRepository::GetDataApex(const std::string& name) const {
