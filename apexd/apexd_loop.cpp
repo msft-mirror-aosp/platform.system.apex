@@ -30,6 +30,7 @@
 #include <libdm/dm.h>
 #include <linux/fs.h>
 #include <linux/loop.h>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
@@ -64,7 +65,7 @@ namespace loop {
 static constexpr const char* kApexLoopIdPrefix = "apex:";
 
 // 128 kB read-ahead, which we currently use for /system as well
-static constexpr const char* kReadAheadKb = "128";
+static constexpr const unsigned int kReadAheadKb = 128;
 
 void LoopbackDeviceUniqueFd::MaybeCloseBad() {
   if (device_fd.get() != -1) {
@@ -259,8 +260,11 @@ Result<void> ConfigureReadAhead(const std::string& device_path) {
     return ErrnoError() << "Failed to open " << sysfs_device;
   }
 
+  std::string readAheadKb = std::to_string(
+      android::sysprop::ApexProperties::loopback_readahead().value_or(kReadAheadKb));
+
   int ret = TEMP_FAILURE_RETRY(
-      write(sysfs_fd.get(), kReadAheadKb, strlen(kReadAheadKb) + 1));
+      write(sysfs_fd.get(), readAheadKb.c_str(), readAheadKb.length()));
   if (ret < 0) {
     return ErrnoError() << "Failed to write to " << sysfs_device;
   }
