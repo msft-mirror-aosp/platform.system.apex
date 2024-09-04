@@ -58,3 +58,11 @@ prop {
     access: Readonly
     prop_name: "apexd.config.boot_activation.threads"
 }
+
+prop {
+    api_name: "loopback_readahead"
+    type: UInt
+    scope: Internal
+    access: Readonly
+    prop_name: "apexd.config.loopback.readahead"
+}
