@@ -109,7 +109,6 @@ cc_binary_host {
         "libapex-deps",
     ],
     shared_libs: [
-        "libhidl-gen-utils",
         "libprocessgroup",
     ],
     static_libs: [
@@ -129,6 +128,7 @@ sh_test_host {
     data_bins: [
         "deapexer",
         "debugfs_static",
+        "fsck.erofs",
         "host_apex_verifier",
     ],
     data_libs: [
@@ -138,8 +138,11 @@ sh_test_host {
         "libcrypto",
         "libcutils",
         "liblog",
+        "libpcre2", // used by libselinux
         "libprocessgroup",
-        "libprotobuf-cpp-full",
+        "libprotobuf-cpp-full", // used by libapex
+        "libprotobuf-cpp-lite", // used by libinit_host
+        "libselinux", // used by libapex
         "libz",
         "libziparchive",
     ],
