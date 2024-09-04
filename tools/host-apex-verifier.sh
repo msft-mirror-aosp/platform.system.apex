@@ -17,9 +17,11 @@ TEST_DIR=$(dirname $0)
 HOST_APEX_VERIFIER=$TEST_DIR/host_apex_verifier
 DEBUGFS=$TEST_DIR/debugfs_static
 DEAPEXER=$TEST_DIR/deapexer
+FSCKEROFS=$TEST_DIR/fsck.erofs
 $HOST_APEX_VERIFIER \
   --deapexer $DEAPEXER \
   --debugfs $DEBUGFS \
+  --fsckerofs $FSCKEROFS \
   --sdk_version $SDK_VERSION \
   --out_system $TEMP_DIR/system \
   --out_system_ext $TEMP_DIR/system_ext \
