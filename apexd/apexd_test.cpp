@@ -125,6 +125,8 @@ class MockCheckpointInterface : public CheckpointInterface {
 
   Result<bool> NeedsRollback() override { return needs_rollback_; }
 
+  Result<void> StartCheckpoint(int32_t num_retries) override { return {}; }
+
   Result<void> AbortChanges(const std::string& msg, bool retry) override {
     return {};
   }
