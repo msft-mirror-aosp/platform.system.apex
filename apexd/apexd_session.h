@@ -44,16 +44,9 @@ std::string GetSessionsDir();
 // TODO(b/288309411): remove static functions in this class.
 class ApexSession {
  public:
-  // Migrates content of /data/apex/sessions to /metadata/apex/sessions.
-  // If device doesn't have /metadata partition this call will be a no-op.
-  // If /data/apex/sessions this call will also be a no-op.
-  static android::base::Result<void> MigrateToMetadataSessionsDir();
-
   static android::base::Result<ApexSession> CreateSession(int session_id);
   static android::base::Result<ApexSession> GetSession(int session_id);
   static std::vector<ApexSession> GetSessions();
-  static std::vector<ApexSession> GetSessionsInState(
-      ::apex::proto::SessionState::State state);
   ApexSession() = delete;
 
   const google::protobuf::RepeatedField<int> GetChildSessionIds() const;
