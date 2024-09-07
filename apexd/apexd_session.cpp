@@ -77,10 +77,6 @@ std::string GetSessionsDir() {
 ApexSession::ApexSession(SessionState state, std::string session_dir)
     : state_(std::move(state)), session_dir_(std::move(session_dir)) {}
 
-Result<void> ApexSession::MigrateToMetadataSessionsDir() {
-  return MoveDir(kOldApexSessionsDir, kNewApexSessionsDir);
-}
-
 Result<ApexSession> ApexSession::CreateSession(int session_id) {
   SessionState state;
   // Create session directory
@@ -131,17 +127,6 @@ std::vector<ApexSession> ApexSession::GetSessions() {
     }
     sessions.push_back(std::move(*session));
   }
-
-  return sessions;
-}
-
-std::vector<ApexSession> ApexSession::GetSessionsInState(
-    SessionState::State state) {
-  auto sessions = GetSessions();
-  sessions.erase(
-      std::remove_if(sessions.begin(), sessions.end(),
-                     [&](const ApexSession &s) { return s.GetState() != state; }),
-      sessions.end());
 
   return sessions;
 }
