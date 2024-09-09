@@ -823,9 +823,8 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
   const auto& instance = ApexFileRepository::GetInstance();
   const auto& preinstalled =
       instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& preinstalled_path = preinstalled.get().GetPath();
-  if (StartsWith(preinstalled_path, "/vendor/apex/") ||
-      StartsWith(preinstalled_path, "/system/vendor/apex/")) {
+  const auto& path = preinstalled.get().GetPath();
+  if (InVendorPartition(path) || InOdmPartition(path)) {
     if (vndk_version != vendor_vndk_version) {
       return Error() << "vndkVersion(" << vndk_version
                      << ") doesn't match with device VNDK version("
@@ -833,8 +832,8 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
     }
     return {};
   }
-  if (StartsWith(preinstalled_path, "/product/apex/") ||
-      StartsWith(preinstalled_path, "/system/product/apex/")) {
+  if (StartsWith(path, "/product/apex/") ||
+      StartsWith(path, "/system/product/apex/")) {
     if (vndk_version != product_vndk_version) {
       return Error() << "vndkVersion(" << vndk_version
                      << ") doesn't match with device VNDK version("

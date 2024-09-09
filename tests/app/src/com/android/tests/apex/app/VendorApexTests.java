@@ -24,6 +24,7 @@ import static org.junit.Assert.fail;
 import android.Manifest;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.os.Bundle;
 import android.os.SystemProperties;
 
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -64,12 +65,17 @@ public class VendorApexTests {
             "com.android.apex.vendor.foo.v2_with_wrong_vndk_version", APEX_PACKAGE_NAME, 2,
             /*isApex*/true, "com.android.apex.vendor.foo.v2_with_wrong_vndk_version.apex");
 
+    /* parameter passed from host-side VendorApexTests: [vendor, odm] */
+    private String mPartition;
+
     @Before
     public void setUp() {
         InstallUtils.dropShellPermissionIdentity();
         InstallUtils.adoptShellPermissionIdentity(
                 Manifest.permission.INSTALL_PACKAGE_UPDATES,
                 Manifest.permission.INSTALL_TEST_ONLY_PACKAGE);
+        Bundle bundle = InstrumentationRegistry.getArguments();
+        mPartition = bundle.getString("partition");
     }
 
     @Test
@@ -79,7 +85,7 @@ public class VendorApexTests {
         {
             PackageInfo apex = pm.getPackageInfo(APEX_PACKAGE_NAME, PackageManager.MATCH_APEX);
             assertThat(apex.getLongVersionCode()).isEqualTo(1);
-            assertThat(apex.applicationInfo.sourceDir).startsWith("/vendor/apex");
+            assertThat(apex.applicationInfo.sourceDir).startsWith("/" + mPartition + "/apex");
         }
 
         Install.single(Apex2Rebootless).commit();

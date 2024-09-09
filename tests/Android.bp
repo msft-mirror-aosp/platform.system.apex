@@ -194,6 +194,7 @@ java_test_host {
         "hamcrest-library",
     ],
     static_libs: [
+        "cts-host-utils",
         "cts-install-lib-host",
         "frameworks-base-hostutils",
         "testng",
