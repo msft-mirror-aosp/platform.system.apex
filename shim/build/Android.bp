@@ -287,13 +287,25 @@ prebuilt_etc {
     installable: false,
 }
 
+prebuilt_etc {
+    name: "allowlist",
+    srcs: [
+        "signature-permission-allowlist.xml",
+    ],
+    sub_dir: "permissions",
+    installable: false,
+}
+
 apex {
     name: "com.android.apex.cts.shim.v1",
     manifest: "manifest.json",
     androidManifest: "AndroidManifest.xml",
     file_contexts: ":apex.test-file_contexts",
     key: "com.android.apex.cts.shim.key",
-    prebuilts: ["hash_v1"],
+    prebuilts: [
+        "hash_v1",
+        "allowlist",
+    ],
     apps: [
         "CtsShim",
         "CtsShimPriv",
