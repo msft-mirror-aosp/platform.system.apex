@@ -31,18 +31,25 @@ using android::base::StartsWith;
 namespace android {
 namespace apex {
 
+bool InVendorPartition(const std::string& path) {
+  return StartsWith(path, "/vendor/apex/") ||
+         StartsWith(path, "/system/vendor/apex/");
+}
+
+bool InOdmPartition(const std::string& path) {
+  return StartsWith(path, "/odm/apex/") ||
+         StartsWith(path, "/vendor/odm/apex/") ||
+         StartsWith(path, "/system/vendor/odm/apex/");
+}
+
 // Returns if apex is a vendor apex, works by testing path of its preinstalled
-// version NOTE: If BOARD_USES_VENDORIMAGE is false, then /vendor will be a
-// symlink to
-//    /system/vendor. Apexd handles "realpath"s for apexes. Hence when checking
-//    if an Apex is a vendor apex with path, we need to check against both.
+// version.
 bool IsVendorApex(const ApexFile& apex_file) {
   const auto& instance = ApexFileRepository::GetInstance();
   const auto& preinstalled =
       instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& preinstalled_path = preinstalled.get().GetPath();
-  return (StartsWith(preinstalled_path, "/vendor/apex/") ||
-          StartsWith(preinstalled_path, "/system/vendor/apex/"));
+  const auto& path = preinstalled.get().GetPath();
+  return InVendorPartition(path) || InOdmPartition(path);
 }
 
 // Checks Compatibility for incoming vendor apex.
@@ -101,20 +108,23 @@ int GetPreinstallPartitionEnum(const ApexFile& apex_file) {
   const auto& preinstalled =
       instance.GetPreInstalledApex(apex_file.GetManifest().name());
   const auto& preinstalled_path = preinstalled.get().GetPath();
-  if (StartsWith(preinstalled_path, "/vendor/") ||
-      StartsWith(preinstalled_path, "/system/vendor/")) {
+  if (InVendorPartition(preinstalled_path)) {
     return stats::apex::
         APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_VENDOR;
   }
-  if (StartsWith(preinstalled_path, "/system_ext/")) {
+  if (InOdmPartition(preinstalled_path)) {
+    return stats::apex::
+        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_ODM;
+  }
+  if (StartsWith(preinstalled_path, "/system_ext/apex/")) {
     return stats::apex::
         APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_SYSTEM_EXT;
   }
-  if (StartsWith(preinstalled_path, "/system/")) {
+  if (StartsWith(preinstalled_path, "/system/apex/")) {
     return stats::apex::
         APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_SYSTEM;
   }
-  if (StartsWith(preinstalled_path, "/product/")) {
+  if (StartsWith(preinstalled_path, "/product/apex/")) {
     return stats::apex::
         APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_PRODUCT;
   }
