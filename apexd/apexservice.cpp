@@ -404,7 +404,7 @@ BinderStatus ApexService::getSessions(
     return check;
   }
 
-  auto sessions = ApexSession::GetSessions();
+  auto sessions = GetSessionManager()->GetSessions();
   for (const auto& session : sessions) {
     ApexSessionInfo session_info;
     ConvertToApexSessionInfo(session, &session_info);
@@ -424,7 +424,7 @@ BinderStatus ApexService::getStagedSessionInfo(
     return check;
   }
 
-  auto session = ApexSession::GetSession(session_id);
+  auto session = GetSessionManager()->GetSession(session_id);
   if (!session.ok()) {
     // Unknown session.
     ClearSessionInfo(apex_session_info);
@@ -833,7 +833,7 @@ status_t ApexService::dump(int fd, const Vector<String16>& /*args*/) {
   }
 
   dprintf(fd, "SESSIONS:\n");
-  std::vector<ApexSession> sessions = ApexSession::GetSessions();
+  std::vector<ApexSession> sessions = GetSessionManager()->GetSessions();
 
   for (const auto& session : sessions) {
     std::string child_ids_str = "";
