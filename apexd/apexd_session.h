@@ -44,9 +44,6 @@ std::string GetSessionsDir();
 // TODO(b/288309411): remove static functions in this class.
 class ApexSession {
  public:
-  static android::base::Result<ApexSession> CreateSession(int session_id);
-  static android::base::Result<ApexSession> GetSession(int session_id);
-  static std::vector<ApexSession> GetSessions();
   ApexSession() = delete;
 
   const google::protobuf::RepeatedField<int> GetChildSessionIds() const;
@@ -75,7 +72,6 @@ class ApexSession {
       const ::apex::proto::SessionState::State& state);
 
   android::base::Result<void> DeleteSession() const;
-  static void DeleteFinalizedSessions();
 
   // Returns the directories containing the apexes staged for this session.
   std::vector<std::string> GetStagedApexDirs(
@@ -87,9 +83,6 @@ class ApexSession {
   ApexSession(::apex::proto::SessionState state, std::string session_dir);
   ::apex::proto::SessionState state_;
   std::string session_dir_;
-
-  static android::base::Result<ApexSession> GetSessionFromDir(
-      const std::string& session_dir);
 };
 
 class ApexSessionManager {
@@ -110,6 +103,7 @@ class ApexSessionManager {
       const std::string& old_sessions_base_dir);
 
   bool HasActiveSession();
+  void DeleteFinalizedSessions();
 
  private:
   explicit ApexSessionManager(std::string sessions_base_dir);
