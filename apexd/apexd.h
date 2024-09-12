@@ -230,6 +230,8 @@ bool IsActiveApexChanged(const ApexFile& apex);
 // Shouldn't be used outside of apexd_test.cpp
 std::set<std::string>& GetChangedActiveApexesForTesting();
 
+ApexSessionManager* GetSessionManager();
+
 }  // namespace apex
 }  // namespace android
 
