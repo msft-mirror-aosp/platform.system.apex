@@ -3234,17 +3234,7 @@ void DeleteUnusedVerityDevices() {
 }
 
 void BootCompletedCleanup() {
-  auto sessions = gSessionManager->GetSessions();
-  for (const ApexSession& session : sessions) {
-    if (!session.IsFinalized()) {
-      continue;
-    }
-    auto result = session.DeleteSession();
-    if (!result.ok()) {
-      LOG(WARNING) << "Failed to delete finalized session: " << session.GetId();
-    }
-  }
-
+  gSessionManager->DeleteFinalizedSessions();
   DeleteUnusedVerityDevices();
 }
 
@@ -3998,6 +3988,8 @@ bool IsActiveApexChanged(const ApexFile& apex) {
 std::set<std::string>& GetChangedActiveApexesForTesting() {
   return gChangedActiveApexes;
 }
+
+ApexSessionManager* GetSessionManager() { return gSessionManager; }
 
 }  // namespace apex
 }  // namespace android
