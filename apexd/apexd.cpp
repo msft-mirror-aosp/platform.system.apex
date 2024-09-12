@@ -214,21 +214,22 @@ void ReleaseF2fsCompressedBlocks(const std::string& file_path) {
 
 std::unique_ptr<DmTable> CreateVerityTable(const ApexVerityData& verity_data,
                                            const std::string& block_device,
-                                           const std::string& hash_device,
                                            bool restart_on_corruption) {
   AvbHashtreeDescriptor* desc = verity_data.desc.get();
   auto table = std::make_unique<DmTable>();
 
-  uint32_t hash_start_block = 0;
-  if (hash_device == block_device) {
-    hash_start_block = desc->tree_offset / desc->hash_block_size;
-  }
+  const uint64_t start = 0;
+  const uint64_t length = desc->image_size / 512;  // in sectors
+
+  const std::string& hash_device = block_device;
+  const uint32_t num_data_blocks = desc->image_size / desc->data_block_size;
+  const uint32_t hash_start_block = desc->tree_offset / desc->hash_block_size;
 
   auto target = std::make_unique<DmTargetVerity>(
-      0, desc->image_size / 512, desc->dm_verity_version, block_device,
-      hash_device, desc->data_block_size, desc->hash_block_size,
-      desc->image_size / desc->data_block_size, hash_start_block,
-      verity_data.hash_algorithm, verity_data.root_digest, verity_data.salt);
+      start, length, desc->dm_verity_version, block_device, hash_device,
+      desc->data_block_size, desc->hash_block_size, num_data_blocks,
+      hash_start_block, verity_data.hash_algorithm, verity_data.root_digest,
+      verity_data.salt);
 
   target->IgnoreZeroBlocks();
   if (restart_on_corruption) {
@@ -457,7 +458,6 @@ Result<void> VerifyMountedImage(const ApexFile& apex,
 Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                          const std::string& mount_point,
                                          const std::string& device_name,
-                                         const std::string& hashtree_file,
                                          bool verify_image, bool reuse_device,
                                          bool temp_mount = false) {
   auto tag = "MountPackageImpl: " + apex.GetManifest().name();
@@ -543,7 +543,6 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   MountedApexData apex_data(apex.GetManifest().version(), loopback_device.name,
                             apex.GetPath(), mount_point,
                             /* device_name = */ "",
-                            /* hashtree_loop_name = */ "",
                             /* is_temp_mount */ temp_mount);
 
   // for APEXes in immutable partitions, we don't need to mount them on
@@ -557,27 +556,9 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                instance.IsBlockApex(apex);
 
   DmVerityDevice verity_dev;
-  loop::LoopbackDeviceUniqueFd loop_for_hash;
   if (mount_on_verity) {
-    std::string hash_device = loopback_device.name;
-    if (verity_data->desc->tree_size == 0) {
-      if (auto st = PrepareHashTree(apex, *verity_data, hashtree_file);
-          !st.ok()) {
-        return st.error();
-      }
-      auto create_loop_status =
-          loop::CreateAndConfigureLoopDevice(hashtree_file,
-                                             /* image_offset= */ 0,
-                                             /* image_size= */ 0);
-      if (!create_loop_status.ok()) {
-        return create_loop_status.error();
-      }
-      loop_for_hash = std::move(*create_loop_status);
-      hash_device = loop_for_hash.name;
-      apex_data.hashtree_loop_name = hash_device;
-    }
     auto verity_table =
-        CreateVerityTable(*verity_data, loopback_device.name, hash_device,
+        CreateVerityTable(*verity_data, loopback_device.name,
                           /* restart_on_corruption = */ !verify_image);
     Result<DmVerityDevice> verity_dev_res =
         CreateVerityDevice(device_name, *verity_table, reuse_device);
@@ -629,7 +610,6 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     // Time to accept the temporaries as good.
     verity_dev.Release();
     loopback_device.CloseGood();
-    loop_for_hash.CloseGood();
 
     scope_guard.Disable();  // Accept the mount.
     return apex_data;
@@ -638,38 +618,21 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   }
 }
 
-std::string GetHashTreeFileName(const ApexFile& apex, bool is_new) {
-  const std::string& id = GetPackageId(apex.GetManifest());
-  std::string ret =
-      StringPrintf("%s/%s", gConfig->apex_hash_tree_dir, id.c_str());
-  return is_new ? ret + ".new" : ret;
-}
-
 Result<MountedApexData> VerifyAndTempMountPackage(
     const ApexFile& apex, const std::string& mount_point) {
   const std::string& package_id = GetPackageId(apex.GetManifest());
   LOG(DEBUG) << "Temp mounting " << package_id << " to " << mount_point;
   const std::string& temp_device_name = package_id + ".tmp";
-  std::string hashtree_file = GetHashTreeFileName(apex, /* is_new = */ true);
-  if (access(hashtree_file.c_str(), F_OK) == 0) {
-    LOG(DEBUG) << hashtree_file << " already exists. Deleting it";
-    if (TEMP_FAILURE_RETRY(unlink(hashtree_file.c_str())) != 0) {
-      return ErrnoError() << "Failed to unlink " << hashtree_file;
-    }
-  }
   auto ret =
-      MountPackageImpl(apex, mount_point, temp_device_name, hashtree_file,
+      MountPackageImpl(apex, mount_point, temp_device_name,
                        /* verify_image = */ true, /* reuse_device= */ false,
                        /* temp_mount = */ true);
   if (!ret.ok()) {
-    LOG(DEBUG) << "Cleaning up " << hashtree_file;
-    if (TEMP_FAILURE_RETRY(unlink(hashtree_file.c_str())) != 0) {
-      PLOG(ERROR) << "Failed to unlink " << hashtree_file;
-    }
-  } else {
-    gMountedApexes.AddMountedApex(apex.GetManifest().name(), *ret);
+    return ret.error();
   }
-  return ret;
+
+  gMountedApexes.AddMountedApex(apex.GetManifest().name(), *ret);
+  return *ret;
 }
 
 }  // namespace
@@ -709,9 +672,6 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
   // mount are freed).
   if (!data.loop_name.empty() && !deferred) {
     loop::DestroyLoopDevice(data.loop_name, log_fn);
-  }
-  if (!data.hashtree_loop_name.empty() && !deferred) {
-    loop::DestroyLoopDevice(data.hashtree_loop_name, log_fn);
   }
 
   return {};
@@ -1151,7 +1111,6 @@ Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
                           bool temp_mount) {
   auto ret =
       MountPackageImpl(apex, mount_point, device_name,
-                       GetHashTreeFileName(apex, /* is_new= */ false),
                        /* verify_image = */ false, reuse_device, temp_mount);
   if (!ret.ok()) {
     return ret.error();
@@ -2304,16 +2263,10 @@ Result<void> StagePackages(const std::vector<std::string>& tmp_paths) {
 
   // Ensure the APEX gets removed on failure.
   std::unordered_set<std::string> staged_files;
-  std::vector<std::string> changed_hashtree_files;
-  auto deleter = [&staged_files, &changed_hashtree_files]() {
+  auto deleter = [&staged_files]() {
     for (const std::string& staged_path : staged_files) {
       if (TEMP_FAILURE_RETRY(unlink(staged_path.c_str())) != 0) {
         PLOG(ERROR) << "Unable to unlink " << staged_path;
-      }
-    }
-    for (const std::string& hashtree_file : changed_hashtree_files) {
-      if (TEMP_FAILURE_RETRY(unlink(hashtree_file.c_str())) != 0) {
-        PLOG(ERROR) << "Unable to unlink " << hashtree_file;
       }
     }
   };
@@ -2321,21 +2274,7 @@ Result<void> StagePackages(const std::vector<std::string>& tmp_paths) {
 
   std::unordered_set<std::string> staged_packages;
   for (const ApexFile& apex_file : *apex_files) {
-    // First promote new hashtree file to the one that will be used when
-    // mounting apex.
-    std::string new_hashtree_file = GetHashTreeFileName(apex_file,
-                                                        /* is_new = */ true);
-    std::string old_hashtree_file = GetHashTreeFileName(apex_file,
-                                                        /* is_new = */ false);
-    if (access(new_hashtree_file.c_str(), F_OK) == 0) {
-      if (TEMP_FAILURE_RETRY(rename(new_hashtree_file.c_str(),
-                                    old_hashtree_file.c_str())) != 0) {
-        return ErrnoError() << "Failed to move " << new_hashtree_file << " to "
-                            << old_hashtree_file;
-      }
-      changed_hashtree_files.emplace_back(std::move(old_hashtree_file));
-    }
-    // And only then move apex to /data/apex/active.
+    // move apex to /data/apex/active.
     std::string dest_path = StageDestPath(apex_file);
     if (access(dest_path.c_str(), F_OK) == 0) {
       LOG(DEBUG) << dest_path << " already exists. Deleting";
@@ -2649,8 +2588,7 @@ void Initialize(CheckpointInterface* checkpoint_service) {
   }
 
   gMountedApexes.PopulateFromMounts(
-      {gConfig->active_apex_data_dir, gConfig->decompression_dir},
-      gConfig->apex_hash_tree_dir);
+      {gConfig->active_apex_data_dir, gConfig->decompression_dir});
 }
 
 // Note: Pre-installed apex are initialized in Initialize(CheckpointInterface*)
@@ -3322,7 +3260,7 @@ int UnmountAll(bool also_include_staged_apexes) {
     }
   }
 
-  gMountedApexes.PopulateFromMounts(data_dirs, gConfig->apex_hash_tree_dir);
+  gMountedApexes.PopulateFromMounts(data_dirs);
   int ret = 0;
   gMountedApexes.ForallMountedApexes([&](const std::string& /*package*/,
                                          const MountedApexData& data,
@@ -3340,13 +3278,13 @@ int UnmountAll(bool also_include_staged_apexes) {
       auto pos = data.mount_point.find('@');
       CHECK(pos != std::string::npos);
       std::string bind_mount = data.mount_point.substr(0, pos);
-      if (umount2(bind_mount.c_str(), UMOUNT_NOFOLLOW) != 0) {
+      if (umount2(bind_mount.c_str(), UMOUNT_NOFOLLOW | MNT_DETACH) != 0) {
         PLOG(ERROR) << "Failed to unmount bind-mount " << bind_mount;
         ret = 1;
         return;
       }
     }
-    if (auto status = Unmount(data, /* deferred= */ false); !status.ok()) {
+    if (auto status = Unmount(data, /* deferred= */ true); !status.ok()) {
       LOG(ERROR) << "Failed to unmount " << data.mount_point << " : "
                  << status.error();
       ret = 1;
@@ -3814,12 +3752,6 @@ Result<void> CheckSupportsNonStagedInstall(const ApexFile& new_apex,
   auto verity_data = new_apex.VerifyApexVerity(*expected_public_key);
   if (!verity_data.ok()) {
     return verity_data.error();
-  }
-  // Supporting non-staged install of APEXes without a hashtree is additional
-  // hassle, it's easier not to support it.
-  if (verity_data->desc->tree_size == 0) {
-    return Error() << new_apex.GetPath()
-                   << " does not have an embedded hash tree";
   }
   return {};
 }
