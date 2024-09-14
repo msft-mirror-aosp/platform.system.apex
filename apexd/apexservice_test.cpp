@@ -123,9 +123,19 @@ class ApexServiceTest : public ::testing::Test {
     ASSERT_TRUE(IsOk(status));
     CleanUp();
     service_->recollectPreinstalledData(kApexPackageBuiltinDirs);
+
+    session_manager_ = ApexSessionManager::Create(GetSessionsDir());
   }
 
   void TearDown() override { CleanUp(); }
+
+  Result<ApexSession> CreateSession(int session_id) {
+    return session_manager_->CreateSession(session_id);
+  }
+
+  Result<ApexSession> GetSession(int session_id) {
+    return session_manager_->GetSession(session_id);
+  }
 
   static std::string GetTestDataDir() {
     return android::base::GetExecutableDirectory();
@@ -382,6 +392,7 @@ class ApexServiceTest : public ::testing::Test {
   sp<IApexService> service_;
   sp<android::os::IVold> vold_service_;
   bool supports_fs_checkpointing_;
+  std::unique_ptr<ApexSessionManager> session_manager_;
 
  private:
   void CleanUp() {
@@ -522,7 +533,7 @@ TEST_F(ApexServiceTest, SubmitStagedSessionStoresBuildFingerprint) {
   params.sessionId = 1547;
   ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)));
 
-  auto session = ApexSession::GetSession(1547);
+  auto session = GetSession(1547);
   ASSERT_FALSE(session->GetBuildFingerprint().empty());
 }
 
@@ -576,7 +587,7 @@ TEST_F(ApexServiceTest, SessionParamDefaults) {
   params.sessionId = 1547;
   ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)));
 
-  auto session = ApexSession::GetSession(1547);
+  auto session = GetSession(1547);
   ASSERT_TRUE(session->GetChildSessionIds().empty());
   ASSERT_FALSE(session->IsRollback());
   ASSERT_FALSE(session->HasRollbackEnabled());
@@ -997,7 +1008,7 @@ TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulFailsNoSession) {
 }
 
 TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulFailsSessionInWrongState) {
-  auto session = ApexSession::CreateSession(73);
+  auto session = CreateSession(73);
   ASSERT_RESULT_OK(session);
   ASSERT_RESULT_OK(
       session->UpdateStateAndCommit(::apex::proto::SessionState::STAGED));
@@ -1012,7 +1023,7 @@ TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulFailsSessionInWrongState) {
 }
 
 TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulActivatedSession) {
-  auto session = ApexSession::CreateSession(239);
+  auto session = CreateSession(239);
   ASSERT_RESULT_OK(session);
   ASSERT_RESULT_OK(
       session->UpdateStateAndCommit(::apex::proto::SessionState::ACTIVATED));
@@ -1027,7 +1038,7 @@ TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulActivatedSession) {
 }
 
 TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulNoOp) {
-  auto session = ApexSession::CreateSession(1543);
+  auto session = CreateSession(1543);
   ASSERT_RESULT_OK(session);
   ASSERT_RESULT_OK(
       session->UpdateStateAndCommit(::apex::proto::SessionState::SUCCESS));
@@ -1043,9 +1054,9 @@ TEST_F(ApexServiceTest, MarkStagedSessionSuccessfulNoOp) {
 
 // Should be able to abort individual staged session
 TEST_F(ApexServiceTest, AbortStagedSession) {
-  auto session1 = ApexSession::CreateSession(239);
+  auto session1 = CreateSession(239);
   ASSERT_RESULT_OK(session1->UpdateStateAndCommit(SessionState::VERIFIED));
-  auto session2 = ApexSession::CreateSession(240);
+  auto session2 = CreateSession(240);
   ASSERT_RESULT_OK(session2->UpdateStateAndCommit(SessionState::STAGED));
 
   std::vector<ApexSessionInfo> sessions;
@@ -1063,9 +1074,9 @@ TEST_F(ApexServiceTest, AbortStagedSession) {
 
 // abortStagedSession should not abort activated session
 TEST_F(ApexServiceTest, AbortStagedSessionActivatedFail) {
-  auto session1 = ApexSession::CreateSession(239);
+  auto session1 = CreateSession(239);
   ASSERT_RESULT_OK(session1->UpdateStateAndCommit(SessionState::ACTIVATED));
-  auto session2 = ApexSession::CreateSession(240);
+  auto session2 = CreateSession(240);
   ASSERT_RESULT_OK(session2->UpdateStateAndCommit(SessionState::STAGED));
 
   std::vector<ApexSessionInfo> sessions;
@@ -1099,19 +1110,19 @@ TEST_F(ApexServiceTest, DeleteFinalizedSessions) {
   // delete sessions in final state.
   auto nonFinalSessions = 0u;
   for (auto i = 0u; i < states.size(); i++) {
-    auto session = ApexSession::CreateSession(230 + i);
+    auto session = CreateSession(230 + i);
     SessionState::State state = states[i];
     ASSERT_RESULT_OK(session->UpdateStateAndCommit(state));
     if (!session->IsFinalized()) {
       nonFinalSessions++;
     }
   }
-  std::vector<ApexSession> sessions = ApexSession::GetSessions();
+  std::vector<ApexSession> sessions = session_manager_->GetSessions();
   ASSERT_EQ(states.size(), sessions.size());
 
   // Now try cleaning up all finalized sessions
-  ApexSession::DeleteFinalizedSessions();
-  sessions = ApexSession::GetSessions();
+  session_manager_->DeleteFinalizedSessions();
+  sessions = session_manager_->GetSessions();
   ASSERT_EQ(nonFinalSessions, sessions.size());
 
   // Verify only finalized sessions have been deleted
@@ -1303,7 +1314,7 @@ TEST_F(ApexServiceRevertTest, RevertActiveSessionsSuccessful) {
     return;
   }
 
-  auto session = ApexSession::CreateSession(1543);
+  auto session = CreateSession(1543);
   ASSERT_RESULT_OK(session);
   ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::ACTIVATED));
 
@@ -1333,7 +1344,7 @@ TEST_F(ApexServiceRevertTest,
     return;
   }
 
-  auto session = ApexSession::CreateSession(1543);
+  auto session = CreateSession(1543);
   ASSERT_RESULT_OK(session);
   ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::ACTIVATED));
 
@@ -1383,7 +1394,7 @@ TEST_F(ApexServiceRevertTest, MarkStagedSessionSuccessfulCleanupBackup) {
   PrepareBackup({GetTestFile("apex.apexd_test.apex"),
                  GetTestFile("apex.apexd_test_different_app.apex")});
 
-  auto session = ApexSession::CreateSession(101);
+  auto session = CreateSession(101);
   ASSERT_RESULT_OK(session);
   ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::ACTIVATED));
 
@@ -1407,7 +1418,7 @@ TEST_F(ApexServiceRevertTest, ResumesRevert) {
   // Make sure /data/apex/active is non-empty.
   ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
 
-  auto session = ApexSession::CreateSession(17239);
+  auto session = CreateSession(17239);
   ASSERT_RESULT_OK(session);
   ASSERT_RESULT_OK(
       session->UpdateStateAndCommit(SessionState::REVERT_IN_PROGRESS));
@@ -1440,7 +1451,7 @@ TEST_F(ApexServiceRevertTest, DoesNotResumeRevert) {
   // Make sure /data/apex/active is non-empty.
   ASSERT_TRUE(IsOk(service_->stagePackages({installer.test_file})));
 
-  auto session = ApexSession::CreateSession(53);
+  auto session = CreateSession(53);
   ASSERT_RESULT_OK(session);
   ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::SUCCESS));
 
@@ -1465,7 +1476,7 @@ TEST_F(ApexServiceRevertTest, SessionsMarkedAsRevertFailed) {
     GTEST_SKIP() << "Can't run if filesystem checkpointing is enabled";
   }
 
-  auto session = ApexSession::CreateSession(53);
+  auto session = CreateSession(53);
   ASSERT_RESULT_OK(session);
   ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::ACTIVATED));
 
@@ -1482,7 +1493,7 @@ TEST_F(ApexServiceRevertTest, RevertFailedStateRevertAttemptFails) {
     GTEST_SKIP() << "Can't run if filesystem checkpointing is enabled";
   }
 
-  auto session = ApexSession::CreateSession(17239);
+  auto session = CreateSession(17239);
   ASSERT_RESULT_OK(session);
   ASSERT_RESULT_OK(session->UpdateStateAndCommit(SessionState::REVERT_FAILED));
 
