@@ -77,60 +77,6 @@ std::string GetSessionsDir() {
 ApexSession::ApexSession(SessionState state, std::string session_dir)
     : state_(std::move(state)), session_dir_(std::move(session_dir)) {}
 
-Result<ApexSession> ApexSession::CreateSession(int session_id) {
-  SessionState state;
-  // Create session directory
-  std::string session_dir = GetSessionsDir() + "/" + std::to_string(session_id);
-  if (auto status = CreateDirIfNeeded(session_dir, 0700); !status.ok()) {
-    return status.error();
-  }
-  state.set_id(session_id);
-
-  return ApexSession(state, std::move(session_dir));
-}
-
-Result<ApexSession> ApexSession::GetSessionFromDir(
-    const std::string& session_dir) {
-  auto state = ParseSessionState(session_dir);
-  if (!state.ok()) {
-    return state.error();
-  }
-  return ApexSession(*state, session_dir);
-}
-
-Result<ApexSession> ApexSession::GetSession(int session_id) {
-  auto session_dir =
-      StringPrintf("%s/%d", GetSessionsDir().c_str(), session_id);
-
-  return GetSessionFromDir(session_dir);
-}
-
-std::vector<ApexSession> ApexSession::GetSessions() {
-  std::vector<ApexSession> sessions;
-
-  Result<std::vector<std::string>> session_paths = ReadDir(
-      GetSessionsDir(), [](const std::filesystem::directory_entry& entry) {
-        std::error_code ec;
-        return entry.is_directory(ec);
-      });
-
-  if (!session_paths.ok()) {
-    return sessions;
-  }
-
-  for (const std::string& session_dir_path : *session_paths) {
-    // Try to read session state
-    auto session = GetSessionFromDir(session_dir_path);
-    if (!session.ok()) {
-      LOG(WARNING) << session.error();
-      continue;
-    }
-    sessions.push_back(std::move(*session));
-  }
-
-  return sessions;
-}
-
 SessionState::State ApexSession::GetState() const { return state_.state(); }
 
 int ApexSession::GetId() const { return state_.id(); }
@@ -248,19 +194,6 @@ std::ostream& operator<<(std::ostream& out, const ApexSession& session) {
              << "; session_dir = " << session.GetSessionDir() << "]";
 }
 
-void ApexSession::DeleteFinalizedSessions() {
-  auto sessions = GetSessions();
-  for (const ApexSession& session : sessions) {
-    if (!session.IsFinalized()) {
-      continue;
-    }
-    auto result = session.DeleteSession();
-    if (!result.ok()) {
-      LOG(WARNING) << "Failed to delete finalized session: " << session.GetId();
-    }
-  }
-}
-
 std::vector<std::string> ApexSession::GetStagedApexDirs(
     const std::string& staged_session_dir) const {
   const google::protobuf::RepeatedField<int>& child_session_ids =
@@ -373,6 +306,19 @@ bool ApexSessionManager::HasActiveSession() {
     }
   }
   return false;
+}
+
+void ApexSessionManager::DeleteFinalizedSessions() {
+  auto sessions = GetSessions();
+  for (const ApexSession& session : sessions) {
+    if (!session.IsFinalized()) {
+      continue;
+    }
+    auto result = session.DeleteSession();
+    if (!result.ok()) {
+      LOG(WARNING) << "Failed to delete finalized session: " << session.GetId();
+    }
+  }
 }
 
 }  // namespace apex
