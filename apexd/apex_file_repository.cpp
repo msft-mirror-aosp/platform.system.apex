@@ -28,6 +28,7 @@
 #include "apex_constants.h"
 #include "apex_file.h"
 #include "apexd_utils.h"
+#include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
 
 using android::base::EndsWith;
@@ -95,14 +96,10 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
                    << apex_file->GetPath();
         continue;
       }
-      // If BOARD_USES_VENDORIMAGE is false, then /vendor will be a symlink to
-      // /system/vendor. path is a realpath to the apex, so we must check
-      // against both.
-      if (enforce_multi_install_partition_ &&
-          !android::base::StartsWith(path, "/vendor/apex/") &&
-          !android::base::StartsWith(path, "/system/vendor/apex/")) {
+      if (enforce_multi_install_partition_ && !InVendorPartition(path) &&
+          !InOdmPartition(path)) {
         LOG(ERROR) << "Multi-install APEX " << path
-                   << " can only be preinstalled on /vendor/apex/.";
+                   << " can only be preinstalled on /{odm,vendor}/apex/.";
         continue;
       }
 
