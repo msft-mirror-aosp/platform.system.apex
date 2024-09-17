@@ -192,6 +192,7 @@ cc_library_static {
         "apexd.cpp",
         "apexd_lifecycle.cpp",
         "apexd_loop.cpp",
+        "apexd_metrics.cpp",
         "apexd_private.cpp",
         "apexd_session.cpp",
         "apexd_verity.cpp",
