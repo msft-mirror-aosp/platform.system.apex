@@ -568,8 +568,7 @@ namespace {
 
 template <typename VerifyFn>
 Result<void> RunVerifyFnInsideTempMount(const ApexFile& apex,
-                                        const VerifyFn& verify_fn,
-                                        bool unmount_during_cleanup) {
+                                        const VerifyFn& verify_fn) {
   // Temp mount image of this apex to validate it was properly signed;
   // this will also read the entire block device through dm-verity, so
   // we can be sure there is no corruption.
@@ -594,14 +593,7 @@ Result<void> RunVerifyFnInsideTempMount(const ApexFile& apex,
                                      true);
   };
   auto scope_guard = android::base::make_scope_guard(cleaner);
-  auto result = verify_fn(temp_mount_point);
-  if (!result.ok()) {
-    return result.error();
-  }
-  if (!unmount_during_cleanup) {
-    scope_guard.Disable();
-  }
-  return {};
+  return verify_fn(temp_mount_point);
 }
 
 // Converts a list of apex file paths into a list of ApexFile objects
@@ -633,7 +625,7 @@ Result<void> ValidateStagingShimApex(const ApexFile& to) {
   auto verify_fn = [&](const std::string& system_apex_path) {
     return shim::ValidateUpdate(system_apex_path, to.GetPath());
   };
-  return RunVerifyFnInsideTempMount(*system_shim, verify_fn, true);
+  return RunVerifyFnInsideTempMount(*system_shim, verify_fn);
 }
 
 Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
@@ -718,7 +710,7 @@ Result<void> VerifyPackageStagedInstall(const ApexFile& apex_file) {
     }
     return Result<void>{};
   };
-  return RunVerifyFnInsideTempMount(apex_file, validate_fn, false);
+  return RunVerifyFnInsideTempMount(apex_file, validate_fn);
 }
 
 template <typename VerifyApexFn>
@@ -2939,7 +2931,6 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
           apex.GetPath(),
           stats::apex::
               APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
-      apexd_private::UnmountTempMount(apex);
     }
   });
   for (int id_to_scan : ids_to_scan) {
@@ -2978,14 +2969,6 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   for (const auto& apex : ret) {
     // Release compressed blocks in case /data is f2fs-compressed filesystem.
     ReleaseF2fsCompressedBlocks(apex.GetPath());
-  }
-
-  // The scope guard above uses lambda that captures ret by reference.
-  // Unfortunately, for the capture by-reference, lifetime of the captured
-  // reference ends together with the lifetime of the closure object. This means
-  // that we need to manually call UnmountTempMount here.
-  for (const auto& apex : ret) {
-    apexd_private::UnmountTempMount(apex);
   }
 
   // Disabling scope guard to stop Failure atoms from being sent
@@ -3573,7 +3556,7 @@ Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file,
     }
     return Result<void>{};
   };
-  return RunVerifyFnInsideTempMount(apex_file, check_fn, true);
+  return RunVerifyFnInsideTempMount(apex_file, check_fn);
 }
 
 Result<void> CheckSupportsNonStagedInstall(const ApexFile& new_apex,
