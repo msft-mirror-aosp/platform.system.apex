@@ -190,8 +190,10 @@ cc_library_static {
         "apex_database.cpp",
         "apex_file_repository.cpp",
         "apexd.cpp",
+        "apexd_dm.cpp",
         "apexd_lifecycle.cpp",
         "apexd_loop.cpp",
+        "apexd_metrics.cpp",
         "apexd_private.cpp",
         "apexd_session.cpp",
         "apexd_verity.cpp",
@@ -253,7 +255,6 @@ cc_defaults {
         "lib_apex_session_state_proto",
         "lib_apex_manifest_proto",
         "libavb",
-        "libverity_tree",
     ],
     cpp_std: "experimental",
 }

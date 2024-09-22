@@ -11,18 +11,24 @@ usage() {
   echo "       Whether this is a vendor APEX"
   echo "  -k existing_apex_keyname"
   echo "       Use existing key instead of creating a new key"
+  echo "  -m"
+  echo "       Whether this is a Mainline module"
   exit -1
 }
 
 is_vendor=0
+mainline_module=0
 
-while getopts "vk:" opt; do
+while getopts "vmk:" opt; do
   case $opt in
     v)
       is_vendor=1
       ;;
     k)
       APEX_KEY=${OPTARG}
+      ;;
+    m)
+      mainline_module=1
       ;;
     *)
       usage
@@ -38,8 +44,12 @@ then
 fi
 
 YEAR=$(date +%Y)
+
+# For Mainline module, add the apex at the root apex/ directory.
+if ((mainline_module == 0)); then
 mkdir -p ${APEX_NAME}
 cd ${APEX_NAME}
+fi
 
 cat > Android.bp <<EOF
 // Copyright (C) ${YEAR} The Android Open Source Project
@@ -108,6 +118,20 @@ fi
 
 if ((is_vendor == 0)); then
 
+if ((mainline_module == 1)); then
+
+cat >> Android.bp <<EOF
+apex {
+    name: "${APEX_NAME}",
+    manifest: "manifest.json",
+    file_contexts: ":${APEX_NAME}-file_contexts",
+    key: "${APEX_KEY}.key",
+    certificate: ":${APEX_KEY}.certificate",
+}
+EOF
+
+else
+
 cat >> Android.bp <<EOF
 apex {
     name: "${APEX_NAME}",
@@ -118,6 +142,8 @@ apex {
     updatable: false,
 }
 EOF
+
+fi
 
 cat > manifest.json << EOF
 {
