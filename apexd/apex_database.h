@@ -42,11 +42,11 @@ class MountedApexDatabase {
     std::string mount_point;  // Path this apex is mounted on.
     std::string device_name;  // Name of the dm verity device.
     // Whenever apex file specified in full_path was deleted.
-    bool deleted;
+    bool deleted = false;
     // Whether the mount is a temp mount or not.
-    bool is_temp_mount;
+    bool is_temp_mount = false;
 
-    MountedApexData() : deleted(false), is_temp_mount(false) {}
+    MountedApexData() = default;
     MountedApexData(int version, const std::string& loop_name,
                     const std::string& full_path,
                     const std::string& mount_point,
@@ -59,30 +59,7 @@ class MountedApexDatabase {
           deleted(false),
           is_temp_mount(is_temp_mount) {}
 
-    inline bool operator<(const MountedApexData& rhs) const {
-      if (version != rhs.version) {
-        return version < rhs.version;
-      }
-      int compare_val = loop_name.compare(rhs.loop_name);
-      if (compare_val < 0) {
-        return true;
-      } else if (compare_val > 0) {
-        return false;
-      }
-      compare_val = full_path.compare(rhs.full_path);
-      if (compare_val < 0) {
-        return true;
-      } else if (compare_val > 0) {
-        return false;
-      }
-      compare_val = mount_point.compare(rhs.mount_point);
-      if (compare_val < 0) {
-        return true;
-      } else if (compare_val > 0) {
-        return false;
-      }
-      return device_name < rhs.device_name;
-    }
+    inline auto operator<=>(const MountedApexData& rhs) const = default;
   };
 
   template <typename... Args>
