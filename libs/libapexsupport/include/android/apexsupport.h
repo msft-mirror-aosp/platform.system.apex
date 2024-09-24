@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include <android/llndk-versioning.h>
 #include <stdint.h>
 #include <sys/cdefs.h>
 
@@ -58,15 +57,14 @@ typedef enum AApexInfoError : int32_t {
  * \returns AApexInfoError
  */
 __attribute__((warn_unused_result)) AApexInfoError
-AApexInfo_create(AApexInfo *_Nullable *_Nonnull info)
-    __INTRODUCED_IN_LLNDK(202404);
+AApexInfo_create(AApexInfo *_Nullable *_Nonnull info);
 
 /**
  * Destroys an AApexInfo object created by AApexInfo_create().
  *
  * \param info pointer to the AApexInfo object created by AApexInfo_create()
  */
-void AApexInfo_destroy(AApexInfo *_Nonnull info) __INTRODUCED_IN_LLNDK(202404);
+void AApexInfo_destroy(AApexInfo *_Nonnull info);
 
 /**
  * Returns a C-string for the APEX name.
@@ -80,8 +78,7 @@ void AApexInfo_destroy(AApexInfo *_Nonnull info) __INTRODUCED_IN_LLNDK(202404);
  * \return the APEX name.
  */
 __attribute__((warn_unused_result))
-const char *_Nonnull AApexInfo_getName(const AApexInfo *_Nonnull info)
-    __INTRODUCED_IN_LLNDK(202404);
+const char *_Nonnull AApexInfo_getName(const AApexInfo *_Nonnull info);
 
 /**
  * Returns the APEX version.
@@ -90,8 +87,7 @@ const char *_Nonnull AApexInfo_getName(const AApexInfo *_Nonnull info)
  *
  * \return the APEX version.
  */
-int64_t AApexInfo_getVersion(const AApexInfo *_Nonnull info)
-    __INTRODUCED_IN_LLNDK(202404);
+int64_t AApexInfo_getVersion(const AApexInfo *_Nonnull info);
 
 // AApexSupport_loadLibrary is private to platform yet.
 #if !defined(__ANDROID_VENDOR__) && !defined(__ANDROID_PRODUCT__)
