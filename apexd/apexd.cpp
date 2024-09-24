@@ -344,8 +344,7 @@ Result<void> VerifyMountedImage(const ApexFile& apex,
 Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                          const std::string& mount_point,
                                          const std::string& device_name,
-                                         bool verify_image, bool reuse_device,
-                                         bool temp_mount = false) {
+                                         bool verify_image, bool reuse_device) {
   auto tag = "MountPackageImpl: " + apex.GetManifest().name();
   ATRACE_NAME(tag.c_str());
   if (apex.IsCompressed()) {
@@ -428,8 +427,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   std::string block_device = loopback_device.name;
   MountedApexData apex_data(apex.GetManifest().version(), loopback_device.name,
                             apex.GetPath(), mount_point,
-                            /* device_name = */ "",
-                            /* is_temp_mount */ temp_mount);
+                            /* device_name = */ "");
 
   // for APEXes in immutable partitions, we don't need to mount them on
   // dm-verity because they are already in the dm-verity protected partition;
@@ -510,16 +508,8 @@ Result<MountedApexData> VerifyAndTempMountPackage(
   const std::string& package_id = GetPackageId(apex.GetManifest());
   LOG(DEBUG) << "Temp mounting " << package_id << " to " << mount_point;
   const std::string& temp_device_name = package_id + ".tmp";
-  auto ret =
-      MountPackageImpl(apex, mount_point, temp_device_name,
-                       /* verify_image = */ true, /* reuse_device= */ false,
-                       /* temp_mount = */ true);
-  if (!ret.ok()) {
-    return ret.error();
-  }
-
-  gMountedApexes.AddMountedApex(apex.GetManifest().name(), *ret);
-  return *ret;
+  return MountPackageImpl(apex, mount_point, temp_device_name,
+                          /* verify_image = */ true, /* reuse_device= */ false);
 }
 
 }  // namespace
@@ -589,8 +579,6 @@ Result<void> RunVerifyFnInsideTempMount(const ApexFile& apex,
       LOG(WARNING) << "Failed to unmount " << temp_mount_point << " : "
                    << result.error();
     }
-    gMountedApexes.RemoveMountedApex(apex.GetManifest().name(), apex.GetPath(),
-                                     true);
   };
   auto scope_guard = android::base::make_scope_guard(cleaner);
   return verify_fn(temp_mount_point);
@@ -941,11 +929,9 @@ Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
 void SetConfig(const ApexdConfig& config) { gConfig = config; }
 
 Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
-                          const std::string& device_name, bool reuse_device,
-                          bool temp_mount) {
-  auto ret =
-      MountPackageImpl(apex, mount_point, device_name,
-                       /* verify_image = */ false, reuse_device, temp_mount);
+                          const std::string& device_name, bool reuse_device) {
+  auto ret = MountPackageImpl(apex, mount_point, device_name,
+                              /* verify_image = */ false, reuse_device);
   if (!ret.ok()) {
     return ret.error();
   }
@@ -955,43 +941,6 @@ Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
 }
 
 namespace apexd_private {
-
-Result<void> UnmountTempMount(const ApexFile& apex) {
-  const ApexManifest& manifest = apex.GetManifest();
-  LOG(VERBOSE) << "Unmounting all temp mounts for package " << manifest.name();
-
-  bool finished_unmounting = false;
-  // If multiple temp mounts exist, ensure that all are unmounted.
-  while (!finished_unmounting) {
-    Result<MountedApexData> data =
-        apexd_private::GetTempMountedApexData(manifest.name());
-    if (!data.ok()) {
-      finished_unmounting = true;
-    } else {
-      gMountedApexes.RemoveMountedApex(manifest.name(), data->full_path, true);
-      Unmount(*data, /* deferred= */ false);
-    }
-  }
-  return {};
-}
-
-Result<MountedApexData> GetTempMountedApexData(const std::string& package) {
-  bool found = false;
-  Result<MountedApexData> mount_data;
-  gMountedApexes.ForallMountedApexes(
-      package,
-      [&](const MountedApexData& data, [[maybe_unused]] bool latest) {
-        if (!found) {
-          mount_data = data;
-          found = true;
-        }
-      },
-      true);
-  if (found) {
-    return mount_data;
-  }
-  return Error() << "No temp mount data found for " << package;
-}
 
 bool IsMounted(const std::string& full_path) {
   bool found_mounted = false;
@@ -1206,8 +1155,8 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file,
       apexd_private::GetPackageMountPoint(manifest);
 
   if (!version_found_mounted) {
-    auto mount_status = MountPackage(apex_file, mount_point, device_name,
-                                     reuse_device, /*temp_mount=*/false);
+    auto mount_status =
+        MountPackage(apex_file, mount_point, device_name, reuse_device);
     if (!mount_status.ok()) {
       return mount_status;
     }
@@ -1301,9 +1250,10 @@ Result<std::vector<ApexFile>> GetStagedApexFiles(
 
 Result<ClassPath> MountAndDeriveClassPath(
     const std::vector<ApexFile>& apex_files) {
+  std::vector<MountedApexData> mounted_data;
   auto guard = android::base::make_scope_guard([&]() {
-    for (const auto& apex : apex_files) {
-      apexd_private::UnmountTempMount(apex);
+    for (const auto& data : mounted_data) {
+      Unmount(data, /*deferred=*/false);
     }
   });
 
@@ -1312,15 +1262,12 @@ Result<ClassPath> MountAndDeriveClassPath(
   for (const auto& apex : apex_files) {
     const std::string& temp_mount_point =
         apexd_private::GetPackageTempMountPoint(apex.GetManifest());
-    const std::string& package_id = GetPackageId(apex.GetManifest());
-    const std::string& temp_device_name = package_id + ".tmp";
-    auto mount_status =
-        MountPackage(apex, temp_mount_point, temp_device_name,
-                     /*reuse_device=*/false, /*temp_mount=*/true);
+    auto mount_status = VerifyAndTempMountPackage(apex, temp_mount_point);
     if (!mount_status.ok()) {
       return mount_status.error();
     }
     temp_mounted_apex_paths.push_back(temp_mount_point);
+    mounted_data.push_back(*mount_status);
   }
 
   // Calculate classpaths of temp mounted staged apexs

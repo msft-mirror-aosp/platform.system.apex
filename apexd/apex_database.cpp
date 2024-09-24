@@ -126,6 +126,10 @@ bool IsActiveMountPoint(const std::string& mount_point) {
   return (mount_point.find('@') == std::string::npos);
 }
 
+bool IsTempMountPoint(const std::string& mount_point) {
+  return EndsWith(mount_point, ".tmp");
+}
+
 Result<void> PopulateLoopInfo(const BlockDevice& top_device,
                               const std::vector<std::string>& data_dirs,
                               MountedApexData* apex_data) {
@@ -174,7 +178,6 @@ void NormalizeIfDeleted(MountedApexData* apex_data) {
 Result<MountedApexData> ResolveMountInfo(
     const BlockDevice& block, const std::string& mount_point,
     const std::vector<std::string>& data_dirs) {
-  bool temp_mount = EndsWith(mount_point, ".tmp");
   // Now, see if it is dm-verity or loop mounted
   switch (block.GetType()) {
     case LoopDevice: {
@@ -186,7 +189,6 @@ Result<MountedApexData> ResolveMountInfo(
       result.loop_name = block.DevPath();
       result.full_path = *backing_file;
       result.mount_point = mount_point;
-      result.is_temp_mount = temp_mount;
       NormalizeIfDeleted(&result);
       return result;
     }
@@ -198,7 +200,6 @@ Result<MountedApexData> ResolveMountInfo(
       MountedApexData result;
       result.mount_point = mount_point;
       result.device_name = *name;
-      result.is_temp_mount = temp_mount;
       auto status = PopulateLoopInfo(block, data_dirs, &result);
       if (!status.ok()) {
         return status.error();
@@ -250,7 +251,9 @@ void MountedApexDatabase::PopulateFromMounts(
     if (IsActiveMountPoint(mount_point)) {
       continue;
     }
-
+    if (IsTempMountPoint(mount_point)) {
+      continue;
+    }
     auto mount_data =
         ResolveMountInfo(BlockDevice(block), mount_point, data_dirs);
     if (!mount_data.ok()) {
