@@ -1312,11 +1312,7 @@ Result<ClassPath> MountAndDeriveClassPath(
   for (const auto& apex : apex_files) {
     const std::string& temp_mount_point =
         apexd_private::GetPackageTempMountPoint(apex.GetManifest());
-    const std::string& package_id = GetPackageId(apex.GetManifest());
-    const std::string& temp_device_name = package_id + ".tmp";
-    auto mount_status =
-        MountPackage(apex, temp_mount_point, temp_device_name,
-                     /*reuse_device=*/false, /*temp_mount=*/true);
+    auto mount_status = VerifyAndTempMountPackage(apex, temp_mount_point);
     if (!mount_status.ok()) {
       return mount_status.error();
     }
