@@ -40,9 +40,6 @@ std::string GetActiveMountPoint(const ::apex::proto::ApexManifest& manifest);
 
 android::base::Result<void> BindMount(const std::string& target,
                                       const std::string& source);
-android::base::Result<MountedApexDatabase::MountedApexData>
-GetTempMountedApexData(const std::string& package);
-android::base::Result<void> UnmountTempMount(const ApexFile& apex);
 
 }  // namespace apexd_private
 }  // namespace apex
