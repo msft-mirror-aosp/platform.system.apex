@@ -68,25 +68,6 @@ void SendApexInstallationRequestedAtom(const std::string& package_path,
   }
 }
 
-void SendApexInstallationStagedAtom(const std::string& package_path) {
-  if (!statssocket::lazy::IsAvailable()) {
-    LOG(WARNING) << "Unable to send Apex Staged Atom for " << package_path
-                 << " ; libstatssocket is not available";
-    return;
-  }
-  Result<std::string> apex_file_sha256_str = CalculateSha256(package_path);
-  if (!apex_file_sha256_str.ok()) {
-    LOG(WARNING) << "Unable to get sha256 of ApexFile: "
-                 << apex_file_sha256_str.error();
-    return;
-  }
-  int ret = stats::apex::stats_write(stats::apex::APEX_INSTALLATION_STAGED,
-                                     apex_file_sha256_str->c_str());
-  if (ret < 0) {
-    LOG(WARNING) << "Failed to report apex_installation_staged stats";
-  }
-}
-
 void SendApexInstallationEndedAtom(const std::string& package_path,
                                    int install_result) {
   if (!statssocket::lazy::IsAvailable()) {
@@ -122,20 +103,6 @@ void SendSessionApexInstallationEndedAtom(const ApexSession& session,
     if (ret < 0) {
       LOG(WARNING) << "Failed to report apex_installation_ended stats";
     }
-  }
-}
-
-void SendApexInstallationStagedAtoms(
-    const std::vector<std::string>& package_paths) {
-  for (const std::string& path : package_paths) {
-    SendApexInstallationStagedAtom(path);
-  }
-}
-
-void SendApexInstallationEndedAtoms(
-    const std::vector<std::string>& package_paths, int install_result) {
-  for (const std::string& path : package_paths) {
-    SendApexInstallationEndedAtom(path, install_result);
   }
 }
 
