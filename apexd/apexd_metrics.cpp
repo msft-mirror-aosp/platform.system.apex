@@ -26,9 +26,6 @@ using android::base::Result;
 
 namespace android::apex {
 
-// Ties sessions to their apex file, assists reporting installation metrics
-std::unordered_map<int, std::vector<std::string>> gSessionApexSha;
-
 void SendApexInstallationRequestedAtom(const std::string& package_path,
                                        bool is_rollback,
                                        unsigned int install_type) {
@@ -111,20 +108,17 @@ void SendApexInstallationEndedAtom(const std::string& package_path,
   }
 }
 
-void SendSessionApexInstallationEndedAtom(int session_id, int install_result) {
+void SendSessionApexInstallationEndedAtom(const ApexSession& session,
+                                          int install_result) {
   if (!statssocket::lazy::IsAvailable()) {
-    LOG(WARNING) << "Unable to send Apex Ended Atom for session " << session_id
-                 << " ; libstatssocket is not available";
+    LOG(WARNING) << "Unable to send Apex Ended Atom for session "
+                 << session.GetId() << " ; libstatssocket is not available";
     return;
   }
-  if (gSessionApexSha.find(session_id) == gSessionApexSha.end()) {
-    LOG(WARNING) << "Unable to send Apex Ended Atom for session " << session_id
-                 << " ; apex_sha for session was not found";
-    return;
-  }
-  for (const auto& apex_sha : gSessionApexSha[session_id]) {
+
+  for (const auto& hash : session.GetApexFileHashes()) {
     int ret = stats::apex::stats_write(stats::apex::APEX_INSTALLATION_ENDED,
-                                       apex_sha.c_str(), install_result);
+                                       hash.c_str(), install_result);
     if (ret < 0) {
       LOG(WARNING) << "Failed to report apex_installation_ended stats";
     }
@@ -143,10 +137,6 @@ void SendApexInstallationEndedAtoms(
   for (const std::string& path : package_paths) {
     SendApexInstallationEndedAtom(path, install_result);
   }
-}
-
-void RegisterSessionApexSha(int session_id, const std::string apex_file_sha) {
-  gSessionApexSha[session_id].push_back(apex_file_sha);
 }
 
 }  // namespace android::apex

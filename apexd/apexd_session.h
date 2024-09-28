@@ -57,6 +57,8 @@ class ApexSession {
   bool IsRollback() const;
   int GetRollbackId() const;
   const google::protobuf::RepeatedPtrField<std::string> GetApexNames() const;
+  const google::protobuf::RepeatedPtrField<std::string> GetApexFileHashes()
+      const;
   const std::string& GetSessionDir() const;
 
   void SetChildSessionIds(const std::vector<int>& child_session_ids);
@@ -67,6 +69,7 @@ class ApexSession {
   void SetCrashingNativeProcess(const std::string& crashing_process);
   void SetErrorMessage(const std::string& error_message);
   void AddApexName(const std::string& apex_name);
+  void SetApexFileHashes(const std::vector<std::string>& hashes);
 
   android::base::Result<void> UpdateStateAndCommit(
       const ::apex::proto::SessionState::State& state);
