@@ -80,6 +80,7 @@
 #include "apex_sha.h"
 #include "apex_shim.h"
 #include "apexd_checkpoint.h"
+#include "apexd_dm.h"
 #include "apexd_lifecycle.h"
 #include "apexd_loop.h"
 #include "apexd_metrics.h"
@@ -245,127 +246,7 @@ std::unique_ptr<DmTable> CreateVerityTable(const ApexVerityData& verity_data,
   table->set_readonly(true);
 
   return table;
-}
-
-// Deletes a dm-verity device with a given name and path
-// Synchronizes on the device actually being deleted from userspace.
-Result<void> DeleteVerityDevice(const std::string& name, bool deferred) {
-  DeviceMapper& dm = DeviceMapper::Instance();
-  if (deferred) {
-    if (!dm.DeleteDeviceDeferred(name)) {
-      return ErrnoError() << "Failed to issue deferred delete of verity device "
-                          << name;
-    }
-    return {};
-  }
-  auto timeout = std::chrono::milliseconds(
-      android::sysprop::ApexProperties::dm_delete_timeout().value_or(750));
-  if (!dm.DeleteDevice(name, timeout)) {
-    return Error() << "Failed to delete dm-device " << name;
-  }
-  return {};
-}
-
-class DmVerityDevice {
- public:
-  DmVerityDevice() : cleared_(true) {}
-  explicit DmVerityDevice(std::string name)
-      : name_(std::move(name)), cleared_(false) {}
-  DmVerityDevice(std::string name, std::string dev_path)
-      : name_(std::move(name)),
-        dev_path_(std::move(dev_path)),
-        cleared_(false) {}
-
-  DmVerityDevice(DmVerityDevice&& other) noexcept
-      : name_(std::move(other.name_)),
-        dev_path_(std::move(other.dev_path_)),
-        cleared_(other.cleared_) {
-    other.cleared_ = true;
-  }
-
-  DmVerityDevice& operator=(DmVerityDevice&& other) noexcept {
-    name_ = other.name_;
-    dev_path_ = other.dev_path_;
-    cleared_ = other.cleared_;
-    other.cleared_ = true;
-    return *this;
-  }
-
-  ~DmVerityDevice() {
-    if (!cleared_) {
-      Result<void> ret = DeleteVerityDevice(name_, /* deferred= */ false);
-      if (!ret.ok()) {
-        LOG(ERROR) << ret.error();
-      }
-    }
-  }
-
-  const std::string& GetName() const { return name_; }
-  const std::string& GetDevPath() const { return dev_path_; }
-
-  void Release() { cleared_ = true; }
-
- private:
-  std::string name_;
-  std::string dev_path_;
-  bool cleared_;
 };
-
-Result<DmVerityDevice> CreateVerityDevice(
-    DeviceMapper& dm, const std::string& name, const DmTable& table,
-    const std::chrono::milliseconds& timeout) {
-  std::string dev_path;
-  if (!dm.CreateDevice(name, table, &dev_path, timeout)) {
-    return Errorf("Couldn't create verity device.");
-  }
-  return DmVerityDevice(name, dev_path);
-}
-
-Result<DmVerityDevice> CreateVerityDevice(const std::string& name,
-                                          const DmTable& table,
-                                          bool reuse_device) {
-  ATRACE_NAME("CreateVerityDevice");
-  LOG(VERBOSE) << "Creating verity device " << name;
-  auto timeout = std::chrono::milliseconds(
-      android::sysprop::ApexProperties::dm_create_timeout().value_or(1000));
-
-  DeviceMapper& dm = DeviceMapper::Instance();
-
-  auto state = dm.GetState(name);
-  if (state == DmDeviceState::INVALID) {
-    return CreateVerityDevice(dm, name, table, timeout);
-  }
-
-  if (reuse_device) {
-    if (state == DmDeviceState::ACTIVE) {
-      LOG(WARNING) << "Deleting existing active dm device " << name;
-      if (auto r = DeleteVerityDevice(name, /* deferred= */ false); !r.ok()) {
-        return r.error();
-      }
-      return CreateVerityDevice(dm, name, table, timeout);
-    }
-    if (!dm.LoadTableAndActivate(name, table)) {
-      dm.DeleteDevice(name);
-      return Error() << "Failed to activate dm device " << name;
-    }
-    std::string path;
-    if (!dm.WaitForDevice(name, timeout, &path)) {
-      dm.DeleteDevice(name);
-      return Error() << "Failed waiting for dm device " << name;
-    }
-    return DmVerityDevice(name, path);
-  } else {
-    if (state != DmDeviceState::INVALID) {
-      // Delete dangling dm-device. This can happen if apexd fails to delete it
-      // while unmounting an apex.
-      LOG(WARNING) << "Deleting existing dm device " << name;
-      if (auto r = DeleteVerityDevice(name, /* deferred= */ false); !r.ok()) {
-        return r.error();
-      }
-    }
-    return CreateVerityDevice(dm, name, table, timeout);
-  }
-}
 
 /**
  * When we create hardlink for a new apex package in kActiveApexPackagesDataDir,
@@ -463,8 +344,7 @@ Result<void> VerifyMountedImage(const ApexFile& apex,
 Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                          const std::string& mount_point,
                                          const std::string& device_name,
-                                         bool verify_image, bool reuse_device,
-                                         bool temp_mount = false) {
+                                         bool verify_image, bool reuse_device) {
   auto tag = "MountPackageImpl: " + apex.GetManifest().name();
   ATRACE_NAME(tag.c_str());
   if (apex.IsCompressed()) {
@@ -547,8 +427,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   std::string block_device = loopback_device.name;
   MountedApexData apex_data(apex.GetManifest().version(), loopback_device.name,
                             apex.GetPath(), mount_point,
-                            /* device_name = */ "",
-                            /* is_temp_mount */ temp_mount);
+                            /* device_name = */ "");
 
   // for APEXes in immutable partitions, we don't need to mount them on
   // dm-verity because they are already in the dm-verity protected partition;
@@ -560,13 +439,13 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                // block apexes are from host
                                instance.IsBlockApex(apex);
 
-  DmVerityDevice verity_dev;
+  DmDevice verity_dev;
   if (mount_on_verity) {
     auto verity_table =
         CreateVerityTable(*verity_data, loopback_device.name,
                           /* restart_on_corruption = */ !verify_image);
-    Result<DmVerityDevice> verity_dev_res =
-        CreateVerityDevice(device_name, *verity_table, reuse_device);
+    Result<DmDevice> verity_dev_res =
+        CreateDmDevice(device_name, *verity_table, reuse_device);
     if (!verity_dev_res.ok()) {
       return Error() << "Failed to create Apex Verity device " << full_path
                      << ": " << verity_dev_res.error();
@@ -629,16 +508,8 @@ Result<MountedApexData> VerifyAndTempMountPackage(
   const std::string& package_id = GetPackageId(apex.GetManifest());
   LOG(DEBUG) << "Temp mounting " << package_id << " to " << mount_point;
   const std::string& temp_device_name = package_id + ".tmp";
-  auto ret =
-      MountPackageImpl(apex, mount_point, temp_device_name,
-                       /* verify_image = */ true, /* reuse_device= */ false,
-                       /* temp_mount = */ true);
-  if (!ret.ok()) {
-    return ret.error();
-  }
-
-  gMountedApexes.AddMountedApex(apex.GetManifest().name(), *ret);
-  return *ret;
+  return MountPackageImpl(apex, mount_point, temp_device_name,
+                          /* verify_image = */ true, /* reuse_device= */ false);
 }
 
 }  // namespace
@@ -660,7 +531,7 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
 
   // Try to free up the device-mapper device.
   if (!data.device_name.empty()) {
-    const auto& result = DeleteVerityDevice(data.device_name, deferred);
+    const auto& result = DeleteDmDevice(data.device_name, deferred);
     if (!result.ok()) {
       return result;
     }
@@ -687,8 +558,7 @@ namespace {
 
 template <typename VerifyFn>
 Result<void> RunVerifyFnInsideTempMount(const ApexFile& apex,
-                                        const VerifyFn& verify_fn,
-                                        bool unmount_during_cleanup) {
+                                        const VerifyFn& verify_fn) {
   // Temp mount image of this apex to validate it was properly signed;
   // this will also read the entire block device through dm-verity, so
   // we can be sure there is no corruption.
@@ -709,18 +579,9 @@ Result<void> RunVerifyFnInsideTempMount(const ApexFile& apex,
       LOG(WARNING) << "Failed to unmount " << temp_mount_point << " : "
                    << result.error();
     }
-    gMountedApexes.RemoveMountedApex(apex.GetManifest().name(), apex.GetPath(),
-                                     true);
   };
   auto scope_guard = android::base::make_scope_guard(cleaner);
-  auto result = verify_fn(temp_mount_point);
-  if (!result.ok()) {
-    return result.error();
-  }
-  if (!unmount_during_cleanup) {
-    scope_guard.Disable();
-  }
-  return {};
+  return verify_fn(temp_mount_point);
 }
 
 // Converts a list of apex file paths into a list of ApexFile objects
@@ -752,7 +613,7 @@ Result<void> ValidateStagingShimApex(const ApexFile& to) {
   auto verify_fn = [&](const std::string& system_apex_path) {
     return shim::ValidateUpdate(system_apex_path, to.GetPath());
   };
-  return RunVerifyFnInsideTempMount(*system_shim, verify_fn, true);
+  return RunVerifyFnInsideTempMount(*system_shim, verify_fn);
 }
 
 Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
@@ -837,7 +698,7 @@ Result<void> VerifyPackageStagedInstall(const ApexFile& apex_file) {
     }
     return Result<void>{};
   };
-  return RunVerifyFnInsideTempMount(apex_file, validate_fn, false);
+  return RunVerifyFnInsideTempMount(apex_file, validate_fn);
 }
 
 template <typename VerifyApexFn>
@@ -1068,11 +929,9 @@ Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
 void SetConfig(const ApexdConfig& config) { gConfig = config; }
 
 Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
-                          const std::string& device_name, bool reuse_device,
-                          bool temp_mount) {
-  auto ret =
-      MountPackageImpl(apex, mount_point, device_name,
-                       /* verify_image = */ false, reuse_device, temp_mount);
+                          const std::string& device_name, bool reuse_device) {
+  auto ret = MountPackageImpl(apex, mount_point, device_name,
+                              /* verify_image = */ false, reuse_device);
   if (!ret.ok()) {
     return ret.error();
   }
@@ -1082,43 +941,6 @@ Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
 }
 
 namespace apexd_private {
-
-Result<void> UnmountTempMount(const ApexFile& apex) {
-  const ApexManifest& manifest = apex.GetManifest();
-  LOG(VERBOSE) << "Unmounting all temp mounts for package " << manifest.name();
-
-  bool finished_unmounting = false;
-  // If multiple temp mounts exist, ensure that all are unmounted.
-  while (!finished_unmounting) {
-    Result<MountedApexData> data =
-        apexd_private::GetTempMountedApexData(manifest.name());
-    if (!data.ok()) {
-      finished_unmounting = true;
-    } else {
-      gMountedApexes.RemoveMountedApex(manifest.name(), data->full_path, true);
-      Unmount(*data, /* deferred= */ false);
-    }
-  }
-  return {};
-}
-
-Result<MountedApexData> GetTempMountedApexData(const std::string& package) {
-  bool found = false;
-  Result<MountedApexData> mount_data;
-  gMountedApexes.ForallMountedApexes(
-      package,
-      [&](const MountedApexData& data, [[maybe_unused]] bool latest) {
-        if (!found) {
-          mount_data = data;
-          found = true;
-        }
-      },
-      true);
-  if (found) {
-    return mount_data;
-  }
-  return Error() << "No temp mount data found for " << package;
-}
 
 bool IsMounted(const std::string& full_path) {
   bool found_mounted = false;
@@ -1333,8 +1155,8 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file,
       apexd_private::GetPackageMountPoint(manifest);
 
   if (!version_found_mounted) {
-    auto mount_status = MountPackage(apex_file, mount_point, device_name,
-                                     reuse_device, /*temp_mount=*/false);
+    auto mount_status =
+        MountPackage(apex_file, mount_point, device_name, reuse_device);
     if (!mount_status.ok()) {
       return mount_status;
     }
@@ -1428,9 +1250,10 @@ Result<std::vector<ApexFile>> GetStagedApexFiles(
 
 Result<ClassPath> MountAndDeriveClassPath(
     const std::vector<ApexFile>& apex_files) {
+  std::vector<MountedApexData> mounted_data;
   auto guard = android::base::make_scope_guard([&]() {
-    for (const auto& apex : apex_files) {
-      apexd_private::UnmountTempMount(apex);
+    for (const auto& data : mounted_data) {
+      Unmount(data, /*deferred=*/false);
     }
   });
 
@@ -1439,15 +1262,12 @@ Result<ClassPath> MountAndDeriveClassPath(
   for (const auto& apex : apex_files) {
     const std::string& temp_mount_point =
         apexd_private::GetPackageTempMountPoint(apex.GetManifest());
-    const std::string& package_id = GetPackageId(apex.GetManifest());
-    const std::string& temp_device_name = package_id + ".tmp";
-    auto mount_status =
-        MountPackage(apex, temp_mount_point, temp_device_name,
-                     /*reuse_device=*/false, /*temp_mount=*/true);
+    auto mount_status = VerifyAndTempMountPackage(apex, temp_mount_point);
     if (!mount_status.ok()) {
       return mount_status.error();
     }
     temp_mounted_apex_paths.push_back(temp_mount_point);
+    mounted_data.push_back(*mount_status);
   }
 
   // Calculate classpaths of temp mounted staged apexs
@@ -3058,7 +2878,6 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
           apex.GetPath(),
           stats::apex::
               APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
-      apexd_private::UnmountTempMount(apex);
     }
   });
   for (int id_to_scan : ids_to_scan) {
@@ -3097,14 +2916,6 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   for (const auto& apex : ret) {
     // Release compressed blocks in case /data is f2fs-compressed filesystem.
     ReleaseF2fsCompressedBlocks(apex.GetPath());
-  }
-
-  // The scope guard above uses lambda that captures ret by reference.
-  // Unfortunately, for the capture by-reference, lifetime of the captured
-  // reference ends together with the lifetime of the closure object. This means
-  // that we need to manually call UnmountTempMount here.
-  for (const auto& apex : ret) {
-    apexd_private::UnmountTempMount(apex);
   }
 
   // Disabling scope guard to stop Failure atoms from being sent
@@ -3219,7 +3030,7 @@ void DeleteUnusedVerityDevices() {
     auto state = dm.GetState(dev.name());
     if (state == DmDeviceState::SUSPENDED && IsApexDevice(dev.name())) {
       LOG(INFO) << "Deleting unused dm device " << dev.name();
-      auto res = DeleteVerityDevice(dev.name(), /* deferred= */ false);
+      auto res = DeleteDmDevice(dev.name(), /* deferred= */ false);
       if (!res.ok()) {
         LOG(WARNING) << res.error();
       }
@@ -3692,7 +3503,7 @@ Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file,
     }
     return Result<void>{};
   };
-  return RunVerifyFnInsideTempMount(apex_file, check_fn, true);
+  return RunVerifyFnInsideTempMount(apex_file, check_fn);
 }
 
 Result<void> CheckSupportsNonStagedInstall(const ApexFile& new_apex,
