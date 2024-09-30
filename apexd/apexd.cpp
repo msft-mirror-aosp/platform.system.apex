@@ -3090,37 +3090,6 @@ int UnmountAll(bool also_include_staged_apexes) {
   return ret;
 }
 
-Result<void> RemountPackages() {
-  std::vector<std::string> apexes;
-  gMountedApexes.ForallMountedApexes([&apexes](const std::string& /*package*/,
-                                               const MountedApexData& data,
-                                               bool latest) {
-    if (latest) {
-      LOG(DEBUG) << "Found active APEX " << data.full_path;
-      apexes.push_back(data.full_path);
-    }
-  });
-  std::vector<std::string> failed;
-  for (const std::string& apex : apexes) {
-    // Since this is only used during development workflow, we are trying to
-    // remount as many apexes as possible instead of failing fast.
-    if (auto ret = RemountApexFile(apex); !ret.ok()) {
-      LOG(WARNING) << "Failed to remount " << apex << " : " << ret.error();
-      failed.emplace_back(apex);
-    }
-  }
-  static constexpr const char* kErrorMessage =
-      "Failed to remount following APEX packages, hence previous versions of "
-      "them are still active. If APEX you are developing is in this list, it "
-      "means that there still are alive processes holding a reference to the "
-      "previous version of your APEX.\n";
-  if (!failed.empty()) {
-    return Error() << kErrorMessage << "Failed (" << failed.size() << ") "
-                   << "APEX packages: [" << Join(failed, ',') << "]";
-  }
-  return {};
-}
-
 // Given a single new APEX incoming via OTA, should we allocate space for it?
 bool ShouldAllocateSpaceForDecompression(const std::string& new_apex_name,
                                          const int64_t new_apex_version,

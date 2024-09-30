@@ -106,7 +106,6 @@ class ApexService : public BnApexService {
   BinderStatus destroyCeSnapshots(int user_id, int rollback_id) override;
   BinderStatus destroyCeSnapshotsNotSpecified(
       int user_id, const std::vector<int>& retain_rollback_ids) override;
-  BinderStatus remountPackages() override;
   BinderStatus recollectPreinstalledData(
       const std::vector<std::string>& paths) override;
   BinderStatus recollectDataApex(const std::string& path,
@@ -726,23 +725,6 @@ BinderStatus ApexService::destroyCeSnapshotsNotSpecified(
   return BinderStatus::ok();
 }
 
-BinderStatus ApexService::remountPackages() {
-  LOG(INFO) << "remountPackages() received by ApexService";
-
-  if (auto debug = CheckDebuggable("remountPackages"); !debug.isOk()) {
-    return debug;
-  }
-  if (auto root = CheckCallerIsRoot("remountPackages"); !root.isOk()) {
-    return root;
-  }
-  if (auto res = ::android::apex::RemountPackages(); !res.ok()) {
-    return BinderStatus::fromExceptionCode(
-        BinderStatus::EX_SERVICE_SPECIFIC,
-        String8(res.error().message().c_str()));
-  }
-  return BinderStatus::ok();
-}
-
 BinderStatus ApexService::recollectPreinstalledData(
     const std::vector<std::string>& paths) {
   LOG(INFO) << "recollectPreinstalledData() received by ApexService, paths: "
@@ -896,17 +878,6 @@ status_t ApexService::shellCommand(int in, int out, int err,
         << std::endl
         << "  submitStagedSession [sessionId] - attempts to submit the "
            "installer session with given id"
-        << std::endl
-        << "  remountPackages - Force apexd to remount active packages. This "
-           "call can be used to speed up development workflow of an APEX "
-           "package. Example of usage:\n"
-           "    1. adb shell stop\n"
-           "    2. adb sync\n"
-           "    3. adb shell cmd -w apexservice remountPackages\n"
-           "    4. adb shell start\n"
-           "\n"
-           "Note: APEX package will be successfully remounted only if there "
-           "are no alive processes holding a reference to it"
         << std::endl;
     dprintf(fd, "%s", log.operator std::string().c_str());
   };
@@ -1097,17 +1068,6 @@ status_t ApexService::shellCommand(int in, int out, int err,
       return OK;
     }
     std::string msg = StringLog() << "Failed to submit session: "
-                                  << status.toString8().c_str() << std::endl;
-    dprintf(err, "%s", msg.c_str());
-    return BAD_VALUE;
-  }
-
-  if (cmd == String16("remountPackages")) {
-    BinderStatus status = remountPackages();
-    if (status.isOk()) {
-      return OK;
-    }
-    std::string msg = StringLog() << "remountPackages failed: "
                                   << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
