@@ -67,8 +67,8 @@ base::Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
   // substitution
   std::unique_ptr<vintf::FileSystem> path_replaced_fs =
       std::make_unique<vintf::details::PathReplacingFileSystem>(
-          std::move(path_to_replace), apex_mount_point,
-          std::make_unique<vintf::details::FileSystemImpl>());
+          std::make_unique<vintf::details::FileSystemImpl>(),
+          std::map{std::pair{path_to_replace, apex_mount_point}});
 
   // Create a new VintfObject that uses our path-replacing FileSystem instance
   auto vintf_with_replaced_path =

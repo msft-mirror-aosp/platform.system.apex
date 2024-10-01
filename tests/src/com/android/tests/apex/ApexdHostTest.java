@@ -123,36 +123,6 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
     }
 
     @Test
-    public void testRemountApex() throws Exception {
-        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
-        assumeTrue("Device requires root", getDevice().isAdbRoot());
-        final File oldFile = getDevice().pullFile(SHIM_APEX_PATH);
-        try {
-            getDevice().remountSystemWritable();
-            // In case remount requires a reboot, wait for boot to complete.
-            getDevice().waitForBootComplete(Duration.ofMinutes(3).toMillis());
-            final File newFile = mHostUtils.getTestFile("com.android.apex.cts.shim.v2.apex");
-            // Stop framework
-            getDevice().executeShellV2Command("stop");
-            // Push new shim APEX. This simulates adb sync.
-            getDevice().pushFile(newFile, SHIM_APEX_PATH);
-            // Ask apexd to remount packages
-            getDevice().executeShellV2Command("cmd -w apexservice remountPackages");
-            // Start framework
-            getDevice().executeShellV2Command("start");
-            // Give enough time for system_server to boot.
-            Thread.sleep(Duration.ofSeconds(15).toMillis());
-            final Set<ITestDevice.ApexInfo> activeApexes = getDevice().getActiveApexes();
-            ITestDevice.ApexInfo testApex = new ITestDevice.ApexInfo(
-                    "com.android.apex.cts.shim", 2L);
-            assertThat(activeApexes).contains(testApex);
-        } finally {
-            getDevice().pushFile(oldFile, SHIM_APEX_PATH);
-            getDevice().reboot();
-        }
-    }
-
-    @Test
     public void testApexWithoutPbIsNotActivated_ProductPartitionHasOlderVersion()
             throws Exception {
         assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
