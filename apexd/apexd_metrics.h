@@ -28,20 +28,10 @@ void SendApexInstallationRequestedAtom(const std::string& package_path,
                                        bool is_rollback,
                                        unsigned int install_type);
 
-void SendApexInstallationStagedAtom(const std::string& package_path);
-
 void SendApexInstallationEndedAtom(const std::string& package_path,
                                    int install_result);
 
 void SendSessionApexInstallationEndedAtom(const ApexSession& session,
                                           int install_result);
-
-void SendApexInstallationStagedAtoms(
-    const std::vector<std::string>& package_paths);
-
-void SendApexInstallationEndedAtoms(
-    const std::vector<std::string>& package_paths, int install_result);
-
-void SendApexInstallationFailedAtoms(const std::vector<ApexFile>& apexes);
 
 }  // namespace android::apex

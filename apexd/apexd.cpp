@@ -701,25 +701,6 @@ Result<void> VerifyPackageStagedInstall(const ApexFile& apex_file) {
   return RunVerifyFnInsideTempMount(apex_file, validate_fn);
 }
 
-template <typename VerifyApexFn>
-Result<std::vector<ApexFile>> VerifyPackages(
-    const std::vector<std::string>& paths, const VerifyApexFn& verify_apex_fn) {
-  Result<std::vector<ApexFile>> apex_files = OpenApexFiles(paths);
-  if (!apex_files.ok()) {
-    return apex_files.error();
-  }
-
-  LOG(DEBUG) << "VerifyPackages() for " << Join(paths, ',');
-
-  for (const ApexFile& apex_file : *apex_files) {
-    Result<void> result = verify_apex_fn(apex_file);
-    if (!result.ok()) {
-      return result.error();
-    }
-  }
-  return std::move(*apex_files);
-}
-
 // VerifySessionDir verifies and returns the apex file in a session
 Result<ApexFile> VerifySessionDir(int session_id, const bool is_rollback) {
   std::string session_dir_path =
@@ -738,6 +719,8 @@ Result<ApexFile> VerifySessionDir(int session_id, const bool is_rollback) {
         "More than one APEX package found in the same session directory.");
   }
 
+  auto apex_file = OR_RETURN(ApexFile::Open((*scan)[0]));
+
   // Report ApexInstallRequests here, so we can track apexes that
   // do not pass the VerifyPackages() and thus won't return for tracking.
   // SubmitStagedSession() performs the remaining apex metrics with valid
@@ -747,7 +730,7 @@ Result<ApexFile> VerifySessionDir(int session_id, const bool is_rollback) {
       (*scan)[0], is_rollback,
       stats::apex::APEX_INSTALLATION_REQUESTED__INSTALLATION_TYPE__STAGED);
 
-  auto verified = VerifyPackages(*scan, VerifyPackageStagedInstall);
+  auto verified = VerifyPackageStagedInstall(apex_file);
   if (!verified.ok()) {
     SendApexInstallationEndedAtom(
         (*scan)[0],
@@ -755,7 +738,7 @@ Result<ApexFile> VerifySessionDir(int session_id, const bool is_rollback) {
             APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
     return verified.error();
   }
-  return std::move((*verified)[0]);
+  return apex_file;
 }
 
 Result<void> DeleteBackup() {
