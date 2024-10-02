@@ -39,7 +39,6 @@
 #include <linux/f2fs.h>
 #include <linux/loop.h>
 #include <selinux/android.h>
-#include <statssocket_lazy.h>
 #include <stdlib.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
@@ -91,7 +90,6 @@
 #include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
 #include "com_android_apex.h"
-#include "statslog_apex.h"
 
 using android::base::boot_clock;
 using android::base::ConsumePrefix;
@@ -726,16 +724,12 @@ Result<ApexFile> VerifySessionDir(int session_id, const bool is_rollback) {
   // SubmitStagedSession() performs the remaining apex metrics with valid
   // instances. VerifySessionDir is only called by SubmitStagedSession(), so we
   // can surmise that a staged apex installation is occurring.
-  SendApexInstallationRequestedAtom(
-      (*scan)[0], is_rollback,
-      stats::apex::APEX_INSTALLATION_REQUESTED__INSTALLATION_TYPE__STAGED);
+  SendApexInstallationRequestedAtom((*scan)[0], is_rollback,
+                                    InstallType::Staged);
 
   auto verified = VerifyPackageStagedInstall(apex_file);
   if (!verified.ok()) {
-    SendApexInstallationEndedAtom(
-        (*scan)[0],
-        stats::apex::
-            APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
+    SendApexInstallationEndedAtom((*scan)[0], InstallResult::Failure);
     return verified.error();
   }
   return apex_file;
@@ -2844,10 +2838,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   std::vector<ApexFile> ret;
   auto guard = android::base::make_scope_guard([&]() {
     for (const auto& apex : ret) {
-      SendApexInstallationEndedAtom(
-          apex.GetPath(),
-          stats::apex::
-              APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
+      SendApexInstallationEndedAtom(apex.GetPath(), InstallResult::Failure);
     }
   });
   for (int id_to_scan : ids_to_scan) {
@@ -2932,10 +2923,7 @@ Result<void> MarkStagedSessionSuccessful(const int session_id) {
     // TODO: Handle activated apexes still unavailable to apexd at this time.
     // This is because apexd is started before this activation with a linker
     // configuration which doesn't know about statsd
-    SendSessionApexInstallationEndedAtom(
-        *session,
-        stats::apex::
-            APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_SUCCESSFUL);
+    SendSessionApexInstallationEndedAtom(*session, InstallResult::Success);
     auto cleanup_status = DeleteBackup();
     if (!cleanup_status.ok()) {
       return Error() << "Failed to mark session " << *session
@@ -3715,18 +3703,12 @@ Result<ApexFile> InstallPackageImpl(const std::string& package_path,
 
 Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
   LOG(INFO) << "Installing " << package_path;
-  SendApexInstallationRequestedAtom(
-      package_path, /* is_rollback */ false,
-      stats::apex::APEX_INSTALLATION_REQUESTED__INSTALLATION_TYPE__REBOOTLESS);
+  SendApexInstallationRequestedAtom(package_path, /*is_rollback=*/false,
+                                    InstallType::NonStaged);
   // TODO: Add error-enums
   Result<ApexFile> ret = InstallPackageImpl(package_path, force);
   SendApexInstallationEndedAtom(
-      package_path,
-      ret.ok()
-          ? stats::apex::
-                APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_SUCCESSFUL
-          : stats::apex::
-                APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
+      package_path, ret.ok() ? InstallResult::Success : InstallResult::Failure);
   return ret;
 }
 
