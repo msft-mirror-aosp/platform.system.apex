@@ -501,15 +501,6 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   }
 }
 
-Result<MountedApexData> VerifyAndTempMountPackage(
-    const ApexFile& apex, const std::string& mount_point) {
-  const std::string& package_id = GetPackageId(apex.GetManifest());
-  LOG(DEBUG) << "Temp mounting " << package_id << " to " << mount_point;
-  const std::string& temp_device_name = package_id + ".tmp";
-  return MountPackageImpl(apex, mount_point, temp_device_name,
-                          /* verify_image = */ true, /* reuse_device= */ false);
-}
-
 }  // namespace
 
 Result<void> Unmount(const MountedApexData& data, bool deferred) {
@@ -554,32 +545,48 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
 
 namespace {
 
-template <typename VerifyFn>
-Result<void> RunVerifyFnInsideTempMount(const ApexFile& apex,
-                                        const VerifyFn& verify_fn) {
-  // Temp mount image of this apex to validate it was properly signed;
-  // this will also read the entire block device through dm-verity, so
-  // we can be sure there is no corruption.
-  const std::string& temp_mount_point =
-      apexd_private::GetPackageTempMountPoint(apex.GetManifest());
-
-  Result<MountedApexData> mount_status =
-      VerifyAndTempMountPackage(apex, temp_mount_point);
-  if (!mount_status.ok()) {
-    LOG(ERROR) << "Failed to temp mount to " << temp_mount_point << " : "
-               << mount_status.error();
-    return mount_status.error();
-  }
-  auto cleaner = [&]() {
-    LOG(DEBUG) << "Unmounting " << temp_mount_point;
-    Result<void> result = Unmount(*mount_status, /* deferred= */ false);
-    if (!result.ok()) {
-      LOG(WARNING) << "Failed to unmount " << temp_mount_point << " : "
-                   << result.error();
+auto RunVerifyFnInsideTempMounts(std::span<const ApexFile> apex_files,
+                                 auto verify_fn)
+    -> decltype(verify_fn(std::vector<std::string>{})) {
+  // Temp mounts will be cleaned up on exit.
+  std::vector<MountedApexData> mounted_data;
+  auto guard = android::base::make_scope_guard([&]() {
+    for (const auto& data : mounted_data) {
+      if (auto result = Unmount(data, /*deferred=*/false); !result.ok()) {
+        LOG(WARNING) << "Failed to unmount " << data.mount_point << ": "
+                     << result.error();
+      }
     }
-  };
-  auto scope_guard = android::base::make_scope_guard(cleaner);
-  return verify_fn(temp_mount_point);
+  });
+
+  // Temp mounts all apexes.
+  // This will also read the entire block device for each apex,
+  // so we can be sure there is no corruption.
+  std::vector<std::string> mount_points;
+  for (const auto& apex : apex_files) {
+    auto mount_point =
+        apexd_private::GetPackageTempMountPoint(apex.GetManifest());
+    auto package_id = GetPackageId(apex.GetManifest());
+    auto device_name = package_id + ".tmp";
+
+    LOG(DEBUG) << "Temp mounting " << package_id << " to " << mount_point;
+    auto data = OR_RETURN(MountPackageImpl(apex, mount_point, device_name,
+                                           /*verify_image=*/true,
+                                           /*reuse_device=*/false));
+    mount_points.push_back(mount_point);
+    mounted_data.push_back(data);
+  }
+
+  // Invoke fn with mount_points.
+  return verify_fn(mount_points);
+}
+
+// Singluar variant of RunVerifyFnInsideTempMounts for convenience
+auto RunVerifyFnInsideTempMount(const ApexFile& apex, auto verify_fn)
+    -> decltype(verify_fn(std::string{})) {
+  return RunVerifyFnInsideTempMounts(
+      Single(apex),
+      [&](const auto& mount_points) { return verify_fn(mount_points[0]); });
 }
 
 // Converts a list of apex file paths into a list of ApexFile objects
@@ -1227,28 +1234,10 @@ Result<std::vector<ApexFile>> GetStagedApexFiles(
 
 Result<ClassPath> MountAndDeriveClassPath(
     const std::vector<ApexFile>& apex_files) {
-  std::vector<MountedApexData> mounted_data;
-  auto guard = android::base::make_scope_guard([&]() {
-    for (const auto& data : mounted_data) {
-      Unmount(data, /*deferred=*/false);
-    }
-  });
-
-  // Mount the staged apex files
-  std::vector<std::string> temp_mounted_apex_paths;
-  for (const auto& apex : apex_files) {
-    const std::string& temp_mount_point =
-        apexd_private::GetPackageTempMountPoint(apex.GetManifest());
-    auto mount_status = VerifyAndTempMountPackage(apex, temp_mount_point);
-    if (!mount_status.ok()) {
-      return mount_status.error();
-    }
-    temp_mounted_apex_paths.push_back(temp_mount_point);
-    mounted_data.push_back(*mount_status);
-  }
-
   // Calculate classpaths of temp mounted staged apexs
-  return ClassPath::DeriveClassPath(temp_mounted_apex_paths);
+  return RunVerifyFnInsideTempMounts(apex_files, [](const auto& mount_points) {
+    return ClassPath::DeriveClassPath(mount_points);
+  });
 }
 
 std::vector<ApexFile> GetActivePackages() {
