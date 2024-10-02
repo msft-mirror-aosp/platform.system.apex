@@ -1970,19 +1970,6 @@ void ScanStagedSessionsDirAndStage() {
         continue;
       }
       staged_apex_names.push_back(apex_file->GetManifest().name());
-
-      // Collect apex's file hash now to assist sending metrics later. With
-      // successful installs, when we want to send the metric message, we are
-      // unable to read the session's apex to compute the sha for the message
-      Result<std::string> apex_file_sha256_str =
-          CalculateSha256(apex_file->GetPath());
-      if (!apex_file_sha256_str.ok()) {
-        LOG(WARNING) << "Unable to get sha256 of ApexFile "
-                     << apex_file->GetPath() << " : "
-                     << apex_file_sha256_str.error();
-      } else {
-        RegisterSessionApexSha(session_id, *apex_file_sha256_str);
-      }
     }
 
     const Result<void> result = StagePackages(apexes);
@@ -2894,6 +2881,11 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
                    << " rollback and enabled for rollback.";
   }
 
+  std::vector<std::string> file_hashes;
+  for (const auto& apex_file : ret) {
+    file_hashes.push_back(OR_RETURN(CalculateSha256(apex_file.GetPath())));
+  }
+
   auto session = gSessionManager->CreateSession(session_id);
   if (!session.ok()) {
     return session.error();
@@ -2907,6 +2899,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   for (const auto& apex_file : ret) {
     session->AddApexName(apex_file.GetManifest().name());
   }
+  session->SetApexFileHashes(file_hashes);
   Result<void> commit_status =
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {
@@ -2957,7 +2950,7 @@ Result<void> MarkStagedSessionSuccessful(const int session_id) {
     // This is because apexd is started before this activation with a linker
     // configuration which doesn't know about statsd
     SendSessionApexInstallationEndedAtom(
-        session_id,
+        *session,
         stats::apex::
             APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_SUCCESSFUL);
     auto cleanup_status = DeleteBackup();

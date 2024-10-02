@@ -16,9 +16,13 @@
 
 #pragma once
 
-namespace android::apex {
+#include <string>
+#include <vector>
 
-void RegisterSessionApexSha(int session_id, const std::string apex_file_sha);
+#include "apex_file.h"
+#include "apexd_session.h"
+
+namespace android::apex {
 
 void SendApexInstallationRequestedAtom(const std::string& package_path,
                                        bool is_rollback,
@@ -29,10 +33,12 @@ void SendApexInstallationStagedAtom(const std::string& package_path);
 void SendApexInstallationEndedAtom(const std::string& package_path,
                                    int install_result);
 
-void SendSessionApexInstallationEndedAtom(int session_id, int install_result);
+void SendSessionApexInstallationEndedAtom(const ApexSession& session,
+                                          int install_result);
 
 void SendApexInstallationStagedAtoms(
     const std::vector<std::string>& package_paths);
+
 void SendApexInstallationEndedAtoms(
     const std::vector<std::string>& package_paths, int install_result);
 
