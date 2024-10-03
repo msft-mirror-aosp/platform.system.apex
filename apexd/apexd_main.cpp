@@ -27,6 +27,7 @@
 #include "apexd.h"
 #include "apexd_checkpoint_vold.h"
 #include "apexd_lifecycle.h"
+#include "apexd_metrics_stats.h"
 #include "apexservice.h"
 
 namespace {
@@ -174,6 +175,7 @@ int main(int argc, char** argv) {
     vold_service = &*vold_service_st;
   }
   android::apex::Initialize(vold_service);
+  android::apex::InitMetrics(std::make_unique<android::apex::StatsLog>());
 
   if (booting) {
     auto res = session_manager->MigrateFromOldSessionsDir(
