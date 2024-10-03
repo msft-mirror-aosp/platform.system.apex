@@ -40,10 +40,6 @@ bool IsVendorApex(const ApexFile& apex_file);
 Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
                                    const std::string& apex_mount_point);
 
-// GetPreinstallPartitionEnum returns an enumeration value of the
-//   preinstall partition of the passed apex_file
-int GetPreinstallPartitionEnum(const ApexFile& apex_file);
-
 }  // namespace apex
 }  // namespace android
 

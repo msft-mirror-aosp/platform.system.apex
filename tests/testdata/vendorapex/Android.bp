@@ -225,31 +225,6 @@ prebuilt_etc {
     sub_dir: "vintf",
 }
 
-// Creates wifi test apex that is updating interface for other hardware
-//    (picked an HAL that exists elsewhere, and for hardware that has
-//     updatable-via-apex="true", and still gets caught - good!)
-apex_test {
-    name: "test.bad3.com.android.hardware.wifi",
-    manifest: "wifi_manifest_rebootless.json",
-    key: "com.android.hardware.key",
-    certificate: ":com.android.hardware.certificate",
-    file_contexts: "wifi_file_contexts",
-    updatable: false,
-    soc_specific: true,
-    installable: false,
-    prebuilts: [
-        "vintf_fragment_wifi_bad3.xml",
-        "com.android.hardware.wifi.rc",
-    ],
-}
-
-prebuilt_etc {
-    name: "vintf_fragment_wifi_bad3.xml",
-    src: "vintf_fragment_wifi_bad3.xml",
-    installable: false,
-    sub_dir: "vintf",
-}
-
 // Test apex for updating com.android.hardware.wifi, with a
 //    good apex
 apex_test {

@@ -16,26 +16,56 @@
 
 #pragma once
 
+#include <memory>
+#include <string>
+#include <vector>
+
 namespace android::apex {
 
-void RegisterSessionApexSha(int session_id, const std::string apex_file_sha);
+class ApexFile;
+class ApexSession;
+
+enum class InstallType {
+  Staged,
+  NonStaged,
+};
+
+enum class InstallResult {
+  Success,
+  Failure,
+};
+
+enum class Partition {
+  System,
+  SystemExt,
+  Product,
+  Vendor,
+  Odm,
+  Unknown,
+};
+
+class Metrics {
+ public:
+  virtual ~Metrics() = default;
+  virtual void InstallationRequested(
+      const std::string& module_name, int64_t version_code,
+      int64_t file_size_bytes, const std::string& file_hash,
+      Partition partition, InstallType install_type, bool is_rollback,
+      bool shared_libs, const std::vector<std::string>& hals) = 0;
+  virtual void InstallationEnded(const std::string& file_hash,
+                                 InstallResult result) = 0;
+};
+
+std::unique_ptr<Metrics> InitMetrics(std::unique_ptr<Metrics> metrics);
 
 void SendApexInstallationRequestedAtom(const std::string& package_path,
                                        bool is_rollback,
-                                       unsigned int install_type);
-
-void SendApexInstallationStagedAtom(const std::string& package_path);
+                                       InstallType install_type);
 
 void SendApexInstallationEndedAtom(const std::string& package_path,
-                                   int install_result);
+                                   InstallResult install_result);
 
-void SendSessionApexInstallationEndedAtom(int session_id, int install_result);
-
-void SendApexInstallationStagedAtoms(
-    const std::vector<std::string>& package_paths);
-void SendApexInstallationEndedAtoms(
-    const std::vector<std::string>& package_paths, int install_result);
-
-void SendApexInstallationFailedAtoms(const std::vector<ApexFile>& apexes);
+void SendSessionApexInstallationEndedAtom(const ApexSession& session,
+                                          InstallResult install_result);
 
 }  // namespace android::apex

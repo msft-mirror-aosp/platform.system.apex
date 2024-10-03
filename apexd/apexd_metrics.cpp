@@ -14,27 +14,60 @@
  * limitations under the License.
  */
 
-#include <statssocket_lazy.h>
+#include "apexd_metrics.h"
+
+#include <android-base/logging.h>
+#include <android-base/result.h>
+#include <android-base/strings.h>
 #include <sys/stat.h>
 
+#include <utility>
+
+#include "apex_file.h"
+#include "apex_file_repository.h"
 #include "apex_sha.h"
-#include "apexd.h"
+#include "apexd_session.h"
 #include "apexd_vendor_apex.h"
-#include "statslog_apex.h"
 
 using android::base::Result;
+using android::base::StartsWith;
 
 namespace android::apex {
 
-// Ties sessions to their apex file, assists reporting installation metrics
-std::unordered_map<int, std::vector<std::string>> gSessionApexSha;
+namespace {
+
+std::unique_ptr<Metrics> gMetrics;
+
+Partition GetPartition(const std::string& path) {
+  if (InVendorPartition(path)) {
+    return Partition::Vendor;
+  }
+  if (InOdmPartition(path)) {
+    return Partition::Odm;
+  }
+  if (StartsWith(path, "/system_ext/apex/")) {
+    return Partition::SystemExt;
+  }
+  if (StartsWith(path, "/system/apex/")) {
+    return Partition::System;
+  }
+  if (StartsWith(path, "/product/apex/")) {
+    return Partition::Product;
+  }
+  return Partition::Unknown;
+}
+
+}  // namespace
+
+std::unique_ptr<Metrics> InitMetrics(std::unique_ptr<Metrics> metrics) {
+  std::swap(gMetrics, metrics);
+  return metrics;
+}
 
 void SendApexInstallationRequestedAtom(const std::string& package_path,
                                        bool is_rollback,
-                                       unsigned int install_type) {
-  if (!statssocket::lazy::IsAvailable()) {
-    LOG(WARNING) << "Unable to send Apex Install Atom for " << package_path
-                 << " ; libstatssocket is not available";
+                                       InstallType install_type) {
+  if (!gMetrics) {
     return;
   }
   auto apex_file = ApexFile::Open(package_path);
@@ -50,103 +83,52 @@ void SendApexInstallationRequestedAtom(const std::string& package_path,
     apex_file_size = stat_buf.st_size;
   } else {
     PLOG(WARNING) << "Failed to stat " << package_path;
-    apex_file_size = 0;
-  }
-  Result<std::string> apex_file_sha256_str = CalculateSha256(package_path);
-  if (!apex_file_sha256_str.ok()) {
-    LOG(WARNING) << "Unable to get sha256 of ApexFile: "
-                 << apex_file_sha256_str.error();
     return;
   }
-  const std::vector<const char*>
-      hal_cstr_list;  // TODO(b/366217822): Populate HAL information
-  int ret = stats::apex::stats_write(
-      stats::apex::APEX_INSTALLATION_REQUESTED, module_name.c_str(),
-      apex_file->GetManifest().version(), apex_file_size,
-      apex_file_sha256_str->c_str(), GetPreinstallPartitionEnum(*apex_file),
-      install_type, is_rollback,
-      apex_file->GetManifest().providesharedapexlibs(), hal_cstr_list);
-  if (ret < 0) {
-    LOG(WARNING) << "Failed to report apex_installation_requested stats";
+  Result<std::string> hash = CalculateSha256(package_path);
+  if (!hash.ok()) {
+    LOG(WARNING) << "Unable to get sha256 of ApexFile: " << hash.error();
+    return;
   }
-}
 
-void SendApexInstallationStagedAtom(const std::string& package_path) {
-  if (!statssocket::lazy::IsAvailable()) {
-    LOG(WARNING) << "Unable to send Apex Staged Atom for " << package_path
-                 << " ; libstatssocket is not available";
+  const auto& instance = ApexFileRepository::GetInstance();
+  auto preinstalled_path = instance.GetPreinstalledPath(module_name);
+  if (!preinstalled_path.ok()) {
+    LOG(WARNING) << preinstalled_path.error();
     return;
   }
-  Result<std::string> apex_file_sha256_str = CalculateSha256(package_path);
-  if (!apex_file_sha256_str.ok()) {
-    LOG(WARNING) << "Unable to get sha256 of ApexFile: "
-                 << apex_file_sha256_str.error();
-    return;
-  }
-  int ret = stats::apex::stats_write(stats::apex::APEX_INSTALLATION_STAGED,
-                                     apex_file_sha256_str->c_str());
-  if (ret < 0) {
-    LOG(WARNING) << "Failed to report apex_installation_staged stats";
-  }
+
+  std::vector<std::string> hal_list;
+  // TODO(b/366217822): Populate HAL information
+
+  gMetrics->InstallationRequested(
+      module_name, apex_file->GetManifest().version(), apex_file_size, *hash,
+      GetPartition(*preinstalled_path), install_type, is_rollback,
+      apex_file->GetManifest().providesharedapexlibs(), hal_list);
 }
 
 void SendApexInstallationEndedAtom(const std::string& package_path,
-                                   int install_result) {
-  if (!statssocket::lazy::IsAvailable()) {
-    LOG(WARNING) << "Unable to send Apex Ended Atom for " << package_path
-                 << " ; libstatssocket is not available";
+                                   InstallResult install_result) {
+  if (!gMetrics) {
     return;
   }
-  Result<std::string> apex_file_sha256_str = CalculateSha256(package_path);
-  if (!apex_file_sha256_str.ok()) {
-    LOG(WARNING) << "Unable to get sha256 of ApexFile: "
-                 << apex_file_sha256_str.error();
+  Result<std::string> hash = CalculateSha256(package_path);
+  if (!hash.ok()) {
+    LOG(WARNING) << "Unable to get sha256 of ApexFile: " << hash.error();
     return;
   }
-  int ret =
-      stats::apex::stats_write(stats::apex::APEX_INSTALLATION_ENDED,
-                               apex_file_sha256_str->c_str(), install_result);
-  if (ret < 0) {
-    LOG(WARNING) << "Failed to report apex_installation_ended stats";
-  }
+  gMetrics->InstallationEnded(*hash, install_result);
 }
 
-void SendSessionApexInstallationEndedAtom(int session_id, int install_result) {
-  if (!statssocket::lazy::IsAvailable()) {
-    LOG(WARNING) << "Unable to send Apex Ended Atom for session " << session_id
-                 << " ; libstatssocket is not available";
+void SendSessionApexInstallationEndedAtom(const ApexSession& session,
+                                          InstallResult install_result) {
+  if (!gMetrics) {
     return;
   }
-  if (gSessionApexSha.find(session_id) == gSessionApexSha.end()) {
-    LOG(WARNING) << "Unable to send Apex Ended Atom for session " << session_id
-                 << " ; apex_sha for session was not found";
-    return;
-  }
-  for (const auto& apex_sha : gSessionApexSha[session_id]) {
-    int ret = stats::apex::stats_write(stats::apex::APEX_INSTALLATION_ENDED,
-                                       apex_sha.c_str(), install_result);
-    if (ret < 0) {
-      LOG(WARNING) << "Failed to report apex_installation_ended stats";
-    }
-  }
-}
 
-void SendApexInstallationStagedAtoms(
-    const std::vector<std::string>& package_paths) {
-  for (const std::string& path : package_paths) {
-    SendApexInstallationStagedAtom(path);
+  for (const auto& hash : session.GetApexFileHashes()) {
+    gMetrics->InstallationEnded(hash, install_result);
   }
-}
-
-void SendApexInstallationEndedAtoms(
-    const std::vector<std::string>& package_paths, int install_result) {
-  for (const std::string& path : package_paths) {
-    SendApexInstallationEndedAtom(path, install_result);
-  }
-}
-
-void RegisterSessionApexSha(int session_id, const std::string apex_file_sha) {
-  gSessionApexSha[session_id].push_back(apex_file_sha);
 }
 
 }  // namespace android::apex
