@@ -176,7 +176,6 @@ java_test_host {
         ":test.good1.com.android.hardware.wifi",
         ":test.bad1.com.android.hardware.wifi",
         ":test.bad2.com.android.hardware.wifi",
-        ":test.bad3.com.android.hardware.wifi",
     ],
 }
 

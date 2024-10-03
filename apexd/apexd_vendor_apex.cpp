@@ -23,7 +23,6 @@
 
 #include "apex_file_repository.h"
 #include "apexd_private.h"
-#include "statslog_apex.h"
 
 using android::base::Error;
 using android::base::StartsWith;
@@ -93,43 +92,6 @@ base::Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
   }
 
   return {};
-}
-
-// GetPreinstallPartitionEnum returns the enumeration value of the preinstall-
-//    partition of the passed apex_file
-int GetPreinstallPartitionEnum(const ApexFile& apex_file) {
-  const auto& instance = ApexFileRepository::GetInstance();
-  // We must test if this apex has a pre-installed version before calling
-  // GetPreInstalledApex() - throws an exception if apex doesn't have one
-  if (!instance.IsPreInstalledApex(apex_file)) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_OTHER;
-  }
-  const auto& preinstalled =
-      instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& preinstalled_path = preinstalled.get().GetPath();
-  if (InVendorPartition(preinstalled_path)) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_VENDOR;
-  }
-  if (InOdmPartition(preinstalled_path)) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_ODM;
-  }
-  if (StartsWith(preinstalled_path, "/system_ext/apex/")) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_SYSTEM_EXT;
-  }
-  if (StartsWith(preinstalled_path, "/system/apex/")) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_SYSTEM;
-  }
-  if (StartsWith(preinstalled_path, "/product/apex/")) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_PRODUCT;
-  }
-  return stats::apex::
-      APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_OTHER;
 }
 
 }  // namespace apex
