@@ -94,8 +94,6 @@ cc_defaults {
         "libtinyxml2",
         "libverity_tree",
         "libvold_binder",
-        "libstatslog_apex",
-        "libstatssocket_lazy",
     ],
     whole_static_libs: ["libcom.android.sysprop.apex"],
 }
@@ -130,6 +128,7 @@ cc_binary {
         "libapex-deps",
         "libapexd-deps",
         "libapexservice-deps",
+        "libapexd_metrics_stats-deps",
     ],
     srcs: [
         "apexd_main.cpp",
@@ -139,6 +138,7 @@ cc_binary {
         "libapexd",
         "libapexd_checkpoint_vold",
         "libapexservice",
+        "libapexd_metrics_stats",
     ],
     init_rc: ["apexd.rc"],
     // Just like the init, apexd should be able to run without
@@ -208,9 +208,11 @@ cc_library_static {
     name: "libapexd_checkpoint_vold",
     defaults: ["apex_flags_defaults"],
     srcs: ["apexd_checkpoint_vold.cpp"],
-    static_libs: [
+    shared_libs: [
         "libbase",
         "libutils",
+    ],
+    static_libs: [
         "libvold_binder",
     ],
     export_include_dirs: ["."],
@@ -547,13 +549,11 @@ cc_test {
         "libapexd",
         "libfstab",
         "libgmock",
-        "libstatslog_apex",
     ],
     shared_libs: [
         "libbinder",
         "libfs_mgr",
         "libutils",
-        "libstatssocket",
     ],
     generated_sources: ["apex-info-list-tinyxml"],
     test_suites: ["device-tests"],
@@ -672,20 +672,34 @@ xsd_config {
     root_elements: ["apex-info-list"],
 }
 
+cc_defaults {
+    name: "libapexd_metrics_stats-deps",
+    shared_libs: [
+        "libbase",
+        "liblog",
+    ],
+    static_libs: [
+        "libstatssocket_lazy",
+    ],
+}
+
 cc_library_static {
-    name: "libstatslog_apex",
-    generated_sources: ["statslog_apex.cpp"],
-    generated_headers: ["statslog_apex.h"],
+    name: "libapexd_metrics_stats",
+    defaults: [
+        "libapexd_metrics_stats-deps",
+    ],
+    srcs: [
+        "apexd_metrics_stats.cpp",
+    ],
+    generated_sources: [
+        "statslog_apex.cpp",
+    ],
+    generated_headers: [
+        "statslog_apex.h",
+    ],
     cflags: [
         "-Wall",
         "-Werror",
-    ],
-    export_generated_headers: ["statslog_apex.h"],
-    static_libs: [
-        "libcutils",
-        "liblog",
-        "libstatssocket_lazy",
-        "libutils",
     ],
 }
 
