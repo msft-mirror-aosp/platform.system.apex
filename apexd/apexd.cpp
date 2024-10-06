@@ -39,7 +39,6 @@
 #include <linux/f2fs.h>
 #include <linux/loop.h>
 #include <selinux/android.h>
-#include <statssocket_lazy.h>
 #include <stdlib.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
@@ -91,7 +90,6 @@
 #include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
 #include "com_android_apex.h"
-#include "statslog_apex.h"
 
 using android::base::boot_clock;
 using android::base::ConsumePrefix;
@@ -701,25 +699,6 @@ Result<void> VerifyPackageStagedInstall(const ApexFile& apex_file) {
   return RunVerifyFnInsideTempMount(apex_file, validate_fn);
 }
 
-template <typename VerifyApexFn>
-Result<std::vector<ApexFile>> VerifyPackages(
-    const std::vector<std::string>& paths, const VerifyApexFn& verify_apex_fn) {
-  Result<std::vector<ApexFile>> apex_files = OpenApexFiles(paths);
-  if (!apex_files.ok()) {
-    return apex_files.error();
-  }
-
-  LOG(DEBUG) << "VerifyPackages() for " << Join(paths, ',');
-
-  for (const ApexFile& apex_file : *apex_files) {
-    Result<void> result = verify_apex_fn(apex_file);
-    if (!result.ok()) {
-      return result.error();
-    }
-  }
-  return std::move(*apex_files);
-}
-
 // VerifySessionDir verifies and returns the apex file in a session
 Result<ApexFile> VerifySessionDir(int session_id, const bool is_rollback) {
   std::string session_dir_path =
@@ -738,24 +717,22 @@ Result<ApexFile> VerifySessionDir(int session_id, const bool is_rollback) {
         "More than one APEX package found in the same session directory.");
   }
 
+  auto apex_file = OR_RETURN(ApexFile::Open((*scan)[0]));
+
   // Report ApexInstallRequests here, so we can track apexes that
   // do not pass the VerifyPackages() and thus won't return for tracking.
   // SubmitStagedSession() performs the remaining apex metrics with valid
   // instances. VerifySessionDir is only called by SubmitStagedSession(), so we
   // can surmise that a staged apex installation is occurring.
-  SendApexInstallationRequestedAtom(
-      (*scan)[0], is_rollback,
-      stats::apex::APEX_INSTALLATION_REQUESTED__INSTALLATION_TYPE__STAGED);
+  SendApexInstallationRequestedAtom((*scan)[0], is_rollback,
+                                    InstallType::Staged);
 
-  auto verified = VerifyPackages(*scan, VerifyPackageStagedInstall);
+  auto verified = VerifyPackageStagedInstall(apex_file);
   if (!verified.ok()) {
-    SendApexInstallationEndedAtom(
-        (*scan)[0],
-        stats::apex::
-            APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
+    SendApexInstallationEndedAtom((*scan)[0], InstallResult::Failure);
     return verified.error();
   }
-  return std::move((*verified)[0]);
+  return apex_file;
 }
 
 Result<void> DeleteBackup() {
@@ -1970,19 +1947,6 @@ void ScanStagedSessionsDirAndStage() {
         continue;
       }
       staged_apex_names.push_back(apex_file->GetManifest().name());
-
-      // Collect apex's file hash now to assist sending metrics later. With
-      // successful installs, when we want to send the metric message, we are
-      // unable to read the session's apex to compute the sha for the message
-      Result<std::string> apex_file_sha256_str =
-          CalculateSha256(apex_file->GetPath());
-      if (!apex_file_sha256_str.ok()) {
-        LOG(WARNING) << "Unable to get sha256 of ApexFile "
-                     << apex_file->GetPath() << " : "
-                     << apex_file_sha256_str.error();
-      } else {
-        RegisterSessionApexSha(session_id, *apex_file_sha256_str);
-      }
     }
 
     const Result<void> result = StagePackages(apexes);
@@ -2874,10 +2838,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   std::vector<ApexFile> ret;
   auto guard = android::base::make_scope_guard([&]() {
     for (const auto& apex : ret) {
-      SendApexInstallationEndedAtom(
-          apex.GetPath(),
-          stats::apex::
-              APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
+      SendApexInstallationEndedAtom(apex.GetPath(), InstallResult::Failure);
     }
   });
   for (int id_to_scan : ids_to_scan) {
@@ -2894,6 +2855,11 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
                    << " rollback and enabled for rollback.";
   }
 
+  std::vector<std::string> file_hashes;
+  for (const auto& apex_file : ret) {
+    file_hashes.push_back(OR_RETURN(CalculateSha256(apex_file.GetPath())));
+  }
+
   auto session = gSessionManager->CreateSession(session_id);
   if (!session.ok()) {
     return session.error();
@@ -2907,6 +2873,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   for (const auto& apex_file : ret) {
     session->AddApexName(apex_file.GetManifest().name());
   }
+  session->SetApexFileHashes(file_hashes);
   Result<void> commit_status =
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {
@@ -2956,10 +2923,7 @@ Result<void> MarkStagedSessionSuccessful(const int session_id) {
     // TODO: Handle activated apexes still unavailable to apexd at this time.
     // This is because apexd is started before this activation with a linker
     // configuration which doesn't know about statsd
-    SendSessionApexInstallationEndedAtom(
-        session_id,
-        stats::apex::
-            APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_SUCCESSFUL);
+    SendSessionApexInstallationEndedAtom(*session, InstallResult::Success);
     auto cleanup_status = DeleteBackup();
     if (!cleanup_status.ok()) {
       return Error() << "Failed to mark session " << *session
@@ -3088,37 +3052,6 @@ int UnmountAll(bool also_include_staged_apexes) {
     }
   });
   return ret;
-}
-
-Result<void> RemountPackages() {
-  std::vector<std::string> apexes;
-  gMountedApexes.ForallMountedApexes([&apexes](const std::string& /*package*/,
-                                               const MountedApexData& data,
-                                               bool latest) {
-    if (latest) {
-      LOG(DEBUG) << "Found active APEX " << data.full_path;
-      apexes.push_back(data.full_path);
-    }
-  });
-  std::vector<std::string> failed;
-  for (const std::string& apex : apexes) {
-    // Since this is only used during development workflow, we are trying to
-    // remount as many apexes as possible instead of failing fast.
-    if (auto ret = RemountApexFile(apex); !ret.ok()) {
-      LOG(WARNING) << "Failed to remount " << apex << " : " << ret.error();
-      failed.emplace_back(apex);
-    }
-  }
-  static constexpr const char* kErrorMessage =
-      "Failed to remount following APEX packages, hence previous versions of "
-      "them are still active. If APEX you are developing is in this list, it "
-      "means that there still are alive processes holding a reference to the "
-      "previous version of your APEX.\n";
-  if (!failed.empty()) {
-    return Error() << kErrorMessage << "Failed (" << failed.size() << ") "
-                   << "APEX packages: [" << Join(failed, ',') << "]";
-  }
-  return {};
 }
 
 // Given a single new APEX incoming via OTA, should we allocate space for it?
@@ -3770,18 +3703,12 @@ Result<ApexFile> InstallPackageImpl(const std::string& package_path,
 
 Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
   LOG(INFO) << "Installing " << package_path;
-  SendApexInstallationRequestedAtom(
-      package_path, /* is_rollback */ false,
-      stats::apex::APEX_INSTALLATION_REQUESTED__INSTALLATION_TYPE__REBOOTLESS);
+  SendApexInstallationRequestedAtom(package_path, /*is_rollback=*/false,
+                                    InstallType::NonStaged);
   // TODO: Add error-enums
   Result<ApexFile> ret = InstallPackageImpl(package_path, force);
   SendApexInstallationEndedAtom(
-      package_path,
-      ret.ok()
-          ? stats::apex::
-                APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_SUCCESSFUL
-          : stats::apex::
-                APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
+      package_path, ret.ok() ? InstallResult::Success : InstallResult::Failure);
   return ret;
 }
 
