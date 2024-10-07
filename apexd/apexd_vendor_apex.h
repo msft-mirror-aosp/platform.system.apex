@@ -28,6 +28,10 @@ using android::base::Result;
 namespace android {
 namespace apex {
 
+bool InVendorPartition(const std::string& path);
+
+bool InOdmPartition(const std::string& path);
+
 // Determines if an incoming apex is a vendor apex
 bool IsVendorApex(const ApexFile& apex_file);
 
@@ -35,10 +39,6 @@ bool IsVendorApex(const ApexFile& apex_file);
 //   vintf_fragment(s) and tests compatibility.
 Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
                                    const std::string& apex_mount_point);
-
-// GetPreinstallPartitionEnum returns an enumeration value of the
-//   preinstall partition of the passed apex_file
-int GetPreinstallPartitionEnum(const ApexFile& apex_file);
 
 }  // namespace apex
 }  // namespace android

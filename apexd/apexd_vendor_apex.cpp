@@ -23,7 +23,6 @@
 
 #include "apex_file_repository.h"
 #include "apexd_private.h"
-#include "statslog_apex.h"
 
 using android::base::Error;
 using android::base::StartsWith;
@@ -31,18 +30,25 @@ using android::base::StartsWith;
 namespace android {
 namespace apex {
 
+bool InVendorPartition(const std::string& path) {
+  return StartsWith(path, "/vendor/apex/") ||
+         StartsWith(path, "/system/vendor/apex/");
+}
+
+bool InOdmPartition(const std::string& path) {
+  return StartsWith(path, "/odm/apex/") ||
+         StartsWith(path, "/vendor/odm/apex/") ||
+         StartsWith(path, "/system/vendor/odm/apex/");
+}
+
 // Returns if apex is a vendor apex, works by testing path of its preinstalled
-// version NOTE: If BOARD_USES_VENDORIMAGE is false, then /vendor will be a
-// symlink to
-//    /system/vendor. Apexd handles "realpath"s for apexes. Hence when checking
-//    if an Apex is a vendor apex with path, we need to check against both.
+// version.
 bool IsVendorApex(const ApexFile& apex_file) {
   const auto& instance = ApexFileRepository::GetInstance();
   const auto& preinstalled =
       instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& preinstalled_path = preinstalled.get().GetPath();
-  return (StartsWith(preinstalled_path, "/vendor/apex/") ||
-          StartsWith(preinstalled_path, "/system/vendor/apex/"));
+  const auto& path = preinstalled.get().GetPath();
+  return InVendorPartition(path) || InOdmPartition(path);
 }
 
 // Checks Compatibility for incoming vendor apex.
@@ -60,8 +66,8 @@ base::Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
   // substitution
   std::unique_ptr<vintf::FileSystem> path_replaced_fs =
       std::make_unique<vintf::details::PathReplacingFileSystem>(
-          std::move(path_to_replace), apex_mount_point,
-          std::make_unique<vintf::details::FileSystemImpl>());
+          std::make_unique<vintf::details::FileSystemImpl>(),
+          std::map{std::pair{path_to_replace, apex_mount_point}});
 
   // Create a new VintfObject that uses our path-replacing FileSystem instance
   auto vintf_with_replaced_path =
@@ -86,40 +92,6 @@ base::Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
   }
 
   return {};
-}
-
-// GetPreinstallPartitionEnum returns the enumeration value of the preinstall-
-//    partition of the passed apex_file
-int GetPreinstallPartitionEnum(const ApexFile& apex_file) {
-  const auto& instance = ApexFileRepository::GetInstance();
-  // We must test if this apex has a pre-installed version before calling
-  // GetPreInstalledApex() - throws an exception if apex doesn't have one
-  if (!instance.IsPreInstalledApex(apex_file)) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_OTHER;
-  }
-  const auto& preinstalled =
-      instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& preinstalled_path = preinstalled.get().GetPath();
-  if (StartsWith(preinstalled_path, "/vendor/") ||
-      StartsWith(preinstalled_path, "/system/vendor/")) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_VENDOR;
-  }
-  if (StartsWith(preinstalled_path, "/system_ext/")) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_SYSTEM_EXT;
-  }
-  if (StartsWith(preinstalled_path, "/system/")) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_SYSTEM;
-  }
-  if (StartsWith(preinstalled_path, "/product/")) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_PRODUCT;
-  }
-  return stats::apex::
-      APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_OTHER;
 }
 
 }  // namespace apex
