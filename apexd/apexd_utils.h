@@ -17,19 +17,6 @@
 #ifndef ANDROID_APEXD_APEXD_UTILS_H_
 #define ANDROID_APEXD_APEXD_UTILS_H_
 
-#include <chrono>
-#include <cstdint>
-#include <filesystem>
-#include <string>
-#include <thread>
-#include <type_traits>
-#include <vector>
-
-#include <dirent.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-
 #include <android-base/chrono_utils.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
@@ -37,7 +24,20 @@
 #include <android-base/scopeguard.h>
 #include <android-base/strings.h>
 #include <cutils/android_reboot.h>
+#include <dirent.h>
 #include <selinux/android.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <span>
+#include <string>
+#include <thread>
+#include <type_traits>
+#include <vector>
 
 #include "apex_constants.h"
 
@@ -323,6 +323,12 @@ inline android::base::Result<std::string> GetfileconPath(
   std::string ret(ctx);
   freecon(ctx);
   return ret;
+}
+
+// Adapter for a single-valued span
+template <typename T>
+std::span<const T> Single(const T& t) {
+  return std::span{&t, 1};
 }
 
 }  // namespace apex
