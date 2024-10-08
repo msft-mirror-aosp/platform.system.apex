@@ -52,6 +52,7 @@ public class VendorApexTests {
     private static final String TAG = "VendorApexTests";
 
     private static final String APEX_PACKAGE_NAME = "com.android.apex.vendor.foo";
+    private static final String APEX_PACKAGE_NAME_BAR = "com.android.apex.vendor.bar";
     private static final TestApp Apex2Rebootless = new TestApp(
             "com.android.apex.vendor.foo.v2", APEX_PACKAGE_NAME, 2,
             /*isApex*/true, "com.android.apex.vendor.foo.v2.apex");
@@ -64,6 +65,12 @@ public class VendorApexTests {
     private static final TestApp Apex2WrongVndkVersion = new TestApp(
             "com.android.apex.vendor.foo.v2_with_wrong_vndk_version", APEX_PACKAGE_NAME, 2,
             /*isApex*/true, "com.android.apex.vendor.foo.v2_with_wrong_vndk_version.apex");
+    private static final TestApp ApexFooV2WithVintf = new TestApp(
+            "com.android.apex.vendor.foo.with_vintf", APEX_PACKAGE_NAME, 2,
+            /*isApex*/true, "com.android.apex.vendor.foo.with_vintf.apex");
+    private static final TestApp ApexBarV2WithVintf = new TestApp(
+            "com.android.apex.vendor.bar.v2_with_vintf", APEX_PACKAGE_NAME_BAR, 2,
+            /*isApex*/true, "com.android.apex.vendor.bar.v2_with_vintf.apex");
 
     /* parameter passed from host-side VendorApexTests: [vendor, odm] */
     private String mPartition;
@@ -72,6 +79,7 @@ public class VendorApexTests {
     public void setUp() {
         InstallUtils.dropShellPermissionIdentity();
         InstallUtils.adoptShellPermissionIdentity(
+                Manifest.permission.INSTALL_PACKAGES,
                 Manifest.permission.INSTALL_PACKAGE_UPDATES,
                 Manifest.permission.INSTALL_TEST_ONLY_PACKAGE);
         Bundle bundle = InstrumentationRegistry.getArguments();
@@ -154,6 +162,23 @@ public class VendorApexTests {
                 AssertionError.class,
                 "vndkVersion\\(WrongVndkVersion\\) doesn't match with device VNDK version",
                 Install.single(Apex2WrongVndkVersion).setStaged());
+    }
+
+    @Test
+    public void testCheckVintfWithAllStagedApexes_MultiPackage() throws Exception {
+        InstallUtils.commitExpectingFailure(
+                AssertionError.class,
+                "CheckVintf failed",
+                Install.multi(ApexFooV2WithVintf, ApexBarV2WithVintf).setStaged());
+    }
+
+    @Test
+    public void testCheckVintfWithAllStagedApexes_MultiSession() throws Exception {
+        Install.single(ApexFooV2WithVintf).setStaged().commit();
+        InstallUtils.commitExpectingFailure(
+                AssertionError.class,
+                "CheckVintf failed",
+                Install.single(ApexBarV2WithVintf).setStaged());
     }
 
     private static void assertAwait(Supplier<Boolean> test, long millis, String failMessage)
