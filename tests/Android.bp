@@ -205,6 +205,7 @@ java_test_host {
         ":com.android.apex.vendor.foo.apex.all.ready",
         ":com.android.apex.vendor.foo.bootstrap",
         ":com.android.apex.vendor.foo.v1_with_service",
+        ":com.android.apex.vendor.bar",
     ],
     test_config: "vendor-apex-tests.xml",
     test_suites: [
@@ -229,6 +230,8 @@ android_test_helper_app {
         ":com.android.apex.vendor.foo.v2_with_requireNativeLibs",
         ":com.android.apex.vendor.foo.v2_with_service",
         ":com.android.apex.vendor.foo.v2_with_wrong_vndk_version",
+        ":com.android.apex.vendor.foo.with_vintf", // v2
+        ":com.android.apex.vendor.bar.v2_with_vintf",
     ],
     test_suites: [
         "general-tests",
