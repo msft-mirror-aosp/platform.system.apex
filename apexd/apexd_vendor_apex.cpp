@@ -18,17 +18,21 @@
 
 #include "apexd_vendor_apex.h"
 
+#include <android-base/logging.h>
 #include <android-base/strings.h>
 #include <vintf/VintfObject.h>
 
 #include "apex_file_repository.h"
 #include "apexd_private.h"
+#include "apexd_utils.h"
 
 using android::base::Error;
 using android::base::StartsWith;
 
 namespace android {
 namespace apex {
+
+using apexd_private::GetActiveMountPoint;
 
 bool InVendorPartition(const std::string& path) {
   return StartsWith(path, "/vendor/apex/") ||
@@ -51,23 +55,41 @@ bool IsVendorApex(const ApexFile& apex_file) {
   return InVendorPartition(path) || InOdmPartition(path);
 }
 
-// Checks Compatibility for incoming vendor apex.
+static Result<bool> HasVintfIn(std::span<const std::string> apex_mounts) {
+  for (const auto& mount : apex_mounts) {
+    if (OR_RETURN(PathExists(mount + "/etc/vintf"))) return true;
+  }
+  return false;
+}
+
+// Checks Compatibility for incoming APEXes.
 //    Adds the data from apex's vintf_fragment(s) and tests compatibility.
-base::Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
-                                         const std::string& apex_mount_point) {
+base::Result<void> CheckVintf(std::span<const ApexFile> apex_files,
+                              std::span<const std::string> mount_points) {
   std::string error;
 
-  const std::string apex_name = apex_file.GetManifest().name();
+  std::vector<std::string> current_mounts;
+  for (const auto& apex : apex_files) {
+    current_mounts.push_back(GetActiveMountPoint(apex.GetManifest()));
+  }
 
-  std::string path_to_replace =
-      apexd_private::GetActiveMountPoint(apex_file.GetManifest());
+  // Skip the check unless any of the current/incoming APEXes has etc/vintf.
+  if (!OR_RETURN(HasVintfIn(current_mounts)) &&
+      !OR_RETURN(HasVintfIn(mount_points))) {
+    return {};
+  }
 
   // Create PathReplacingFileSystem instance containing caller's path
-  // substitution
+  // substitutions
+  std::map<std::string, std::string> replacements;
+  CHECK(apex_files.size() == mount_points.size()) << "size mismatch";
+  for (size_t i = 0; i < current_mounts.size(); i++) {
+    replacements.emplace(current_mounts[i], mount_points[i]);
+  }
   std::unique_ptr<vintf::FileSystem> path_replaced_fs =
       std::make_unique<vintf::details::PathReplacingFileSystem>(
           std::make_unique<vintf::details::FileSystemImpl>(),
-          std::map{std::pair{path_to_replace, apex_mount_point}});
+          std::move(replacements));
 
   // Create a new VintfObject that uses our path-replacing FileSystem instance
   auto vintf_with_replaced_path =
@@ -82,13 +104,11 @@ base::Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
 
   // checkCompatibility on vintfObj using the replacement vintf directory
   int ret = vintf_with_replaced_path->checkCompatibility(&error, flags);
-  LOG(DEBUG) << "CheckVendorApexUpdate: check on vendor apex " << apex_name
-             << " returned " << ret << " (want " << vintf::COMPATIBLE
-             << " == COMPATIBLE)";
   if (ret == vintf::INCOMPATIBLE) {
-    return Error() << "vendor apex is not compatible, error=" << error;
-  } else if (ret != vintf::COMPATIBLE) {
-    return Error() << "Check of vendor apex failed, error=" << error;
+    return Error() << "CheckVintf failed: not compatible. error=" << error;
+  }
+  if (ret != vintf::COMPATIBLE) {
+    return Error() << "CheckVintf failed: error=" << error;
   }
 
   return {};
