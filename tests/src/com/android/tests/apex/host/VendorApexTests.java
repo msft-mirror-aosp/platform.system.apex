@@ -92,8 +92,8 @@ public class VendorApexTests extends BaseHostJUnit4Test {
 
     @After
     public void tearDown() throws Exception {
-        deleteFiles("/" + mPartition + "/apex/" + APEX_PACKAGE_NAME + "*apex",
-                "/data/apex/active/" + APEX_PACKAGE_NAME + "*apex");
+        deleteFiles("/" + mPartition + "/apex/com.android.apex.vendor.*apex",
+                "/data/apex/active/com.android.apex.vendor.*apex");
     }
 
     @Test
@@ -156,6 +156,32 @@ public class VendorApexTests extends BaseHostJUnit4Test {
             .isEqualTo(getMountNamespaceFor("$(pidof vold)"));
     }
 
+    @Test
+    @LargeTest
+    public void testCheckVintfWithAllStagedApexes_MultiPackage() throws Exception {
+        // CheckVintf should be invoked with all staged APEXes mounted.
+        // For example, two conflicting APEXes in a session may pass the check
+        // when CheckVintf is performed with a single incoming APEX separately.
+        // In this test, installing two conflicting APEXes in the same session should
+        // fail with CheckVintf error.
+        pushPreinstalledApex("com.android.apex.vendor.foo.apex",
+                "com.android.apex.vendor.bar.apex");
+        runPhase("testCheckVintfWithAllStagedApexes_MultiPackage");
+    }
+
+    @Test
+    @LargeTest
+    public void testCheckVintfWithAllStagedApexes_MultiSession() throws Exception {
+        // CheckVintf should be invoked with all staged APEXes mounted.
+        // For example, two conflicting APEXes in different sessions may pass the check
+        // when CheckVintf is performed for each session separately.
+        // In this test, installing two APEXes in two separate sessions should
+        // fail with CheckVintfError.
+        pushPreinstalledApex("com.android.apex.vendor.foo.apex",
+                "com.android.apex.vendor.bar.apex");
+        runPhase("testCheckVintfWithAllStagedApexes_MultiSession");
+    }
+
     private String getMountNamespaceFor(String proc) throws Exception {
         CommandResult result =
                 getDevice().executeShellV2Command("readlink /proc/" + proc + "/ns/mnt");
@@ -165,11 +191,14 @@ public class VendorApexTests extends BaseHostJUnit4Test {
         return result.getStdout().trim();
     }
 
-    private void pushPreinstalledApex(String fileName) throws Exception {
+    private void pushPreinstalledApex(String... fileNames) throws Exception {
+        assertThat(fileNames).isNotEmpty();
         CompatibilityBuildHelper buildHelper = new CompatibilityBuildHelper(getBuild());
-        final File apex = buildHelper.getTestFile(fileName);
-        Path path = Paths.get("/", mPartition, "apex", fileName);
-        assertTrue(getDevice().pushFile(apex, path.toString()));
+        for (String fileName : fileNames) {
+            final File apex = buildHelper.getTestFile(fileName);
+            Path path = Paths.get("/", mPartition, "apex", fileName);
+            assertTrue(getDevice().pushFile(apex, path.toString()));
+        }
         getDevice().reboot();
     }
 
