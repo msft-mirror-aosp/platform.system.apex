@@ -676,10 +676,13 @@ cc_defaults {
     name: "libapexd_metrics_stats-deps",
     shared_libs: [
         "libbase",
+        "libbinder",
+        "libutils",
         "liblog",
     ],
     static_libs: [
-        "libstatssocket_lazy",
+        "android.os.statsbootstrap_aidl-cpp",
+        "libstatsbootstrap",
     ],
 }
 
@@ -706,7 +709,7 @@ cc_library_static {
 genrule {
     name: "statslog_apex.h",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_apex.h --module apex --namespace stats,apex",
+    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_apex.h --module apex --namespace stats,apex --bootstrap",
     out: [
         "statslog_apex.h",
     ],
@@ -715,7 +718,7 @@ genrule {
 genrule {
     name: "statslog_apex.cpp",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_apex.cpp --module apex --namespace stats,apex --importHeader statslog_apex.h",
+    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_apex.cpp --module apex --namespace stats,apex --importHeader statslog_apex.h --bootstrap",
     out: [
         "statslog_apex.cpp",
     ],
