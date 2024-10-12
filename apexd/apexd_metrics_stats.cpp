@@ -17,8 +17,7 @@
 #include "apexd_metrics_stats.h"
 
 #include <android-base/logging.h>
-#include <dlfcn.h>
-#include <statssocket_lazy.h>
+#include <unistd.h>
 
 #include "apexd_metrics.h"
 #include "statslog_apex.h"
@@ -109,6 +108,8 @@ void StatsLog::InstallationEnded(const std::string& file_hash,
   }
 }
 
-bool StatsLog::IsAvailable() { return statssocket::lazy::IsAvailable(); }
+bool StatsLog::IsAvailable() {
+  return access("/apex/com.android.os.statsd", F_OK) == 0;
+}
 
 }  // namespace android::apex
