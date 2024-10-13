@@ -42,6 +42,9 @@
     },
     {
       "name": "VendorApexHostTestCases"
+    },
+    {
+      "name": "apexd_host_tests"
     }
   ],
   "imports": [
