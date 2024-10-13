@@ -46,6 +46,8 @@ class ApexFile {
   ApexFile() = delete;
   ApexFile(ApexFile&&) = default;
   ApexFile& operator=(ApexFile&&) = default;
+  ApexFile(const ApexFile&) = default;
+  ApexFile& operator=(const ApexFile&) = default;
 
   const std::string& GetPath() const { return apex_path_; }
   const std::optional<uint32_t>& GetImageOffset() const {
