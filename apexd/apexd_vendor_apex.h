@@ -19,6 +19,7 @@
 
 #include <android-base/result.h>
 
+#include <span>
 #include <string>
 
 #include "apex_file.h"
@@ -35,10 +36,9 @@ bool InOdmPartition(const std::string& path);
 // Determines if an incoming apex is a vendor apex
 bool IsVendorApex(const ApexFile& apex_file);
 
-// For incoming vendor apex updates.  Adds the data from its
-//   vintf_fragment(s) and tests compatibility.
-Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
-                                   const std::string& apex_mount_point);
+// Check VINTF for incoming apex updates.
+Result<void> CheckVintf(std::span<const ApexFile> apex_files,
+                        std::span<const std::string> mount_points);
 
 }  // namespace apex
 }  // namespace android
