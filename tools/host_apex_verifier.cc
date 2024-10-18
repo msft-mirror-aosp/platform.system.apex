@@ -56,7 +56,10 @@ namespace {
 static const std::vector<std::string> partitions = {"system", "system_ext",
                                                     "product", "vendor", "odm"};
 
-void PrintUsage() {
+void PrintUsage(const std::string& msg = "") {
+  if (msg != "") {
+    std::cerr << "Error: " << msg << "\n";
+  }
   printf(R"(usage: host_apex_verifier [options]
 
 Tests APEX file(s) for correctness.
@@ -76,21 +79,44 @@ for checking all APEXes:
 
 for checking a single APEX:
   --apex=PATH                 Path to the target APEX.
+  --partition_tag=[system|vendor|...] Partition for the target APEX.
 )");
 }
 
+// Use this for better error message when unavailable keyword is used.
+class NotAvailableParser : public init::SectionParser {
+ public:
+  NotAvailableParser(const std::string& keyword) : keyword_(keyword) {}
+  base::Result<void> ParseSection(std::vector<std::string>&&,
+                                  const std::string&, int) override {
+    return base::Error() << "'" << keyword_ << "' is not available.";
+  }
+
+ private:
+  std::string keyword_;
+};
+
 // Validate any init rc files inside the APEX.
 void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
-                 int sdk_version) {
+                 int sdk_version, bool is_vendor) {
   init::Parser parser;
+  if (is_vendor) {
+    init::InitializeHostSubcontext({apex_dir});
+  }
   init::ServiceList service_list = init::ServiceList();
-  parser.AddSectionParser(
-      "service", std::make_unique<init::ServiceParser>(&service_list, nullptr));
+  parser.AddSectionParser("service", std::make_unique<init::ServiceParser>(
+                                         &service_list, init::GetSubcontext()));
   const init::BuiltinFunctionMap& function_map = init::GetBuiltinFunctionMap();
   init::Action::set_function_map(&function_map);
   init::ActionManager action_manager = init::ActionManager();
-  parser.AddSectionParser(
-      "on", std::make_unique<init::ActionParser>(&action_manager, nullptr));
+  if (is_vendor) {
+    parser.AddSectionParser("on", std::make_unique<init::ActionParser>(
+                                      &action_manager, init::GetSubcontext()));
+  } else {
+    // "on" keyword is not available in non-vendor APEXes.
+    parser.AddSectionParser("on", std::make_unique<NotAvailableParser>("on"));
+  }
+
   std::string init_dir_path = apex_dir + "/etc";
   std::vector<std::string> init_configs;
   std::unique_ptr<DIR, decltype(&closedir)> init_dir(
@@ -132,7 +158,7 @@ void CheckInitRc(const std::string& apex_dir, const ApexManifest& manifest,
 
 // Extract and validate a single APEX.
 void ScanApex(const std::string& deapexer, int sdk_version,
-              const std::string& apex_path) {
+              const std::string& apex_path, const std::string& partition_tag) {
   LOG(INFO) << "Checking APEX " << apex_path;
 
   auto apex = OR_FATAL(ApexFile::Open(apex_path));
@@ -147,8 +173,8 @@ void ScanApex(const std::string& deapexer, int sdk_version,
     LOG(FATAL) << "Error running deapexer command \"" << deapexer_command
                << "\": " << code;
   }
-
-  CheckInitRc(extracted_apex_dir, manifest, sdk_version);
+  bool is_vendor = partition_tag == "vendor" || partition_tag == "odm";
+  CheckInitRc(extracted_apex_dir, manifest, sdk_version, is_vendor);
 }
 
 // Scan the factory APEX files in the partition apex dir.
@@ -160,8 +186,10 @@ void ScanApex(const std::string& deapexer, int sdk_version,
 //   - Extracted target_files archives which may not contain
 //     flattened <PARTITON>/apex/ directories.
 void ScanPartitionApexes(const std::string& deapexer, int sdk_version,
-                         const std::string& partition_dir) {
-  LOG(INFO) << "Scanning partition factory APEX dir " << partition_dir;
+                         const std::string& partition_dir,
+                         const std::string& partition_tag) {
+  LOG(INFO) << "Scanning " << partition_dir << " for factory APEXes in "
+            << partition_tag;
 
   std::unique_ptr<DIR, decltype(&closedir)> apex_dir(
       opendir(partition_dir.c_str()), closedir);
@@ -174,7 +202,8 @@ void ScanPartitionApexes(const std::string& deapexer, int sdk_version,
   while ((entry = readdir(apex_dir.get()))) {
     if (base::EndsWith(entry->d_name, ".apex") ||
         base::EndsWith(entry->d_name, ".capex")) {
-      ScanApex(deapexer, sdk_version, partition_dir + "/" + entry->d_name);
+      ScanApex(deapexer, sdk_version, partition_dir + "/" + entry->d_name,
+               partition_tag);
     }
   }
 }
@@ -196,6 +225,7 @@ int main(int argc, char** argv) {
   int sdk_version = INT_MAX;
   std::map<std::string, std::string> partition_map;
   std::string apex;
+  std::string partition_tag;
 
   while (true) {
     static const struct option long_options[] = {
@@ -210,6 +240,7 @@ int main(int argc, char** argv) {
         {"out_vendor", required_argument, nullptr, 0},
         {"out_odm", required_argument, nullptr, 0},
         {"apex", required_argument, nullptr, 0},
+        {"partition_tag", required_argument, nullptr, 0},
         {nullptr, 0, nullptr, 0},
     };
 
@@ -240,6 +271,9 @@ int main(int argc, char** argv) {
         }
         if (name == "apex") {
           apex = optarg;
+        }
+        if (name == "partition_tag") {
+          partition_tag = optarg;
         }
         for (const auto& p : partitions) {
           if (name == "out_" + p) {
@@ -272,16 +306,25 @@ int main(int argc, char** argv) {
   deapexer += " --fsckerofs_path " + fsckerofs;
 
   if (!!apex.empty() + !!partition_map.empty() != 1) {
-    PrintUsage();
+    PrintUsage("use either --apex or --out_<partition>.\n");
     return EXIT_FAILURE;
+  }
+  if (!apex.empty()) {
+    if (std::find(partitions.begin(), partitions.end(), partition_tag) ==
+        partitions.end()) {
+      PrintUsage(
+          "--apex should come with "
+          "--partition_tag=[system|system_ext|product|vendor|odm].\n");
+      return EXIT_FAILURE;
+    }
   }
 
   if (!partition_map.empty()) {
-    for (const auto& p : partition_map) {
-      ScanPartitionApexes(deapexer, sdk_version, p.second);
+    for (const auto& [partition, dir] : partition_map) {
+      ScanPartitionApexes(deapexer, sdk_version, dir, partition);
     }
   } else {
-    ScanApex(deapexer, sdk_version, apex);
+    ScanApex(deapexer, sdk_version, apex, partition_tag);
   }
   return EXIT_SUCCESS;
 }
