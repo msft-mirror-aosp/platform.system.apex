@@ -109,7 +109,7 @@ genrule {
         "-o $(genDir)/com.android.apex.compressed.v1_with_v2_apex.capex",
 }
 
-genrule {
+java_genrule {
     // Generates a compressed apex which can be opened but not decompressed
     name: "gen_capex_not_decompressible",
     out: ["com.android.apex.compressed.v1_not_decompressible.capex"],
@@ -123,7 +123,7 @@ genrule {
         "-o $(genDir)/com.android.apex.compressed.v1_not_decompressible.capex",
 }
 
-genrule {
+java_genrule {
     // Generates a capex which has same module name as com.android.apex.compressed, but
     // is contains a different public key.
     name: "gen_key_mismatch_capex",
@@ -162,7 +162,7 @@ genrule {
         "-o $(genDir)/com.android.apex.compressed_key_mismatch_with_original.capex",
 }
 
-genrule {
+java_genrule {
     // Generates an apex which has a different manifest outside the filesystem
     // image.
     name: "gen_manifest_mismatch_compressed_apex_v2",
