@@ -108,8 +108,6 @@ class ApexService : public BnApexService {
       int user_id, const std::vector<int>& retain_rollback_ids) override;
   BinderStatus recollectPreinstalledData(
       const std::vector<std::string>& paths) override;
-  BinderStatus recollectDataApex(const std::string& path,
-                                 const std::string& decompression_dir) override;
   BinderStatus markBootCompleted() override;
   BinderStatus calculateSizeForCompressedApex(
       const CompressedApexInfoList& compressed_apex_info_list,
@@ -730,26 +728,6 @@ BinderStatus ApexService::recollectPreinstalledData(
   }
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
   if (auto res = instance.AddPreInstalledApex(paths); !res.ok()) {
-    return BinderStatus::fromExceptionCode(
-        BinderStatus::EX_SERVICE_SPECIFIC,
-        String8(res.error().message().c_str()));
-  }
-  return BinderStatus::ok();
-}
-
-BinderStatus ApexService::recollectDataApex(
-    const std::string& path, const std::string& decompression_dir) {
-  LOG(INFO) << "recollectDataApex() received by ApexService, paths " << path
-            << " and " << decompression_dir;
-
-  if (auto debug = CheckDebuggable("recollectDataApex"); !debug.isOk()) {
-    return debug;
-  }
-  if (auto root = CheckCallerIsRoot("recollectDataApex"); !root.isOk()) {
-    return root;
-  }
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  if (auto res = instance.AddDataApex(path); !res.ok()) {
     return BinderStatus::fromExceptionCode(
         BinderStatus::EX_SERVICE_SPECIFIC,
         String8(res.error().message().c_str()));
