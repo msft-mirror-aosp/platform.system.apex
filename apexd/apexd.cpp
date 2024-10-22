@@ -2256,13 +2256,6 @@ int OnBootstrap() {
     }
   }
 
-  // Create directories for APEX shared libraries.
-  auto sharedlibs_apex_dir = CreateSharedLibsApexDir();
-  if (!sharedlibs_apex_dir.ok()) {
-    LOG(ERROR) << sharedlibs_apex_dir.error();
-    return 1;
-  }
-
   // Now activate bootstrap apexes.
   auto ret =
       ActivateApexPackages(bootstrap_apexes, ActivationMode::kBootstrapMode);
