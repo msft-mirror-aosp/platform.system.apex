@@ -4990,6 +4990,27 @@ TEST_F(ApexdMountTest, SubmitSingleStagedSessionKeepsPreviousSessions) {
   ASSERT_EQ(SessionState::VERIFIED, sessions[3].GetState());
 }
 
+TEST(Loop, CreateWithApexFile) {
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(apex, Ok());
+  ASSERT_TRUE(apex->GetImageOffset().has_value());
+  ASSERT_TRUE(apex->GetImageSize().has_value());
+
+  auto loop = loop::CreateAndConfigureLoopDevice(apex->GetPath(),
+                                                 apex->GetImageOffset().value(),
+                                                 apex->GetImageSize().value());
+  ASSERT_THAT(loop, Ok());
+}
+
+TEST(Loop, NoSuchFile) {
+  CaptureStderr();
+  {
+    auto loop = loop::CreateAndConfigureLoopDevice("invalid_path", 0, 0);
+    ASSERT_THAT(loop, Not(Ok()));
+  }
+  ASSERT_EQ(GetCapturedStderr(), "");
+}
+
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
   void OnTestStart(const ::testing::TestInfo& test_info) override {
 #ifdef __ANDROID__
