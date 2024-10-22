@@ -1445,15 +1445,6 @@ Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
   }
   worker_num = std::min(apex_queue.size(), worker_num);
 
-  // On -eng builds there might be two different pre-installed art apexes.
-  // Attempting to activate them in parallel will result in UB (e.g.
-  // apexd-bootstrap might crash). In order to avoid this, for the time being on
-  // -eng builds activate apexes sequentially.
-  // TODO(b/176497601): remove this.
-  if (GetProperty("ro.build.type", "") == "eng") {
-    worker_num = 1;
-  }
-
   std::vector<std::future<std::vector<Result<const ApexFile*>>>> futures;
   futures.reserve(worker_num);
   for (size_t i = 0; i < worker_num; i++) {
@@ -2225,17 +2216,6 @@ int OnBootstrap() {
   LOG(INFO) << "Need to pre-allocate " << loop_device_cnt
             << " loop devices for " << pre_installed_apexes.size()
             << " APEX packages";
-  // TODO(b/209491448) Remove this.
-  auto block_count = AddBlockApex(instance);
-  if (!block_count.ok()) {
-    LOG(ERROR) << status.error();
-    return 1;
-  }
-  if (*block_count > 0) {
-    LOG(INFO) << "Also need to pre-allocate " << *block_count
-              << " loop devices for block APEXes";
-    loop_device_cnt += *block_count;
-  }
   if (auto res = loop::PreAllocateLoopDevices(loop_device_cnt); !res.ok()) {
     LOG(ERROR) << "Failed to pre-allocate loop devices : " << res.error();
   }
@@ -2313,12 +2293,6 @@ void Initialize(CheckpointInterface* checkpoint_service) {
   if (!status.ok()) {
     LOG(ERROR) << "Failed to collect pre-installed APEX files : "
                << status.error();
-    return;
-  }
-
-  // TODO(b/209491448) Remove this.
-  if (auto block_status = AddBlockApex(instance); !block_status.ok()) {
-    LOG(ERROR) << status.error();
     return;
   }
 
