@@ -218,9 +218,6 @@ android::apex::MountedApexDatabase& GetApexDatabaseForTesting();
 android::base::Result<ApexFile> InstallPackage(const std::string& package_path,
                                                bool force);
 
-// Exposed for testing.
-android::base::Result<int> AddBlockApex(ApexFileRepository& instance);
-
 bool IsActiveApexChanged(const ApexFile& apex);
 
 // Shouldn't be used outside of apexd_test.cpp
