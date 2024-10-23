@@ -108,8 +108,6 @@ class ApexService : public BnApexService {
       int user_id, const std::vector<int>& retain_rollback_ids) override;
   BinderStatus recollectPreinstalledData(
       const std::vector<std::string>& paths) override;
-  BinderStatus recollectDataApex(const std::string& path,
-                                 const std::string& decompression_dir) override;
   BinderStatus markBootCompleted() override;
   BinderStatus calculateSizeForCompressedApex(
       const CompressedApexInfoList& compressed_apex_info_list,
@@ -366,17 +364,7 @@ static ApexInfo GetApexInfo(const ApexFile& package) {
   Result<std::string> preinstalled_path =
       instance.GetPreinstalledPath(package.GetManifest().name());
   if (preinstalled_path.ok()) {
-    // We replace the preinstalled paths for block devices to /system/apex
-    // because PackageManager will not resolve them if they aren't in one of
-    // the SYSTEM_PARTITIONS defined in PackagePartitions.java.
-    // b/195363518 for more context.
-    const std::string block_path = "/dev/block/";
-    const std::string sys_apex_path =
-        std::string(kApexPackageSystemDir) + "/" +
-        preinstalled_path->substr(block_path.length());
-    out.preinstalledModulePath = preinstalled_path->starts_with(block_path)
-                                     ? sys_apex_path
-                                     : *preinstalled_path;
+    out.preinstalledModulePath = *preinstalled_path;
   }
   out.activeApexChanged = ::android::apex::IsActiveApexChanged(package);
   return out;
@@ -740,26 +728,6 @@ BinderStatus ApexService::recollectPreinstalledData(
   }
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
   if (auto res = instance.AddPreInstalledApex(paths); !res.ok()) {
-    return BinderStatus::fromExceptionCode(
-        BinderStatus::EX_SERVICE_SPECIFIC,
-        String8(res.error().message().c_str()));
-  }
-  return BinderStatus::ok();
-}
-
-BinderStatus ApexService::recollectDataApex(
-    const std::string& path, const std::string& decompression_dir) {
-  LOG(INFO) << "recollectDataApex() received by ApexService, paths " << path
-            << " and " << decompression_dir;
-
-  if (auto debug = CheckDebuggable("recollectDataApex"); !debug.isOk()) {
-    return debug;
-  }
-  if (auto root = CheckCallerIsRoot("recollectDataApex"); !root.isOk()) {
-    return root;
-  }
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  if (auto res = instance.AddDataApex(path); !res.ok()) {
     return BinderStatus::fromExceptionCode(
         BinderStatus::EX_SERVICE_SPECIFIC,
         String8(res.error().message().c_str()));
