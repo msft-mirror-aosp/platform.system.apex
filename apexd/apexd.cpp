@@ -39,7 +39,6 @@
 #include <linux/f2fs.h>
 #include <linux/loop.h>
 #include <selinux/android.h>
-#include <statssocket_lazy.h>
 #include <stdlib.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
@@ -49,7 +48,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <utils/Trace.h>
-#include <vintf/VintfObject.h>
 
 #include <algorithm>
 #include <array>
@@ -80,8 +78,10 @@
 #include "apex_sha.h"
 #include "apex_shim.h"
 #include "apexd_checkpoint.h"
+#include "apexd_dm.h"
 #include "apexd_lifecycle.h"
 #include "apexd_loop.h"
+#include "apexd_metrics.h"
 #include "apexd_private.h"
 #include "apexd_rollback_utils.h"
 #include "apexd_session.h"
@@ -89,7 +89,6 @@
 #include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
 #include "com_android_apex.h"
-#include "statslog_apex.h"
 
 using android::base::boot_clock;
 using android::base::ConsumePrefix;
@@ -116,6 +115,8 @@ namespace android {
 namespace apex {
 
 using MountedApexData = MountedApexDatabase::MountedApexData;
+Result<std::vector<ApexFile>> OpenSessionApexFiles(
+    int session_id, const std::vector<int>& child_session_ids);
 
 namespace {
 
@@ -148,7 +149,8 @@ std::set<std::string> gChangedActiveApexes;
 
 static constexpr size_t kLoopDeviceSetupAttempts = 3u;
 
-// Please DO NOT add new modules to this list without contacting mainline-modularization@ first.
+// Please DO NOT add new modules to this list without contacting
+// mainline-modularization@ first.
 static const std::vector<std::string> kBootstrapApexes = ([]() {
   std::vector<std::string> ret = {
       "com.android.i18n",
@@ -243,127 +245,7 @@ std::unique_ptr<DmTable> CreateVerityTable(const ApexVerityData& verity_data,
   table->set_readonly(true);
 
   return table;
-}
-
-// Deletes a dm-verity device with a given name and path
-// Synchronizes on the device actually being deleted from userspace.
-Result<void> DeleteVerityDevice(const std::string& name, bool deferred) {
-  DeviceMapper& dm = DeviceMapper::Instance();
-  if (deferred) {
-    if (!dm.DeleteDeviceDeferred(name)) {
-      return ErrnoError() << "Failed to issue deferred delete of verity device "
-                          << name;
-    }
-    return {};
-  }
-  auto timeout = std::chrono::milliseconds(
-      android::sysprop::ApexProperties::dm_delete_timeout().value_or(750));
-  if (!dm.DeleteDevice(name, timeout)) {
-    return Error() << "Failed to delete dm-device " << name;
-  }
-  return {};
-}
-
-class DmVerityDevice {
- public:
-  DmVerityDevice() : cleared_(true) {}
-  explicit DmVerityDevice(std::string name)
-      : name_(std::move(name)), cleared_(false) {}
-  DmVerityDevice(std::string name, std::string dev_path)
-      : name_(std::move(name)),
-        dev_path_(std::move(dev_path)),
-        cleared_(false) {}
-
-  DmVerityDevice(DmVerityDevice&& other) noexcept
-      : name_(std::move(other.name_)),
-        dev_path_(std::move(other.dev_path_)),
-        cleared_(other.cleared_) {
-    other.cleared_ = true;
-  }
-
-  DmVerityDevice& operator=(DmVerityDevice&& other) noexcept {
-    name_ = other.name_;
-    dev_path_ = other.dev_path_;
-    cleared_ = other.cleared_;
-    other.cleared_ = true;
-    return *this;
-  }
-
-  ~DmVerityDevice() {
-    if (!cleared_) {
-      Result<void> ret = DeleteVerityDevice(name_, /* deferred= */ false);
-      if (!ret.ok()) {
-        LOG(ERROR) << ret.error();
-      }
-    }
-  }
-
-  const std::string& GetName() const { return name_; }
-  const std::string& GetDevPath() const { return dev_path_; }
-
-  void Release() { cleared_ = true; }
-
- private:
-  std::string name_;
-  std::string dev_path_;
-  bool cleared_;
 };
-
-Result<DmVerityDevice> CreateVerityDevice(
-    DeviceMapper& dm, const std::string& name, const DmTable& table,
-    const std::chrono::milliseconds& timeout) {
-  std::string dev_path;
-  if (!dm.CreateDevice(name, table, &dev_path, timeout)) {
-    return Errorf("Couldn't create verity device.");
-  }
-  return DmVerityDevice(name, dev_path);
-}
-
-Result<DmVerityDevice> CreateVerityDevice(const std::string& name,
-                                          const DmTable& table,
-                                          bool reuse_device) {
-  ATRACE_NAME("CreateVerityDevice");
-  LOG(VERBOSE) << "Creating verity device " << name;
-  auto timeout = std::chrono::milliseconds(
-      android::sysprop::ApexProperties::dm_create_timeout().value_or(1000));
-
-  DeviceMapper& dm = DeviceMapper::Instance();
-
-  auto state = dm.GetState(name);
-  if (state == DmDeviceState::INVALID) {
-    return CreateVerityDevice(dm, name, table, timeout);
-  }
-
-  if (reuse_device) {
-    if (state == DmDeviceState::ACTIVE) {
-      LOG(WARNING) << "Deleting existing active dm device " << name;
-      if (auto r = DeleteVerityDevice(name, /* deferred= */ false); !r.ok()) {
-        return r.error();
-      }
-      return CreateVerityDevice(dm, name, table, timeout);
-    }
-    if (!dm.LoadTableAndActivate(name, table)) {
-      dm.DeleteDevice(name);
-      return Error() << "Failed to activate dm device " << name;
-    }
-    std::string path;
-    if (!dm.WaitForDevice(name, timeout, &path)) {
-      dm.DeleteDevice(name);
-      return Error() << "Failed waiting for dm device " << name;
-    }
-    return DmVerityDevice(name, path);
-  } else {
-    if (state != DmDeviceState::INVALID) {
-      // Delete dangling dm-device. This can happen if apexd fails to delete it
-      // while unmounting an apex.
-      LOG(WARNING) << "Deleting existing dm device " << name;
-      if (auto r = DeleteVerityDevice(name, /* deferred= */ false); !r.ok()) {
-        return r.error();
-      }
-    }
-    return CreateVerityDevice(dm, name, table, timeout);
-  }
-}
 
 /**
  * When we create hardlink for a new apex package in kActiveApexPackagesDataDir,
@@ -461,8 +343,7 @@ Result<void> VerifyMountedImage(const ApexFile& apex,
 Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                          const std::string& mount_point,
                                          const std::string& device_name,
-                                         bool verify_image, bool reuse_device,
-                                         bool temp_mount = false) {
+                                         bool verify_image, bool reuse_device) {
   auto tag = "MountPackageImpl: " + apex.GetManifest().name();
   ATRACE_NAME(tag.c_str());
   if (apex.IsCompressed()) {
@@ -545,8 +426,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   std::string block_device = loopback_device.name;
   MountedApexData apex_data(apex.GetManifest().version(), loopback_device.name,
                             apex.GetPath(), mount_point,
-                            /* device_name = */ "",
-                            /* is_temp_mount */ temp_mount);
+                            /* device_name = */ "");
 
   // for APEXes in immutable partitions, we don't need to mount them on
   // dm-verity because they are already in the dm-verity protected partition;
@@ -558,13 +438,13 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                // block apexes are from host
                                instance.IsBlockApex(apex);
 
-  DmVerityDevice verity_dev;
+  DmDevice verity_dev;
   if (mount_on_verity) {
     auto verity_table =
         CreateVerityTable(*verity_data, loopback_device.name,
                           /* restart_on_corruption = */ !verify_image);
-    Result<DmVerityDevice> verity_dev_res =
-        CreateVerityDevice(device_name, *verity_table, reuse_device);
+    Result<DmDevice> verity_dev_res =
+        CreateDmDevice(device_name, *verity_table, reuse_device);
     if (!verity_dev_res.ok()) {
       return Error() << "Failed to create Apex Verity device " << full_path
                      << ": " << verity_dev_res.error();
@@ -599,7 +479,8 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   if (mount(block_device.c_str(), mount_point.c_str(),
             apex.GetFsType().value().c_str(), mount_flags, nullptr) == 0) {
     auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        boot_clock::now() - time_started).count();
+                            boot_clock::now() - time_started)
+                            .count();
     LOG(INFO) << "Successfully mounted package " << full_path << " on "
               << mount_point << " duration=" << time_elapsed;
     auto status = VerifyMountedImage(apex, mount_point);
@@ -621,23 +502,6 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   }
 }
 
-Result<MountedApexData> VerifyAndTempMountPackage(
-    const ApexFile& apex, const std::string& mount_point) {
-  const std::string& package_id = GetPackageId(apex.GetManifest());
-  LOG(DEBUG) << "Temp mounting " << package_id << " to " << mount_point;
-  const std::string& temp_device_name = package_id + ".tmp";
-  auto ret =
-      MountPackageImpl(apex, mount_point, temp_device_name,
-                       /* verify_image = */ true, /* reuse_device= */ false,
-                       /* temp_mount = */ true);
-  if (!ret.ok()) {
-    return ret.error();
-  }
-
-  gMountedApexes.AddMountedApex(apex.GetManifest().name(), *ret);
-  return *ret;
-}
-
 }  // namespace
 
 Result<void> Unmount(const MountedApexData& data, bool deferred) {
@@ -657,7 +521,7 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
 
   // Try to free up the device-mapper device.
   if (!data.device_name.empty()) {
-    const auto& result = DeleteVerityDevice(data.device_name, deferred);
+    const auto& result = DeleteDmDevice(data.device_name, deferred);
     if (!result.ok()) {
       return result;
     }
@@ -682,100 +546,48 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
 
 namespace {
 
-void SendApexInstallationRequestedAtom(const std::string& package_path,
-                                       const bool is_rollback,
-                                       const unsigned int install_type) {
-  if (!statssocket::lazy::IsAvailable()) {
-    LOG(WARNING) << "Unable to send Apex Atom; libstatssocket is not available";
-    return;
-  }
-  auto apex_file = ApexFile::Open(package_path);
-  if (!apex_file.ok()) {
-    LOG(WARNING) << "Unable to send Apex Atom; Failed to open ApexFile "
-                 << package_path << ": " << apex_file.error();
-    return;
-  }
-  const std::string& module_name = apex_file->GetManifest().name();
-  struct stat stat_buf;
-  intmax_t apex_file_size;
-  if (stat(package_path.c_str(), &stat_buf) == 0) {
-    apex_file_size = stat_buf.st_size;
-  } else {
-    PLOG(WARNING) << "Failed to stat " << package_path;
-    apex_file_size = 0;
-  }
-  Result<std::string> apex_file_sha256_str = CalculateSha256(package_path);
-  if (!apex_file_sha256_str.ok()) {
-    LOG(WARNING) << "Unable to get sha256 of ApexFile: "
-                 << apex_file_sha256_str.error();
-  }
-  const std::vector<const char*> hal_cstr_list;
-  int ret = stats::apex::stats_write(
-      stats::apex::APEX_INSTALLATION_REQUESTED, module_name.c_str(),
-      apex_file->GetManifest().version(), apex_file_size,
-      apex_file_sha256_str->c_str(), GetPreinstallPartitionEnum(*apex_file),
-      install_type, is_rollback,
-      apex_file->GetManifest().providesharedapexlibs(), hal_cstr_list);
-  if (ret < 0) {
-    LOG(WARNING) << "Failed to report apex_installation_requested stats";
-  }
-}
-
-void SendApexInstallationEndedAtom(const std::string& package_path,
-                                   int install_result) {
-  if (!statssocket::lazy::IsAvailable()) {
-    LOG(WARNING) << "Unable to send Apex Atom; libstatssocket is not available";
-    return;
-  }
-  Result<std::string> apex_file_sha256_str = CalculateSha256(package_path);
-  if (!apex_file_sha256_str.ok()) {
-    LOG(WARNING) << "Unable to get sha256 of ApexFile: "
-                 << apex_file_sha256_str.error();
-  }
-  int ret =
-      stats::apex::stats_write(stats::apex::APEX_INSTALLATION_ENDED,
-                               apex_file_sha256_str->c_str(), install_result);
-  if (ret < 0) {
-    LOG(WARNING) << "Failed to report apex_installation_ended stats";
-  }
-}
-
-template <typename VerifyFn>
-Result<void> RunVerifyFnInsideTempMount(const ApexFile& apex,
-                                        const VerifyFn& verify_fn,
-                                        bool unmount_during_cleanup) {
-  // Temp mount image of this apex to validate it was properly signed;
-  // this will also read the entire block device through dm-verity, so
-  // we can be sure there is no corruption.
-  const std::string& temp_mount_point =
-      apexd_private::GetPackageTempMountPoint(apex.GetManifest());
-
-  Result<MountedApexData> mount_status =
-      VerifyAndTempMountPackage(apex, temp_mount_point);
-  if (!mount_status.ok()) {
-    LOG(ERROR) << "Failed to temp mount to " << temp_mount_point << " : "
-               << mount_status.error();
-    return mount_status.error();
-  }
-  auto cleaner = [&]() {
-    LOG(DEBUG) << "Unmounting " << temp_mount_point;
-    Result<void> result = Unmount(*mount_status, /* deferred= */ false);
-    if (!result.ok()) {
-      LOG(WARNING) << "Failed to unmount " << temp_mount_point << " : "
-                   << result.error();
+auto RunVerifyFnInsideTempMounts(std::span<const ApexFile> apex_files,
+                                 auto verify_fn)
+    -> decltype(verify_fn(std::vector<std::string>{})) {
+  // Temp mounts will be cleaned up on exit.
+  std::vector<MountedApexData> mounted_data;
+  auto guard = android::base::make_scope_guard([&]() {
+    for (const auto& data : mounted_data) {
+      if (auto result = Unmount(data, /*deferred=*/false); !result.ok()) {
+        LOG(WARNING) << "Failed to unmount " << data.mount_point << ": "
+                     << result.error();
+      }
     }
-    gMountedApexes.RemoveMountedApex(apex.GetManifest().name(), apex.GetPath(),
-                                     true);
-  };
-  auto scope_guard = android::base::make_scope_guard(cleaner);
-  auto result = verify_fn(temp_mount_point);
-  if (!result.ok()) {
-    return result.error();
+  });
+
+  // Temp mounts all apexes.
+  // This will also read the entire block device for each apex,
+  // so we can be sure there is no corruption.
+  std::vector<std::string> mount_points;
+  for (const auto& apex : apex_files) {
+    auto mount_point =
+        apexd_private::GetPackageTempMountPoint(apex.GetManifest());
+    auto package_id = GetPackageId(apex.GetManifest());
+    auto device_name = package_id + ".tmp";
+
+    LOG(DEBUG) << "Temp mounting " << package_id << " to " << mount_point;
+    auto data = OR_RETURN(MountPackageImpl(apex, mount_point, device_name,
+                                           /*verify_image=*/true,
+                                           /*reuse_device=*/false));
+    mount_points.push_back(mount_point);
+    mounted_data.push_back(data);
   }
-  if (!unmount_during_cleanup) {
-    scope_guard.Disable();
-  }
-  return {};
+
+  // Invoke fn with mount_points.
+  return verify_fn(mount_points);
+}
+
+// Singluar variant of RunVerifyFnInsideTempMounts for convenience
+auto RunVerifyFnInsideTempMount(const ApexFile& apex, auto verify_fn)
+    -> decltype(verify_fn(std::string{})) {
+  return RunVerifyFnInsideTempMounts(
+      Single(apex),
+      [&](const auto& mount_points) { return verify_fn(mount_points[0]); });
 }
 
 // Converts a list of apex file paths into a list of ApexFile objects
@@ -807,7 +619,7 @@ Result<void> ValidateStagingShimApex(const ApexFile& to) {
   auto verify_fn = [&](const std::string& system_apex_path) {
     return shim::ValidateUpdate(system_apex_path, to.GetPath());
   };
-  return RunVerifyFnInsideTempMount(*system_shim, verify_fn, true);
+  return RunVerifyFnInsideTempMount(*system_shim, verify_fn);
 }
 
 Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
@@ -823,9 +635,8 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
   const auto& instance = ApexFileRepository::GetInstance();
   const auto& preinstalled =
       instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& preinstalled_path = preinstalled.get().GetPath();
-  if (StartsWith(preinstalled_path, "/vendor/apex/") ||
-      StartsWith(preinstalled_path, "/system/vendor/apex/")) {
+  const auto& path = preinstalled.get().GetPath();
+  if (InVendorPartition(path) || InOdmPartition(path)) {
     if (vndk_version != vendor_vndk_version) {
       return Error() << "vndkVersion(" << vndk_version
                      << ") doesn't match with device VNDK version("
@@ -833,8 +644,8 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
     }
     return {};
   }
-  if (StartsWith(preinstalled_path, "/product/apex/") ||
-      StartsWith(preinstalled_path, "/system/product/apex/")) {
+  if (StartsWith(path, "/product/apex/") ||
+      StartsWith(path, "/system/product/apex/")) {
     if (vndk_version != product_vndk_version) {
       return Error() << "vndkVersion(" << vndk_version
                      << ") doesn't match with device VNDK version("
@@ -881,62 +692,41 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
 // This function contains checks that might be expensive to perform, e.g. temp
 // mounting a package and reading entire dm-verity device, and shouldn't be run
 // during boot.
-Result<void> VerifyPackageStagedInstall(const ApexFile& apex_file) {
-  const auto& verify_package_boot_status = VerifyPackageBoot(apex_file);
-  if (!verify_package_boot_status.ok()) {
-    return verify_package_boot_status;
+Result<void> VerifyPackagesStagedInstall(
+    const std::vector<ApexFile>& apex_files) {
+  for (const auto& apex_file : apex_files) {
+    OR_RETURN(VerifyPackageBoot(apex_file));
   }
 
-  const auto validate_fn = [&apex_file](const std::string& mount_point) {
-    if (IsVendorApex(apex_file)) {
-      return CheckVendorApexUpdate(apex_file, mount_point);
+  // Since there can be multiple staged sessions, let's verify incoming APEXes
+  // with all staged apexes mounted.
+  std::vector<ApexFile> all_apex_files;
+  for (const auto& session :
+       gSessionManager->GetSessionsInState(SessionState::STAGED)) {
+    auto session_id = session.GetId();
+    auto child_session_ids = session.GetChildSessionIds();
+    auto staged_apex_files = OpenSessionApexFiles(
+        session_id, {child_session_ids.begin(), child_session_ids.end()});
+    if (staged_apex_files.ok()) {
+      std::ranges::move(*staged_apex_files, std::back_inserter(all_apex_files));
+    } else {
+      // Let's not abort with a previously staged session
+      LOG(ERROR) << "Failed to open previously staged APEX files: "
+                 << staged_apex_files.error();
     }
-    return Result<void>{};
+  }
+
+  // + incoming APEXes at the end.
+  for (const auto& apex_file : apex_files) {
+    all_apex_files.push_back(apex_file);
+  }
+
+  auto check_fn =
+      [&](const std::vector<std::string>& mount_points) -> Result<void> {
+    OR_RETURN(CheckVintf(all_apex_files, mount_points));
+    return {};
   };
-  return RunVerifyFnInsideTempMount(apex_file, validate_fn, false);
-}
-
-template <typename VerifyApexFn>
-Result<std::vector<ApexFile>> VerifyPackages(
-    const std::vector<std::string>& paths, const VerifyApexFn& verify_apex_fn) {
-  Result<std::vector<ApexFile>> apex_files = OpenApexFiles(paths);
-  if (!apex_files.ok()) {
-    return apex_files.error();
-  }
-
-  LOG(DEBUG) << "VerifyPackages() for " << Join(paths, ',');
-
-  for (const ApexFile& apex_file : *apex_files) {
-    Result<void> result = verify_apex_fn(apex_file);
-    if (!result.ok()) {
-      return result.error();
-    }
-  }
-  return std::move(*apex_files);
-}
-
-Result<ApexFile> VerifySessionDir(int session_id) {
-  std::string session_dir_path =
-      StringPrintf("%s/session_%d", gConfig->staged_session_dir, session_id);
-  LOG(INFO) << "Scanning " << session_dir_path
-            << " looking for packages to be validated";
-  Result<std::vector<std::string>> scan =
-      FindFilesBySuffix(session_dir_path, {kApexPackageSuffix});
-  if (!scan.ok()) {
-    LOG(WARNING) << scan.error();
-    return scan.error();
-  }
-
-  if (scan->size() > 1) {
-    return Errorf(
-        "More than one APEX package found in the same session directory.");
-  }
-
-  auto verified = VerifyPackages(*scan, VerifyPackageStagedInstall);
-  if (!verified.ok()) {
-    return verified.error();
-  }
-  return std::move((*verified)[0]);
+  return RunVerifyFnInsideTempMounts(all_apex_files, check_fn);
 }
 
 Result<void> DeleteBackup() {
@@ -1110,11 +900,9 @@ Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
 void SetConfig(const ApexdConfig& config) { gConfig = config; }
 
 Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
-                          const std::string& device_name, bool reuse_device,
-                          bool temp_mount) {
-  auto ret =
-      MountPackageImpl(apex, mount_point, device_name,
-                       /* verify_image = */ false, reuse_device, temp_mount);
+                          const std::string& device_name, bool reuse_device) {
+  auto ret = MountPackageImpl(apex, mount_point, device_name,
+                              /* verify_image = */ false, reuse_device);
   if (!ret.ok()) {
     return ret.error();
   }
@@ -1124,43 +912,6 @@ Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
 }
 
 namespace apexd_private {
-
-Result<void> UnmountTempMount(const ApexFile& apex) {
-  const ApexManifest& manifest = apex.GetManifest();
-  LOG(VERBOSE) << "Unmounting all temp mounts for package " << manifest.name();
-
-  bool finished_unmounting = false;
-  // If multiple temp mounts exist, ensure that all are unmounted.
-  while (!finished_unmounting) {
-    Result<MountedApexData> data =
-        apexd_private::GetTempMountedApexData(manifest.name());
-    if (!data.ok()) {
-      finished_unmounting = true;
-    } else {
-      gMountedApexes.RemoveMountedApex(manifest.name(), data->full_path, true);
-      Unmount(*data, /* deferred= */ false);
-    }
-  }
-  return {};
-}
-
-Result<MountedApexData> GetTempMountedApexData(const std::string& package) {
-  bool found = false;
-  Result<MountedApexData> mount_data;
-  gMountedApexes.ForallMountedApexes(
-      package,
-      [&](const MountedApexData& data, [[maybe_unused]] bool latest) {
-        if (!found) {
-          mount_data = data;
-          found = true;
-        }
-      },
-      true);
-  if (found) {
-    return mount_data;
-  }
-  return Error() << "No temp mount data found for " << package;
-}
 
 bool IsMounted(const std::string& full_path) {
   bool found_mounted = false;
@@ -1375,8 +1126,8 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file,
       apexd_private::GetPackageMountPoint(manifest);
 
   if (!version_found_mounted) {
-    auto mount_status = MountPackage(apex_file, mount_point, device_name,
-                                     reuse_device, /*temp_mount=*/false);
+    auto mount_status =
+        MountPackage(apex_file, mount_point, device_name, reuse_device);
     if (!mount_status.ok()) {
       return mount_status;
     }
@@ -1428,18 +1179,8 @@ Result<void> DeactivatePackage(const std::string& full_path) {
                         /* deferred= */ false, /* detach_mount_point= */ false);
 }
 
-Result<std::vector<ApexFile>> GetStagedApexFiles(
+Result<std::vector<ApexFile>> OpenSessionApexFiles(
     int session_id, const std::vector<int>& child_session_ids) {
-  auto session = gSessionManager->GetSession(session_id);
-  if (!session.ok()) {
-    return session.error();
-  }
-  // We should only accept sessions in SessionState::STAGED state
-  auto session_state = (*session).GetState();
-  if (session_state != SessionState::STAGED) {
-    return Error() << "Session " << session_id << " is not in state STAGED";
-  }
-
   std::vector<int> ids_to_scan;
   if (!child_session_ids.empty()) {
     ids_to_scan = child_session_ids;
@@ -1468,32 +1209,23 @@ Result<std::vector<ApexFile>> GetStagedApexFiles(
   return OpenApexFiles(apex_file_paths);
 }
 
-Result<ClassPath> MountAndDeriveClassPath(
-    const std::vector<ApexFile>& apex_files) {
-  auto guard = android::base::make_scope_guard([&]() {
-    for (const auto& apex : apex_files) {
-      apexd_private::UnmountTempMount(apex);
-    }
-  });
-
-  // Mount the staged apex files
-  std::vector<std::string> temp_mounted_apex_paths;
-  for (const auto& apex : apex_files) {
-    const std::string& temp_mount_point =
-        apexd_private::GetPackageTempMountPoint(apex.GetManifest());
-    const std::string& package_id = GetPackageId(apex.GetManifest());
-    const std::string& temp_device_name = package_id + ".tmp";
-    auto mount_status =
-        MountPackage(apex, temp_mount_point, temp_device_name,
-                     /*reuse_device=*/false, /*temp_mount=*/true);
-    if (!mount_status.ok()) {
-      return mount_status.error();
-    }
-    temp_mounted_apex_paths.push_back(temp_mount_point);
+Result<std::vector<ApexFile>> GetStagedApexFiles(
+    int session_id, const std::vector<int>& child_session_ids) {
+  // We should only accept sessions in SessionState::STAGED state
+  auto session = OR_RETURN(gSessionManager->GetSession(session_id));
+  if (session.GetState() != SessionState::STAGED) {
+    return Error() << "Session " << session_id << " is not in state STAGED";
   }
 
+  return OpenSessionApexFiles(session_id, child_session_ids);
+}
+
+Result<ClassPath> MountAndDeriveClassPath(
+    const std::vector<ApexFile>& apex_files) {
   // Calculate classpaths of temp mounted staged apexs
-  return ClassPath::DeriveClassPath(temp_mounted_apex_paths);
+  return RunVerifyFnInsideTempMounts(apex_files, [](const auto& mount_points) {
+    return ClassPath::DeriveClassPath(mount_points);
+  });
 }
 
 std::vector<ApexFile> GetActivePackages() {
@@ -1712,15 +1444,6 @@ Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
     worker_num = apex_queue.size();
   }
   worker_num = std::min(apex_queue.size(), worker_num);
-
-  // On -eng builds there might be two different pre-installed art apexes.
-  // Attempting to activate them in parallel will result in UB (e.g.
-  // apexd-bootstrap might crash). In order to avoid this, for the time being on
-  // -eng builds activate apexes sequentially.
-  // TODO(b/176497601): remove this.
-  if (GetProperty("ro.build.type", "") == "eng") {
-    worker_num = 1;
-  }
 
   std::vector<std::future<std::vector<Result<const ApexFile*>>>> futures;
   futures.reserve(worker_num);
@@ -2088,9 +1811,7 @@ void DeleteDePreRestoreSnapshots(const ApexSession& session) {
   }
 }
 
-void OnBootCompleted() {
-  ApexdLifecycle::GetInstance().MarkBootCompleted();
-}
+void OnBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
 
 // Returns true if any session gets staged
 void ScanStagedSessionsDirAndStage() {
@@ -2230,11 +1951,11 @@ std::string StageDestPath(const ApexFile& apex_file) {
 
 }  // namespace
 
-Result<void> StagePackages(const std::vector<std::string>& tmp_paths) {
+Result<void> StagePackagesImpl(const std::vector<std::string>& tmp_paths) {
   if (tmp_paths.empty()) {
     return Errorf("Empty set of inputs");
   }
-  LOG(DEBUG) << "StagePackages() for " << Join(tmp_paths, ',');
+  LOG(DEBUG) << "StagePackagesImpl() for " << Join(tmp_paths, ',');
 
   // Note: this function is temporary. As such the code is not optimized, e.g.,
   //       it will open ApexFiles multiple times.
@@ -2300,6 +2021,14 @@ Result<void> StagePackages(const std::vector<std::string>& tmp_paths) {
   scope_guard.Disable();  // Accept the state.
 
   return RemovePreviouslyActiveApexFiles(staged_packages, staged_files);
+}
+
+Result<void> StagePackages(const std::vector<std::string>& tmp_paths) {
+  Result<void> ret = StagePackagesImpl(tmp_paths);
+  if (!ret.ok()) {
+    ;  // TODO(b/366068337, Queue atoms)
+  }
+  return ret;
 }
 
 Result<void> UnstagePackages(const std::vector<std::string>& paths) {
@@ -2487,17 +2216,6 @@ int OnBootstrap() {
   LOG(INFO) << "Need to pre-allocate " << loop_device_cnt
             << " loop devices for " << pre_installed_apexes.size()
             << " APEX packages";
-  // TODO(b/209491448) Remove this.
-  auto block_count = AddBlockApex(instance);
-  if (!block_count.ok()) {
-    LOG(ERROR) << status.error();
-    return 1;
-  }
-  if (*block_count > 0) {
-    LOG(INFO) << "Also need to pre-allocate " << *block_count
-              << " loop devices for block APEXes";
-    loop_device_cnt += *block_count;
-  }
   if (auto res = loop::PreAllocateLoopDevices(loop_device_cnt); !res.ok()) {
     LOG(ERROR) << "Failed to pre-allocate loop devices : " << res.error();
   }
@@ -2518,13 +2236,6 @@ int OnBootstrap() {
     }
   }
 
-  // Create directories for APEX shared libraries.
-  auto sharedlibs_apex_dir = CreateSharedLibsApexDir();
-  if (!sharedlibs_apex_dir.ok()) {
-    LOG(ERROR) << sharedlibs_apex_dir.error();
-    return 1;
-  }
-
   // Now activate bootstrap apexes.
   auto ret =
       ActivateApexPackages(bootstrap_apexes, ActivationMode::kBootstrapMode);
@@ -2535,7 +2246,8 @@ int OnBootstrap() {
 
   OnAllPackagesActivated(/*is_bootstrap=*/true);
   auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-    boot_clock::now() - time_started).count();
+                          boot_clock::now() - time_started)
+                          .count();
   LOG(INFO) << "OnBootstrap done, duration=" << time_elapsed;
   return 0;
 }
@@ -2581,12 +2293,6 @@ void Initialize(CheckpointInterface* checkpoint_service) {
   if (!status.ok()) {
     LOG(ERROR) << "Failed to collect pre-installed APEX files : "
                << status.error();
-    return;
-  }
-
-  // TODO(b/209491448) Remove this.
-  if (auto block_status = AddBlockApex(instance); !block_status.ok()) {
-    LOG(ERROR) << status.error();
     return;
   }
 
@@ -2898,8 +2604,8 @@ Result<void> ValidateDecompressedApex(const ApexFile& capex,
       capex.GetManifest().capexmetadata().originalapexdigest() !=
           apex_verity->root_digest) {
     return Error() << "Root digest of " << apex.GetPath()
-                   << " does not match with"
-                   << " expected root digest in " << capex.GetPath();
+                   << " does not match with" << " expected root digest in "
+                   << capex.GetPath();
   }
   return {};
 }
@@ -3002,7 +2708,8 @@ void OnStart() {
   SnapshotOrRestoreDeSysData();
 
   auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-    boot_clock::now() - time_started).count();
+                          boot_clock::now() - time_started)
+                          .count();
   LOG(INFO) << "OnStart done, duration=" << time_elapsed;
 }
 
@@ -3056,6 +2763,10 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   if (session_id == 0) {
     return Error() << "Session id was not provided.";
   }
+  if (has_rollback_enabled && is_rollback) {
+    return Error() << "Cannot set session " << session_id << " as both a"
+                   << " rollback and enabled for rollback.";
+  }
 
   if (!gSupportsFsCheckpoints) {
     Result<void> backup_status = BackupActivePackages();
@@ -3065,31 +2776,23 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     }
   }
 
-  std::vector<int> ids_to_scan;
-  if (!child_session_ids.empty()) {
-    ids_to_scan = child_session_ids;
-  } else {
-    ids_to_scan = {session_id};
-  }
+  auto ret = OR_RETURN(OpenSessionApexFiles(session_id, child_session_ids));
 
-  std::vector<ApexFile> ret;
+  for (const auto& apex : ret) {
+    SendApexInstallationRequestedAtom(apex.GetPath(), is_rollback,
+                                      InstallType::Staged);
+  }
   auto guard = android::base::make_scope_guard([&]() {
     for (const auto& apex : ret) {
-      apexd_private::UnmountTempMount(apex);
+      SendApexInstallationEndedAtom(apex.GetPath(), InstallResult::Failure);
     }
   });
-  for (int id_to_scan : ids_to_scan) {
-    auto verified = VerifySessionDir(id_to_scan);
-    if (!verified.ok()) {
-      return verified.error();
-    }
-    LOG(DEBUG) << verified->GetPath() << " is verified";
-    ret.push_back(std::move(*verified));
-  }
 
-  if (has_rollback_enabled && is_rollback) {
-    return Error() << "Cannot set session " << session_id << " as both a"
-                   << " rollback and enabled for rollback.";
+  OR_RETURN(VerifyPackagesStagedInstall(ret));
+
+  std::vector<std::string> file_hashes;
+  for (const auto& apex_file : ret) {
+    file_hashes.push_back(OR_RETURN(CalculateSha256(apex_file.GetPath())));
   }
 
   auto session = gSessionManager->CreateSession(session_id);
@@ -3105,6 +2808,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   for (const auto& apex_file : ret) {
     session->AddApexName(apex_file.GetManifest().name());
   }
+  session->SetApexFileHashes(file_hashes);
   Result<void> commit_status =
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {
@@ -3116,13 +2820,8 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     ReleaseF2fsCompressedBlocks(apex.GetPath());
   }
 
-  // The scope guard above uses lambda that captures ret by reference.
-  // Unfortunately, for the capture by-reference, lifetime of the captured
-  // reference ends together with the lifetime of the closure object. This means
-  // that we need to manually call UnmountTempMount here.
-  for (const auto& apex : ret) {
-    apexd_private::UnmountTempMount(apex);
-  }
+  // Disabling scope guard to stop Failure atoms from being sent
+  guard.Disable();
 
   return ret;
 }
@@ -3156,6 +2855,10 @@ Result<void> MarkStagedSessionSuccessful(const int session_id) {
   if (session->GetState() == SessionState::SUCCESS) {
     return {};
   } else if (session->GetState() == SessionState::ACTIVATED) {
+    // TODO: Handle activated apexes still unavailable to apexd at this time.
+    // This is because apexd is started before this activation with a linker
+    // configuration which doesn't know about statsd
+    SendSessionApexInstallationEndedAtom(*session, InstallResult::Success);
     auto cleanup_status = DeleteBackup();
     if (!cleanup_status.ok()) {
       return Error() << "Failed to mark session " << *session
@@ -3226,7 +2929,7 @@ void DeleteUnusedVerityDevices() {
     auto state = dm.GetState(dev.name());
     if (state == DmDeviceState::SUSPENDED && IsApexDevice(dev.name())) {
       LOG(INFO) << "Deleting unused dm device " << dev.name();
-      auto res = DeleteVerityDevice(dev.name(), /* deferred= */ false);
+      auto res = DeleteDmDevice(dev.name(), /* deferred= */ false);
       if (!res.ok()) {
         LOG(WARNING) << res.error();
       }
@@ -3235,17 +2938,7 @@ void DeleteUnusedVerityDevices() {
 }
 
 void BootCompletedCleanup() {
-  auto sessions = gSessionManager->GetSessions();
-  for (const ApexSession& session : sessions) {
-    if (!session.IsFinalized()) {
-      continue;
-    }
-    auto result = session.DeleteSession();
-    if (!result.ok()) {
-      LOG(WARNING) << "Failed to delete finalized session: " << session.GetId();
-    }
-  }
-
+  gSessionManager->DeleteFinalizedSessions();
   DeleteUnusedVerityDevices();
 }
 
@@ -3294,37 +2987,6 @@ int UnmountAll(bool also_include_staged_apexes) {
     }
   });
   return ret;
-}
-
-Result<void> RemountPackages() {
-  std::vector<std::string> apexes;
-  gMountedApexes.ForallMountedApexes([&apexes](const std::string& /*package*/,
-                                               const MountedApexData& data,
-                                               bool latest) {
-    if (latest) {
-      LOG(DEBUG) << "Found active APEX " << data.full_path;
-      apexes.push_back(data.full_path);
-    }
-  });
-  std::vector<std::string> failed;
-  for (const std::string& apex : apexes) {
-    // Since this is only used during development workflow, we are trying to
-    // remount as many apexes as possible instead of failing fast.
-    if (auto ret = RemountApexFile(apex); !ret.ok()) {
-      LOG(WARNING) << "Failed to remount " << apex << " : " << ret.error();
-      failed.emplace_back(apex);
-    }
-  }
-  static constexpr const char* kErrorMessage =
-      "Failed to remount following APEX packages, hence previous versions of "
-      "them are still active. If APEX you are developing is in this list, it "
-      "means that there still are alive processes holding a reference to the "
-      "previous version of your APEX.\n";
-  if (!failed.empty()) {
-    return Error() << kErrorMessage << "Failed (" << failed.size() << ") "
-                   << "APEX packages: [" << Join(failed, ',') << "]";
-  }
-  return {};
 }
 
 // Given a single new APEX incoming via OTA, should we allocate space for it?
@@ -3704,12 +3366,10 @@ Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file,
     if (access((mount_point + "/priv-app").c_str(), F_OK) == 0) {
       return Error() << apex_file.GetPath() << " contains priv-app inside";
     }
-    if (IsVendorApex(apex_file)) {
-      return CheckVendorApexUpdate(apex_file, mount_point);
-    }
+    OR_RETURN(CheckVintf(Single(apex_file), Single(mount_point)));
     return Result<void>{};
   };
-  return RunVerifyFnInsideTempMount(apex_file, check_fn, true);
+  return RunVerifyFnInsideTempMount(apex_file, check_fn);
 }
 
 Result<void> CheckSupportsNonStagedInstall(const ApexFile& new_apex,
@@ -3832,7 +3492,7 @@ Result<void> UnloadApexFromInit(const std::string& apex_name) {
     // When failed to SetProperty(), there's nothing we can do here.
     // Log error and return early to avoid indefinite waiting for ack.
     return Error() << "Failed to set " << kCtlApexUnloadSysprop << " to "
-                << apex_name;
+                   << apex_name;
   }
   SetProperty("apex." + apex_name + ".ready", "false");
   return {};
@@ -3844,7 +3504,7 @@ Result<void> LoadApexFromInit(const std::string& apex_name) {
     // When failed to SetProperty(), there's nothing we can do here.
     // Log error and return early to avoid indefinite waiting for ack.
     return Error() << "Failed to set " << kCtlApexLoadSysprop << " to "
-                << apex_name;
+                   << apex_name;
   }
   SetProperty("apex." + apex_name + ".ready", "true");
   return {};
@@ -3900,8 +3560,8 @@ Result<ApexFile> InstallPackageImpl(const std::string& package_path,
   // And then reload it from the init process whether it succeeds or not.
   auto reload_apex = android::base::make_scope_guard([&]() {
     if (auto status = LoadApexFromInit(module_name); !status.ok()) {
-      LOG(ERROR) << "Failed to load apex " << module_name
-                  << " : " << status.error().message();
+      LOG(ERROR) << "Failed to load apex " << module_name << " : "
+                 << status.error().message();
     }
   });
 
@@ -3976,18 +3636,12 @@ Result<ApexFile> InstallPackageImpl(const std::string& package_path,
 
 Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
   LOG(INFO) << "Installing " << package_path;
-  SendApexInstallationRequestedAtom(
-      package_path, /* is_rollback */ false,
-      stats::apex::APEX_INSTALLATION_REQUESTED__INSTALLATION_TYPE__REBOOTLESS);
+  SendApexInstallationRequestedAtom(package_path, /*is_rollback=*/false,
+                                    InstallType::NonStaged);
   // TODO: Add error-enums
   Result<ApexFile> ret = InstallPackageImpl(package_path, force);
   SendApexInstallationEndedAtom(
-      package_path,
-      ret.ok()
-          ? stats::apex::
-                APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_SUCCESSFUL
-          : stats::apex::
-                APEX_INSTALLATION_ENDED__INSTALLATION_RESULT__INSTALL_FAILURE_APEX_INSTALLATION);
+      package_path, ret.ok() ? InstallResult::Success : InstallResult::Failure);
   return ret;
 }
 
@@ -3999,6 +3653,8 @@ bool IsActiveApexChanged(const ApexFile& apex) {
 std::set<std::string>& GetChangedActiveApexesForTesting() {
   return gChangedActiveApexes;
 }
+
+ApexSessionManager* GetSessionManager() { return gSessionManager; }
 
 }  // namespace apex
 }  // namespace android
