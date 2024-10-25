@@ -87,6 +87,13 @@ message ApexManifest {
   // VNDK version for apexes depending on a specific version of VNDK libs.
   string vndkVersion = 14;
 
+  // Deprecated.
   // Whether this vendor APEX needs to be activated in bootstrap phase.
-  bool vendorBootstrap = 15;
+  // For new APEX, please use `bootstrap` instead.
+  // Vendor APEX become bootstrap APEX if either `vendorBootstrap`
+  // or `bootstrap` is set to true.
+  bool vendorBootstrap = 15 [ deprecated = true ];
+
+  // Whether this APEX needs to be activated in bootstrap phase.
+  bool bootstrap = 16;
 }
