@@ -43,7 +43,7 @@ sh_test_host {
     test_options: {
         unit_test: false,
     },
-    data: [
+    device_common_data: [
         ":com.android.libapexsupport.tests",
     ],
 }
