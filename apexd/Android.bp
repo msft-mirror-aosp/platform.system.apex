@@ -473,6 +473,7 @@ cc_test {
         "-Wno-used-but-marked-unused",
     ],
     data: [
+        ":apex.apexd_bootstrap_test",
         ":apex.apexd_test",
         ":apex.apexd_test_erofs",
         ":apex.apexd_test_f2fs",
