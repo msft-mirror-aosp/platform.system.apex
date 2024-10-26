@@ -289,7 +289,7 @@ cc_library_static {
     export_include_dirs: ["."],
 }
 
-genrule {
+java_genrule {
     // Generates an apex which has a different manifest outside the filesystem
     // image.
     name: "gen_manifest_mismatch_apex",
@@ -309,7 +309,7 @@ genrule {
         "$(genDir)/apex.apexd_test_manifest_mismatch.apex",
 }
 
-genrule {
+java_genrule {
     // Generates an apex with a corrupted filesystem superblock, which should cause
     // Apex::Open to fail
     name: "gen_corrupt_superblock_apex",
@@ -328,7 +328,7 @@ genrule {
         "$(genDir)/apex.apexd_test_corrupt_superblock_apex.apex",
 }
 
-genrule {
+java_genrule {
     // Generates an apex with a corrupted filesystem image, which should cause
     // dm-verity verification to fail
     name: "gen_corrupt_apex",
@@ -347,7 +347,7 @@ genrule {
         "$(genDir)/apex.apexd_test_corrupt_apex.apex",
 }
 
-genrule {
+java_genrule {
     // Extract the root digest with avbtool
     name: "apex.apexd_test_digest",
     out: ["apex.apexd_test_digest.txt"],
@@ -358,7 +358,7 @@ genrule {
         "| cut -c 3-| tee $(out)",
 }
 
-genrule {
+java_genrule {
     // Extract the root digest with avbtool
     name: "apex.apexd_test_f2fs_digest",
     out: ["apex.apexd_test_f2fs_digest.txt"],
@@ -369,7 +369,7 @@ genrule {
         "| cut -c 3-| tee $(out)",
 }
 
-genrule {
+java_genrule {
     // Extract the root digest with avbtool
     name: "apex.apexd_test_erofs_digest",
     out: ["apex.apexd_test_erofs_digest.txt"],
@@ -421,7 +421,7 @@ java_genrule {
         "$(genDir)/apex.apexd_test_different_key_v2.apex",
 }
 
-genrule {
+java_genrule {
     // Generates an apex which has a different manifest outside the filesystem
     // image.
     name: "gen_manifest_mismatch_rebootless_apex",
@@ -441,7 +441,7 @@ genrule {
         "$(genDir)/test.rebootless_apex_manifest_mismatch.apex",
 }
 
-genrule {
+java_genrule {
     // Generates an apex with a corrupted filesystem image, which should cause
     // dm-verity verification to fail
     name: "gen_corrupt_rebootless_apex",
@@ -473,6 +473,7 @@ cc_test {
         "-Wno-used-but-marked-unused",
     ],
     data: [
+        ":apex.apexd_bootstrap_test",
         ":apex.apexd_test",
         ":apex.apexd_test_erofs",
         ":apex.apexd_test_f2fs",
