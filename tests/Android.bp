@@ -34,7 +34,7 @@ java_test_host {
     static_libs: [
         "platformprotos",
     ],
-    data: [
+    device_common_data: [
         ":test1_com.android.tzdata",
     ],
     test_config: "timezone-data-e2e-tests.xml",
@@ -45,7 +45,7 @@ java_test_host {
     name: "media_e2e_tests",
     srcs: ["src/**/MediaHostTest.java"],
     defaults: ["apex_e2e_test_defaults"],
-    data: [
+    device_common_data: [
         ":test_com.android.media",
     ],
     test_config: "media-e2e-tests.xml",
@@ -56,7 +56,7 @@ java_test_host {
     name: "media_swcodec_e2e_tests",
     srcs: ["src/**/MediaSwCodecHostTest.java"],
     defaults: ["apex_e2e_test_defaults"],
-    data: [
+    device_common_data: [
         ":test_com.android.media.swcodec",
     ],
     test_config: "media-swcodec-e2e-tests.xml",
@@ -67,7 +67,7 @@ java_test_host {
     name: "apex_targetprep_tests",
     libs: ["tradefed"],
     srcs: ["src/**/ApexTargetPrepTest.java"],
-    data: [":StagedInstallTestApexV2"],
+    device_common_data: [":StagedInstallTestApexV2"],
     test_config: "apex-targetprep-tests.xml",
     test_suites: ["general-tests"],
 }
@@ -145,6 +145,8 @@ java_test_host {
         "testdata/trigger_watchdog.rc",
         "testdata/trigger_watchdog.sh",
         "testdata/trigger_reboot.sh",
+    ],
+    device_common_data: [
         ":apex.apexd_test_v2",
         ":com.android.apex.cts.shim.v2_prebuilt",
     ],
@@ -165,7 +167,7 @@ java_test_host {
     ],
     test_config: "apexd-host-tests.xml",
     test_suites: ["general-tests"],
-    data: [
+    device_common_data: [
         ":apex.apexd_test",
         ":apex.apexd_test_v2",
         ":apex.apexd_test_v2_no_pb",
@@ -198,7 +200,7 @@ java_test_host {
         "frameworks-base-hostutils",
         "testng",
     ],
-    data: [
+    device_common_data: [
         ":VendorApexTestsApp",
         ":com.android.apex.vendor.foo",
         ":com.android.apex.vendor.foo",
@@ -244,7 +246,7 @@ java_test_host {
         "src/**/SharedLibsApexTest.java",
     ],
     libs: ["tradefed"],
-    java_resources: [
+    device_common_java_resources: [
         ":com.android.apex.test.bar_stripped.v1.libvX_prebuilt",
         ":com.android.apex.test.bar_stripped.v2.libvY_prebuilt",
         ":com.android.apex.test.bar.v1.libvX_prebuilt",
@@ -283,7 +285,7 @@ java_test_host {
     ],
     test_config: "apex_compression_platform_tests.xml",
     test_suites: ["general-tests"],
-    data: [
+    device_common_data: [
         ":com.android.apex.compressed.v1",
         ":com.android.apex.compressed.v1{.apex}",
         ":com.android.apex.compressed.v1_different_digest",
@@ -324,10 +326,10 @@ java_test_host {
     ],
     test_config: "apk-in-apex-tests.xml",
     test_suites: ["general-tests"],
-    data: [
+    device_common_data: [
         ":apex_apkinapex_tests_app",
     ],
-    java_resources: [
+    device_common_java_resources: [
         ":com.android.apex.product.test",
         ":com.android.apex.product.app.test.xml",
         ":com.android.apex.system.test",
@@ -370,11 +372,11 @@ java_test_host {
     ],
     test_config: "max-sdk-tests.xml",
     test_suites: ["general-tests"],
-    data: [
+    device_common_data: [
         ":apex_maxsdk_tests_app",
         ":apex_maxsdk_regular_app_tests",
     ],
-    java_resources: [
+    device_common_java_resources: [
         ":com.android.apex.maxsdk.test",
     ],
 }
