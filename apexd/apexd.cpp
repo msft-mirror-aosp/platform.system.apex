@@ -186,6 +186,11 @@ bool IsBootstrapApex(const ApexFile& apex) {
   if (IsVendorApex(apex) && apex.GetManifest().vendorbootstrap()) {
     return true;
   }
+
+  if (apex.GetManifest().bootstrap()) {
+    return true;
+  }
+
   return std::find(kBootstrapApexes.begin(), kBootstrapApexes.end(),
                    apex.GetManifest().name()) != kBootstrapApexes.end() ||
          std::find(additional.begin(), additional.end(),

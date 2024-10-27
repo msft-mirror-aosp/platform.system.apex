@@ -4368,6 +4368,20 @@ TEST_F(ApexdMountTest, OnBootstrapCreatesEmptyDmDevices) {
             dm.GetState("com.android.apex.compressed"));
 }
 
+TEST_F(ApexdMountTest, OnBootstrapLoadBootstrapApexOnly) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  AddPreInstalledApex("apex.apexd_bootstrap_test.apex");
+
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Check bootstrap apex was loaded
+  auto active_bootstrap_apex =
+      GetActivePackage("com.android.apex.bootstrap_test_package");
+  ASSERT_THAT(active_bootstrap_apex, Ok());
+  // Check that non-bootstrap apex was not loaded
+  ASSERT_THAT(GetActivePackage("com.android.apex.test_package"), Not(Ok()));
+}
+
 TEST_F(ApexdUnitTest, StagePackagesFailKey) {
   auto status =
       StagePackages({GetTestFile("apex.apexd_test_no_inst_key.apex")});
