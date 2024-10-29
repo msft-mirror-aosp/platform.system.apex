@@ -46,6 +46,14 @@ apex_test {
 }
 
 apex_test {
+    name: "com.android.apex.vendor.bar",
+    defaults: [
+        "com.android.apex.vendor.foo.defaults",
+    ],
+    manifest: "manifest_bar_v1.json",
+}
+
+apex_test {
     name: "com.android.apex.vendor.foo.v2",
     defaults: [
         "com.android.apex.vendor.foo.defaults",
@@ -112,9 +120,9 @@ prebuilt_etc {
 }
 
 prebuilt_etc {
-    name: "apex_vendor_foo_v2_vintf",
+    name: "apex_vendor_foo_v2.xml",
     src: "apex_vendor_foo_v2.xml",
-    relative_install_path: "vintf",
+    sub_dir: "vintf",
     installable: false,
 }
 
@@ -173,7 +181,19 @@ apex_test {
     ],
     prebuilts: [
         "apex_vendor_foo_v2.rc",
-        "apex_vendor_foo_v2_vintf",
+        "apex_vendor_foo_v2.xml",
+    ],
+}
+
+// Test apex conflicting with com.android.apex.vendor.foo.v2_with_vintf
+apex_test {
+    name: "com.android.apex.vendor.bar.v2_with_vintf",
+    defaults: [
+        "com.android.apex.vendor.foo.defaults",
+    ],
+    manifest: "manifest_bar_v2.json",
+    prebuilts: [
+        "apex_vendor_foo_v2.xml",
     ],
 }
 

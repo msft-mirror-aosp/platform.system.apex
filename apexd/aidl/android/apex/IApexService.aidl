@@ -89,13 +89,6 @@ interface IApexService {
     * on user builds. Only root is allowed to call this method.
     */
    void recollectPreinstalledData(in @utf8InCpp List<String> paths);
-   /**
-    * Forces apexd to recollect data apex from the given |path|.
-    *
-    * Not meant for use outside of testing. This call will not be functional
-    * on user builds. Only root is allowed to call this method.
-    */
-   void recollectDataApex(in @utf8InCpp String path, in@utf8InCpp String decompression_dir);
 
    /**
     * Informs apexd that the boot has completed.
