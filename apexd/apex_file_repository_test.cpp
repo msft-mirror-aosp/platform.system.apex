@@ -30,7 +30,12 @@
 #include <filesystem>
 #include <string>
 
+#include "apex_blocklist.h"
+#include "apex_constants.h"
 #include "apex_file.h"
+#include "apexd.h"
+#include "apexd_metrics.h"
+#include "apexd_private.h"
 #include "apexd_test_utils.h"
 #include "apexd_verity.h"
 
@@ -46,6 +51,7 @@ using android::base::GetExecutableDirectory;
 using android::base::StringPrintf;
 using android::base::testing::Ok;
 using ::testing::ByRef;
+using ::testing::ContainerEq;
 using ::testing::Not;
 using ::testing::UnorderedElementsAre;
 
@@ -907,6 +913,129 @@ TEST_F(ApexFileRepositoryTestAddBlockApex, RespectIsFactoryBitFromMetadata) {
     ASSERT_EQ(is_factory,
               instance.HasPreInstalledVersion("com.android.apex.test_package"));
   }
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex, AddAndGetPublicKeyPartition) {
+  TemporaryDir credential_dir_1, credential_dir_2;
+  auto key_path_1 =
+      GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey");
+  fs::copy(key_path_1, credential_dir_1.path);
+  auto key_path_2 = GetTestFile(
+      "apexd_testdata/com.android.apex.brand.new.another.avbpubkey");
+  fs::copy(key_path_2, credential_dir_2.path);
+
+  ApexFileRepository instance;
+  const auto expected_partition_1 = ApexPartition::System;
+  const auto expected_partition_2 = ApexPartition::Odm;
+  auto ret = instance.AddBrandNewApexCredentialAndBlocklist(
+      {{expected_partition_1, credential_dir_1.path},
+       {expected_partition_2, credential_dir_2.path}});
+  ASSERT_RESULT_OK(ret);
+
+  std::string key_1;
+  std::string key_2;
+  const std::string& key_3 = "random key";
+  android::base::ReadFileToString(key_path_1, &key_1);
+  android::base::ReadFileToString(key_path_2, &key_2);
+  auto partition_1 = instance.GetBrandNewApexPublicKeyPartition(key_1);
+  auto partition_2 = instance.GetBrandNewApexPublicKeyPartition(key_2);
+  auto partition_3 = instance.GetBrandNewApexPublicKeyPartition(key_3);
+  ASSERT_EQ(partition_1.value(), expected_partition_1);
+  ASSERT_EQ(partition_2.value(), expected_partition_2);
+  ASSERT_FALSE(partition_3.has_value());
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex,
+     AddPublicKeyFailDuplicateKeyInDiffPartition) {
+  TemporaryDir credential_dir_1, credential_dir_2;
+  auto key_path_1 =
+      GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey");
+  fs::copy(key_path_1, credential_dir_1.path);
+  auto key_path_2 = GetTestFile(
+      "apexd_testdata/com.android.apex.brand.new.renamed.avbpubkey");
+  fs::copy(key_path_2, credential_dir_2.path);
+
+  ApexFileRepository instance;
+  const auto expected_partition_1 = ApexPartition::System;
+  const auto expected_partition_2 = ApexPartition::Odm;
+  ASSERT_DEATH(
+      {
+        instance.AddBrandNewApexCredentialAndBlocklist(
+            {{expected_partition_1, credential_dir_1.path},
+             {expected_partition_2, credential_dir_2.path}});
+      },
+      "Duplicate public keys are found in different partitions.");
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex, AddAndGetBlockedVersion) {
+  TemporaryDir blocklist_dir;
+  auto blocklist_path = GetTestFile("apexd_testdata/blocklist.json");
+  fs::copy(blocklist_path, blocklist_dir.path);
+
+  ApexFileRepository instance;
+  const auto expected_partition = ApexPartition::System;
+  const auto blocked_apex_name = "com.android.apex.brand.new";
+  const auto expected_blocked_version = 1;
+  auto ret = instance.AddBrandNewApexCredentialAndBlocklist(
+      {{expected_partition, blocklist_dir.path}});
+  ASSERT_RESULT_OK(ret);
+
+  const auto non_existent_partition = ApexPartition::Odm;
+  const auto non_existent_apex_name = "randome.apex";
+  auto blocked_version = instance.GetBrandNewApexBlockedVersion(
+      expected_partition, blocked_apex_name);
+  ASSERT_EQ(blocked_version, expected_blocked_version);
+  auto blocked_version_non_existent_apex =
+      instance.GetBrandNewApexBlockedVersion(expected_partition,
+                                             non_existent_apex_name);
+  ASSERT_FALSE(blocked_version_non_existent_apex.has_value());
+  auto blocked_version_non_existent_partition =
+      instance.GetBrandNewApexBlockedVersion(non_existent_partition,
+                                             blocked_apex_name);
+  ASSERT_FALSE(blocked_version_non_existent_partition.has_value());
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex,
+     AddCredentialAndBlocklistSucceedEmptyFile) {
+  TemporaryDir empty_dir;
+
+  ApexFileRepository instance;
+  const auto expected_partition = ApexPartition::System;
+  auto ret = instance.AddBrandNewApexCredentialAndBlocklist(
+      {{expected_partition, empty_dir.path}});
+  ASSERT_RESULT_OK(ret);
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex,
+     AddBlocklistSucceedDuplicateApexNameInDiffPartition) {
+  TemporaryDir blocklist_dir_1, blocklist_dir_2;
+  auto blocklist_path = GetTestFile("apexd_testdata/blocklist.json");
+  fs::copy(blocklist_path, blocklist_dir_1.path);
+  fs::copy(blocklist_path, blocklist_dir_2.path);
+
+  ApexFileRepository instance;
+  const auto expected_partition = ApexPartition::System;
+  const auto other_partition = ApexPartition::Product;
+  auto ret = instance.AddBrandNewApexCredentialAndBlocklist(
+      {{expected_partition, blocklist_dir_1.path},
+       {other_partition, blocklist_dir_2.path}});
+  ASSERT_RESULT_OK(ret);
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex,
+     AddBlocklistFailDuplicateApexNameInSamePartition) {
+  TemporaryDir blocklist_dir;
+  auto blocklist_path = GetTestFile("apexd_testdata/blocklist_invalid.json");
+  fs::copy(blocklist_path, fs::path(blocklist_dir.path) / "blocklist.json");
+
+  ApexFileRepository instance;
+  const auto expected_partition = ApexPartition::System;
+  ASSERT_DEATH(
+      {
+        instance.AddBrandNewApexCredentialAndBlocklist(
+            {{expected_partition, blocklist_dir.path}});
+      },
+      "Duplicate APEX names are found in blocklist.");
 }
 
 }  // namespace apex

@@ -17,11 +17,14 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace android {
 namespace apex {
+
+enum class ApexPartition { System, SystemExt, Product, Vendor, Odm };
 
 static constexpr const char* kApexDataDir = "/data/apex";
 static constexpr const char* kActiveApexPackagesDataDir = "/data/apex/active";
@@ -30,10 +33,19 @@ static constexpr const char* kApexDecompressedDir = "/data/apex/decompressed";
 static constexpr const char* kOtaReservedDir = "/data/apex/ota_reserved";
 static constexpr const char* kApexPackageSystemDir = "/system/apex";
 static constexpr const char* kApexPackageSystemExtDir = "/system_ext/apex";
+static constexpr const char* kApexPackageProductDir = "/product/apex";
 static constexpr const char* kApexPackageVendorDir = "/vendor/apex";
 static constexpr const char* kApexPackageOdmDir = "/odm/apex";
+static const std::unordered_map<ApexPartition, std::string>
+    kPartitionToApexPackageDirs = {
+        {ApexPartition::System, kApexPackageSystemDir},
+        {ApexPartition::SystemExt, kApexPackageSystemExtDir},
+        {ApexPartition::Product, kApexPackageProductDir},
+        {ApexPartition::Vendor, kApexPackageVendorDir},
+        {ApexPartition::Odm, kApexPackageOdmDir},
+};
 static const std::vector<std::string> kApexPackageBuiltinDirs = {
-    kApexPackageSystemDir, kApexPackageSystemExtDir, "/product/apex",
+    kApexPackageSystemDir, kApexPackageSystemExtDir, kApexPackageProductDir,
     kApexPackageVendorDir, kApexPackageOdmDir};
 static constexpr const char* kApexRoot = "/apex";
 static constexpr const char* kStagedSessionsDir = "/data/app-staging";
@@ -81,6 +93,28 @@ static constexpr const std::chrono::seconds kBlockApexWaitTime(10);
 static constexpr const char* kApexAllReadyProp = "apex.all.ready";
 static constexpr const char* kCtlApexLoadSysprop = "ctl.apex_load";
 static constexpr const char* kCtlApexUnloadSysprop = "ctl.apex_unload";
+
+// Constants for brand-new APEX
+static constexpr const char* kBrandNewApexPublicKeySuffix = ".avbpubkey";
+static constexpr const char* kBrandNewApexBlocklistFileName = "blocklist.json";
+static constexpr const char* kBrandNewApexConfigSystemDir =
+    "/system/etc/brand_new_apex";
+static constexpr const char* kBrandNewApexConfigSystemExtDir =
+    "/system_ext/etc/brand_new_apex";
+static constexpr const char* kBrandNewApexConfigProductDir =
+    "/product/etc/brand_new_apex";
+static constexpr const char* kBrandNewApexConfigVendorDir =
+    "/vendor/etc/brand_new_apex";
+static constexpr const char* kBrandNewApexConfigOdmDir =
+    "/odm/etc/brand_new_apex";
+static const std::unordered_map<ApexPartition, std::string>
+    kPartitionToBrandNewApexConfigDirs = {
+        {ApexPartition::System, kBrandNewApexConfigSystemDir},
+        {ApexPartition::SystemExt, kBrandNewApexConfigSystemExtDir},
+        {ApexPartition::Product, kBrandNewApexConfigProductDir},
+        {ApexPartition::Vendor, kBrandNewApexConfigVendorDir},
+        {ApexPartition::Odm, kBrandNewApexConfigOdmDir},
+};
 
 // Banned APEX names
 static const std::unordered_set<std::string> kBannedApexName = {
