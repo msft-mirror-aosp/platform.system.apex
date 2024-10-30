@@ -92,7 +92,7 @@ void SendApexInstallationRequestedAtom(const std::string& package_path,
   }
 
   const auto& instance = ApexFileRepository::GetInstance();
-  auto preinstalled_path = instance.GetPreinstalledPath(module_name);
+  auto preinstalled_path = instance.GetPreinstalledPath(*apex_file);
   if (!preinstalled_path.ok()) {
     LOG(WARNING) << preinstalled_path.error();
     return;

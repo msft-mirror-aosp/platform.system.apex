@@ -446,10 +446,28 @@ Result<const std::string> ApexFileRepository::GetPublicKey(
 // TODO(b/179497746): remove this method when we add api for fetching ApexFile
 //  by name
 Result<const std::string> ApexFileRepository::GetPreinstalledPath(
-    const std::string& name) const {
+    const ApexFile& apex) const {
+  auto name = apex.GetManifest().name();
   auto it = pre_installed_store_.find(name);
   if (it == pre_installed_store_.end()) {
-    return Error() << "No preinstalled data found for package " << name;
+    if (!ApexFileRepository::IsBrandNewApexEnabled()) {
+      return Error() << "No preinstalled data found for package " << name;
+    }
+
+    if (!HasDataVersion(name)) {
+      // Skips verification if there is already data version. It happens when
+      // APEX is staged but not yet activated.
+      OR_RETURN(VerifyBrandNewPackageAgainstPreinstalled(apex));
+    }
+    // There must be a matching partition because the APEX is verified above.
+    auto partition =
+        GetBrandNewApexPublicKeyPartition(apex.GetBundledPublicKey()).value();
+    auto itt = kPartitionToApexPackageDirs.find(partition);
+    if (itt == kPartitionToApexPackageDirs.end()) {
+      return Error() << "No preinstalled data found for brand-new APEX package "
+                     << name;
+    }
+    return itt->second + "/brand_new";
   }
   return it->second.GetPath();
 }
