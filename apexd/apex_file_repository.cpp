@@ -30,6 +30,7 @@
 #include "apex_blocklist.h"
 #include "apex_constants.h"
 #include "apex_file.h"
+#include "apexd_brand_new_verifier.h"
 #include "apexd_utils.h"
 #include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
@@ -326,7 +327,23 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
     }
 
     const std::string& name = apex_file->GetManifest().name();
-    if (!HasPreInstalledVersion(name)) {
+    auto preinstalled = pre_installed_store_.find(name);
+    if (preinstalled != pre_installed_store_.end()) {
+      if (preinstalled->second.GetBundledPublicKey() !=
+          apex_file->GetBundledPublicKey()) {
+        // Ignore data apex if public key doesn't match with pre-installed apex
+        LOG(ERROR) << "Skipping " << file
+                   << " : public key doesn't match pre-installed one";
+        continue;
+      }
+    } else if (ApexFileRepository::IsBrandNewApexEnabled()) {
+      auto brand_new_verified = VerifyBrandNewPackage(*apex_file);
+      if (!brand_new_verified.ok()) {
+        LOG(ERROR) << "Skipping " << file << " : "
+                   << brand_new_verified.error();
+        continue;
+      }
+    } else {
       LOG(ERROR) << "Skipping " << file << " : no preinstalled apex";
       // Ignore data apex without corresponding pre-installed apex
       continue;
@@ -338,15 +355,6 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
       LOG(WARNING) << "APEX " << name << " is a multi-installed APEX."
                    << " Any updated version in /data will always overwrite"
                    << " the multi-installed preinstalled version, if possible.";
-    }
-
-    auto pre_installed_public_key = GetPublicKey(name);
-    if (!pre_installed_public_key.ok() ||
-        apex_file->GetBundledPublicKey() != *pre_installed_public_key) {
-      // Ignore data apex if public key doesn't match with pre-installed apex
-      LOG(ERROR) << "Skipping " << file
-                 << " : public key doesn't match pre-installed one";
-      continue;
     }
 
     if (EndsWith(apex_file->GetPath(), kDecompressedApexPackageSuffix)) {
