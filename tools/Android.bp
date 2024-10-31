@@ -81,11 +81,13 @@ python_test_host {
     ],
     data: [
         ":avbtool",
-        ":com.android.example.apex",
         ":conv_apex_manifest",
         ":apex_compression_tool",
         ":deapexer",
         ":soong_zip",
+    ],
+    device_common_data: [
+        ":com.android.example.apex",
     ],
     libs: [
         "apex_manifest_proto",
@@ -134,7 +136,6 @@ sh_test_host {
     data_libs: [
         "libbase",
         "libc++",
-        "libcgrouprc",
         "libcrypto",
         "libcutils",
         "liblog",
@@ -180,8 +181,10 @@ python_test_host {
     data: [
         ":apexer_test_host_tools",
         ":apexer_with_DCLA_preprocessing",
-        ":com.android.example.apex",
         "testdata/com.android.example.apex.pem",
+    ],
+    device_common_data: [
+        ":com.android.example.apex",
     ],
     test_suites: ["general-tests"],
     test_options: {
