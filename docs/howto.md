@@ -343,22 +343,25 @@ implicit.
 Use
 
 ```
-adb sync && adb shell cmd -w apexservice remountPackages
+adb install --force-non-staged <path_to_apex>
 ```
 
-Note that for this command to remount your APEX, you must ensure that all
-processes that have reference to your APEX are killed. E.g. if you are
-developing an APEX that contributes to system\_server, you can use the
-following:
+This is a development only feature that only works on debuggable builds.
+It can be used to speed up development workflow for teams that have
+their code packaged in an APEX.
 
-```
-adb root
-adb remount
-adb shell stop
-adb sync
-adb shell cmd -w apexservice remountPackages
-adb shell start
-```
+Example of how this feature can be used:
+
+1. Iterate on code in an APEX
+2. Build APEX
+3. `adb install --force-non-staged out/dist/your.apex`
+4. Restart the processes that depend on this APEX
+   (e.g. `adb shell stop && adb shell start`).
+5. ???
+6. Profit
+
+Behind the scenes the force non-staged APEX update is implemented by
+unmounting the /apex/ mount point with `MNT_DETACH` flag.
 
 ## Using an APEX
 

@@ -21,14 +21,18 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeTrue;
 
+import static java.util.stream.Collectors.toList;
+
+import android.cts.host.utils.DeviceJUnit4ClassRunnerWithParameters;
+import android.cts.host.utils.DeviceJUnit4Parameterized;
 import android.cts.install.lib.host.InstallUtilsHost;
 import android.platform.test.annotations.LargeTest;
 
 import com.android.apex.ApexInfo;
 import com.android.apex.XmlParser;
 import com.android.compatibility.common.tradefed.build.CompatibilityBuildHelper;
-import com.android.tradefed.testtype.DeviceJUnit4ClassRunner;
 import com.android.tradefed.testtype.junit4.BaseHostJUnit4Test;
+import com.android.tradefed.testtype.junit4.DeviceTestRunOptions;
 import com.android.tradefed.util.CommandResult;
 import com.android.tradefed.util.CommandStatus;
 
@@ -36,15 +40,20 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-
-import static java.util.stream.Collectors.toList;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameter;
+import org.junit.runners.Parameterized.UseParametersRunnerFactory;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
-@RunWith(DeviceJUnit4ClassRunner.class)
+@RunWith(DeviceJUnit4Parameterized.class)
+@UseParametersRunnerFactory(DeviceJUnit4ClassRunnerWithParameters.RunnerFactory.class)
 public class VendorApexTests extends BaseHostJUnit4Test {
 
     private static final String TAG = "VendorApexTests";
@@ -52,10 +61,20 @@ public class VendorApexTests extends BaseHostJUnit4Test {
 
     private final InstallUtilsHost mHostUtils = new InstallUtilsHost(this);
 
+    @Parameter()
+    public String mPartition;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<Object[]> data() {
+        return Arrays.asList(new Object[][]{{"vendor"}, {"odm"}});
+    }
+
     private void runPhase(String phase) throws Exception {
-        assertThat(runDeviceTests("com.android.tests.vendorapex.app",
-                "com.android.tests.apex.app.VendorApexTests",
-                phase)).isTrue();
+        var options = new DeviceTestRunOptions("com.android.tests.vendorapex.app")
+                              .setTestClassName("com.android.tests.apex.app.VendorApexTests")
+                              .setTestMethodName(phase)
+                              .addInstrumentationArg("partition", mPartition);
+        assertThat(runDeviceTests(options)).isTrue();
     }
 
     @Before
@@ -73,8 +92,8 @@ public class VendorApexTests extends BaseHostJUnit4Test {
 
     @After
     public void tearDown() throws Exception {
-        deleteFiles("/vendor/apex/" + APEX_PACKAGE_NAME + "*apex",
-                "/data/apex/active/" + APEX_PACKAGE_NAME + "*apex");
+        deleteFiles("/" + mPartition + "/apex/com.android.apex.vendor.*apex",
+                "/data/apex/active/com.android.apex.vendor.*apex");
     }
 
     @Test
@@ -137,6 +156,32 @@ public class VendorApexTests extends BaseHostJUnit4Test {
             .isEqualTo(getMountNamespaceFor("$(pidof vold)"));
     }
 
+    @Test
+    @LargeTest
+    public void testCheckVintfWithAllStagedApexes_MultiPackage() throws Exception {
+        // CheckVintf should be invoked with all staged APEXes mounted.
+        // For example, two conflicting APEXes in a session may pass the check
+        // when CheckVintf is performed with a single incoming APEX separately.
+        // In this test, installing two conflicting APEXes in the same session should
+        // fail with CheckVintf error.
+        pushPreinstalledApex("com.android.apex.vendor.foo.apex",
+                "com.android.apex.vendor.bar.apex");
+        runPhase("testCheckVintfWithAllStagedApexes_MultiPackage");
+    }
+
+    @Test
+    @LargeTest
+    public void testCheckVintfWithAllStagedApexes_MultiSession() throws Exception {
+        // CheckVintf should be invoked with all staged APEXes mounted.
+        // For example, two conflicting APEXes in different sessions may pass the check
+        // when CheckVintf is performed for each session separately.
+        // In this test, installing two APEXes in two separate sessions should
+        // fail with CheckVintfError.
+        pushPreinstalledApex("com.android.apex.vendor.foo.apex",
+                "com.android.apex.vendor.bar.apex");
+        runPhase("testCheckVintfWithAllStagedApexes_MultiSession");
+    }
+
     private String getMountNamespaceFor(String proc) throws Exception {
         CommandResult result =
                 getDevice().executeShellV2Command("readlink /proc/" + proc + "/ns/mnt");
@@ -146,10 +191,14 @@ public class VendorApexTests extends BaseHostJUnit4Test {
         return result.getStdout().trim();
     }
 
-    private void pushPreinstalledApex(String fileName) throws Exception {
+    private void pushPreinstalledApex(String... fileNames) throws Exception {
+        assertThat(fileNames).isNotEmpty();
         CompatibilityBuildHelper buildHelper = new CompatibilityBuildHelper(getBuild());
-        final File apex = buildHelper.getTestFile(fileName);
-        assertTrue(getDevice().pushFile(apex, Paths.get("/vendor/apex", fileName).toString()));
+        for (String fileName : fileNames) {
+            final File apex = buildHelper.getTestFile(fileName);
+            Path path = Paths.get("/", mPartition, "apex", fileName);
+            assertTrue(getDevice().pushFile(apex, path.toString()));
+        }
         getDevice().reboot();
     }
 
