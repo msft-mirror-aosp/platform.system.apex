@@ -28,6 +28,7 @@
 #include "apex_constants.h"
 #include "apex_file.h"
 #include "apexd_utils.h"
+#include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
 
 using android::base::EndsWith;
@@ -95,14 +96,10 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
                    << apex_file->GetPath();
         continue;
       }
-      // If BOARD_USES_VENDORIMAGE is false, then /vendor will be a symlink to
-      // /system/vendor. path is a realpath to the apex, so we must check
-      // against both.
-      if (enforce_multi_install_partition_ &&
-          !android::base::StartsWith(path, "/vendor/apex/") &&
-          !android::base::StartsWith(path, "/system/vendor/apex/")) {
+      if (enforce_multi_install_partition_ && !InVendorPartition(path) &&
+          !InOdmPartition(path)) {
         LOG(ERROR) << "Multi-install APEX " << path
-                   << " can only be preinstalled on /vendor/apex/.";
+                   << " can only be preinstalled on /{odm,vendor}/apex/.";
         continue;
       }
 
@@ -139,21 +136,7 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
     if (it == pre_installed_store_.end()) {
       pre_installed_store_.emplace(name, std::move(*apex_file));
     } else if (it->second.GetPath() != apex_file->GetPath()) {
-      auto level = base::FATAL;
-      if (ignore_duplicate_apex_definitions_) {
-        level = base::INFO;
-      }
-      // On some development (non-REL) builds the VNDK apex could be in /vendor.
-      // When testing CTS-on-GSI on these builds, there would be two VNDK apexes
-      // in the system, one in /system and one in /vendor.
-      static constexpr char kVndkApexModuleNamePrefix[] = "com.android.vndk.";
-      static constexpr char kPlatformVersionCodenameProperty[] =
-          "ro.build.version.codename";
-      if (android::base::StartsWith(name, kVndkApexModuleNamePrefix) &&
-          GetProperty(kPlatformVersionCodenameProperty, "REL") != "REL") {
-        level = android::base::INFO;
-      }
-      LOG(level) << "Found two apex packages " << it->second.GetPath()
+      LOG(FATAL) << "Found two apex packages " << it->second.GetPath()
                  << " and " << apex_file->GetPath()
                  << " with the same module name " << name;
     } else if (it->second.GetBundledPublicKey() !=

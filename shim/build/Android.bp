@@ -249,7 +249,7 @@ apex {
     updatable: false,
 }
 
-genrule {
+java_genrule {
     name: "generate_hash_v1",
     srcs: [
         ":com.android.apex.cts.shim.v2",
@@ -422,7 +422,7 @@ genrule {
 }
 
 // v2 cts shim package signed by bob, without lineage
-genrule {
+java_genrule {
     name: "com.android.apex.cts.shim.v2_signed_bob",
     out: ["com.android.apex.cts.shim.v2_signed_bob"],
     tools: [":apksigner"],
@@ -439,7 +439,7 @@ genrule {
 }
 
 // v2 cts shim package signed by bob + lineage
-genrule {
+java_genrule {
     name: "com.android.apex.cts.shim.v2_signed_bob_rot",
     out: ["com.android.apex.cts.shim.v2_signed_bob_rot"],
     tools: [":apksigner"],
@@ -457,7 +457,7 @@ genrule {
 }
 
 // v2 cts shim package signed by bob + lineage + rollback capability
-genrule {
+java_genrule {
     name: "com.android.apex.cts.shim.v2_signed_bob_rot_rollback",
     out: ["com.android.apex.cts.shim.v2_signed_bob_rot_rollback"],
     tools: [":apksigner"],
@@ -475,7 +475,7 @@ genrule {
 }
 
 // v3 cts shim package signed by bob
-genrule {
+java_genrule {
     name: "com.android.apex.cts.shim.v3_signed_bob",
     out: ["com.android.apex.cts.shim.v3_signed_bob"],
     tools: [":apksigner"],
@@ -492,7 +492,7 @@ genrule {
 }
 
 // v3 cts shim package signed by bob + lineage
-genrule {
+java_genrule {
     name: "com.android.apex.cts.shim.v3_signed_bob_rot",
     out: ["com.android.apex.cts.shim.v3_signed_bob_rot"],
     tools: [":apksigner"],
@@ -527,7 +527,7 @@ apex {
     updatable: false,
 }
 
-genrule {
+java_genrule {
     name: "com.android.apex.cts.shim.v2_no_pb",
     srcs: [":com.android.apex.cts.shim.v2_legacy"],
     out: ["com.android.apex.cts.shim.v2_no_pb.apex"],
@@ -566,7 +566,7 @@ apex {
 }
 
 // Apex shim with unsigned apk
-genrule {
+java_genrule {
     name: "com.android.apex.cts.shim.v2_unsigned_apk_container",
     // Use shim.v2_rebootless to re-use same APEX in the rebootless update test case.
     srcs: [":com.android.apex.cts.shim.v2_rebootless"],
