@@ -61,4 +61,7 @@ message SessionState {
 
   // Populated with error details when session fails to activate
   string error_message = 10;
+
+  // The list of sha256 hashes of apexes within this session.
+  repeated string apex_file_hashes = 11;
 }
