@@ -27,23 +27,46 @@ using android::base::Result;
 
 namespace android::apex {
 
-Result<void> VerifyBrandNewPackage(const ApexFile& apex) {
+Result<void> VerifyBrandNewPackageAgainstPreinstalled(const ApexFile& apex) {
   CHECK(ApexFileRepository::IsBrandNewApexEnabled())
       << "Brand-new APEX must be enabled in order to do verification.";
 
+  const std::string& name = apex.GetManifest().name();
   const auto& file_repository = ApexFileRepository::GetInstance();
   auto partition = file_repository.GetBrandNewApexPublicKeyPartition(
       apex.GetBundledPublicKey());
   if (!partition.has_value()) {
     return Error()
            << "No pre-installed public key found for the brand-new APEX: "
-           << apex.GetManifest().name();
+           << name;
   }
+
   if (apex.GetManifest().version() <=
-      file_repository.GetBrandNewApexBlockedVersion(
-          partition.value(), apex.GetManifest().name())) {
-    return Error() << "Brand-new APEX is blocked: "
-                   << apex.GetManifest().name();
+      file_repository.GetBrandNewApexBlockedVersion(partition.value(), name)) {
+    return Error() << "Brand-new APEX is blocked: " << name;
+  }
+
+  return {};
+}
+
+Result<void> VerifyBrandNewPackageAgainstActive(const ApexFile& apex) {
+  CHECK(ApexFileRepository::IsBrandNewApexEnabled())
+      << "Brand-new APEX must be enabled in order to do verification.";
+
+  const std::string& name = apex.GetManifest().name();
+  const auto& file_repository = ApexFileRepository::GetInstance();
+
+  if (file_repository.HasPreInstalledVersion(name)) {
+    return {};
+  }
+
+  if (file_repository.HasDataVersion(name)) {
+    auto existing_package = file_repository.GetDataApex(name).get();
+    if (apex.GetBundledPublicKey() != existing_package.GetBundledPublicKey()) {
+      return Error()
+             << "Brand-new APEX public key doesn't match existing active APEX: "
+             << name;
+    }
   }
   return {};
 }

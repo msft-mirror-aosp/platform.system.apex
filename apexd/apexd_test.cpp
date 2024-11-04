@@ -4829,6 +4829,93 @@ TEST(Loop, NoSuchFile) {
   ASSERT_EQ(GetCapturedStderr(), "");
 }
 
+TEST_F(ApexdMountTest, SubmitStagedSessionSucceedVerifiedBrandNewApex) {
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  PrepareStagedSession("com.android.apex.brand.new.apex", 239);
+  ASSERT_RESULT_OK(SubmitStagedSession(239, {}, false, false, -1));
+
+  auto sessions = GetSessionManager()->GetSessions();
+  ASSERT_EQ(1u, sessions.size());
+  ASSERT_EQ(239, sessions[0].GetId());
+  ASSERT_EQ(SessionState::VERIFIED, sessions[0].GetState());
+  file_repository.Reset();
+}
+
+TEST_F(ApexdMountTest,
+       SubmitStagedSessionSucceedVerifiedBrandNewApexWithActiveVersion) {
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir, data_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+  ASSERT_RESULT_OK(file_repository.AddDataApex(data_dir.path));
+
+  PrepareStagedSession("com.android.apex.brand.new.v2.apex", 239);
+  ASSERT_RESULT_OK(SubmitStagedSession(239, {}, false, false, -1));
+
+  auto sessions = GetSessionManager()->GetSessions();
+  ASSERT_EQ(1u, sessions.size());
+  ASSERT_EQ(239, sessions[0].GetId());
+  ASSERT_EQ(SessionState::VERIFIED, sessions[0].GetState());
+  file_repository.Reset();
+}
+
+TEST_F(ApexdMountTest,
+       SubmitStagedSessionFailBrandNewApexMismatchActiveVersion) {
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir, data_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  fs::copy(GetTestFile(
+               "apexd_testdata/com.android.apex.brand.new.another.avbpubkey"),
+           trusted_key_dir.path);
+  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+  ASSERT_RESULT_OK(file_repository.AddDataApex(data_dir.path));
+
+  PrepareStagedSession("com.android.apex.brand.new.v2.diffkey.apex", 239);
+  auto ret = SubmitStagedSession(239, {}, false, false, -1);
+
+  ASSERT_THAT(
+      ret,
+      HasError(WithMessage(("Brand-new APEX public key doesn't match existing "
+                            "active APEX: com.android.apex.brand.new"))));
+  file_repository.Reset();
+}
+
+TEST_F(ApexdMountTest, SubmitStagedSessionFailBrandNewApexDisabled) {
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  PrepareStagedSession("com.android.apex.brand.new.apex", 239);
+  auto ret = SubmitStagedSession(239, {}, false, false, -1);
+
+  ASSERT_THAT(ret,
+              HasError(WithMessage(("No preinstalled apex found for unverified "
+                                    "package com.android.apex.brand.new"))));
+  file_repository.Reset();
+}
+
 TEST_F(ApexdUnitTest, StagePackagesSucceedVerifiedBrandNewApex) {
   ApexFileRepository::EnableBrandNewApex();
   auto& file_repository = ApexFileRepository::GetInstance();

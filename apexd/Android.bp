@@ -507,6 +507,7 @@ cc_test {
         ":gen_key_mismatch_with_original_capex",
         ":com.android.apex.brand.new",
         ":com.android.apex.brand.new.v2",
+        ":com.android.apex.brand.new.v2.diffkey",
         ":com.android.apex.cts.shim.v1_prebuilt",
         ":com.android.apex.cts.shim.v2_prebuilt",
         ":com.android.apex.cts.shim.v2_wrong_sha_prebuilt",

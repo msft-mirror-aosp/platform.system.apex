@@ -109,6 +109,16 @@ apex {
     min_sdk_version: "34",
 }
 
+apex {
+    name: "com.android.apex.brand.new.v2.diffkey",
+    manifest: "manifest_brand_new_v2.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.apex.brand.new.another.key",
+    installable: false,
+    min_sdk_version: "34",
+}
+
 java_genrule {
     // Generates an apex which has a different public key outside the filesystem image
     name: "gen_key_mismatch_with_image_apex",

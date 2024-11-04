@@ -24,16 +24,27 @@
 
 namespace android::apex {
 
-// Returns the verification result of a specific brand-new package.
-// Verifies a brand-new APEX in that
+// Returns the verification result of a specific brand-new package against the
+// pre-installed public keys and blocklists. Verifies a brand-new APEX in that
 // 1. brand-new APEX is enabled
 // 2. it matches exactly one certificate in one of the built-in partitions
 // 3. its name and version are not blocked by the blocklist in the matching
 // partition
+//
 // The function is called in
 // |SubmitStagedSession| (brand-new apex becomes 'staged')
 // |ScanStagedSessionsDirAndStage| ('staged' apex becomes 'active')
 // |ApexFileRepository::AddDataApex| (add 'active' apex to repository)
-android::base::Result<void> VerifyBrandNewPackage(const ApexFile& apex);
+android::base::Result<void> VerifyBrandNewPackageAgainstPreinstalled(
+    const ApexFile& apex);
+
+// Returns the verification result of a specific brand-new package.
+// Verifies a brand-new APEX in that its public key is the same as the existing
+// active version if any. Pre-installed APEX is skipped.
+//
+// The function is called in
+// |SubmitStagedSession| (brand-new apex becomes 'staged')
+android::base::Result<void> VerifyBrandNewPackageAgainstActive(
+    const ApexFile& apex);
 
 }  // namespace android::apex
