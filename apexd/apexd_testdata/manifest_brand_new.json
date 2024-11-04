@@ -1,4 +1,5 @@
 {
   "name": "com.android.apex.brand.new",
-  "version": 1
+  "version": 1,
+  "supportsRebootlessUpdate": true
 }
