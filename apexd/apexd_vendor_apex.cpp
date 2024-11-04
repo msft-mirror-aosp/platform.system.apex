@@ -49,10 +49,8 @@ bool InOdmPartition(const std::string& path) {
 // version.
 bool IsVendorApex(const ApexFile& apex_file) {
   const auto& instance = ApexFileRepository::GetInstance();
-  const auto& preinstalled =
-      instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& path = preinstalled.get().GetPath();
-  return InVendorPartition(path) || InOdmPartition(path);
+  const auto& path = instance.GetPreinstalledPath(apex_file);
+  return InVendorPartition(*path) || InOdmPartition(*path);
 }
 
 static Result<bool> HasVintfIn(std::span<const std::string> apex_mounts) {

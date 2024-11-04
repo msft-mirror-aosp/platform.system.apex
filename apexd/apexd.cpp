@@ -3076,8 +3076,7 @@ void CollectApexInfoList(std::ostream& os,
                                           bool is_active) {
     auto& instance = ApexFileRepository::GetInstance();
 
-    auto preinstalled_path =
-        instance.GetPreinstalledPath(apex.GetManifest().name());
+    auto preinstalled_path = instance.GetPreinstalledPath(apex);
     std::optional<std::string> preinstalled_module_path;
     if (preinstalled_path.ok()) {
       preinstalled_module_path = *preinstalled_path;
