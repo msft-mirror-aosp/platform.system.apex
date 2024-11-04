@@ -337,7 +337,8 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
         continue;
       }
     } else if (ApexFileRepository::IsBrandNewApexEnabled()) {
-      auto brand_new_verified = VerifyBrandNewPackage(*apex_file);
+      auto brand_new_verified =
+          VerifyBrandNewPackageAgainstPreinstalled(*apex_file);
       if (!brand_new_verified.ok()) {
         LOG(ERROR) << "Skipping " << file << " : "
                    << brand_new_verified.error();
