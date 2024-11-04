@@ -28,8 +28,7 @@
 #include "apex_constants.h"
 #include "apex_file.h"
 
-namespace android {
-namespace apex {
+namespace android::apex {
 
 using ApexFileRef = std::reference_wrapper<const android::apex::ApexFile>;
 
@@ -87,13 +86,30 @@ class ApexFileRepository final {
   // finished, all queries to the instance are thread safe.
   android::base::Result<void> AddDataApex(const std::string& data_dir);
 
+  // Populates instance by collecting pre-installed credential files (.avbpubkey
+  // for now) and blocklist files from the given directories. They are needed
+  // specifically for brand-new APEX.
+  // Note: this call is **not thread safe** and
+  // is expected to be performed in a single thread during initialization of
+  // apexd. After initialization is finished, all queries to the instance are
+  // thread safe.
+  android::base::Result<void> AddBrandNewApexCredentialAndBlocklist(
+      const std::unordered_map<ApexPartition, std::string>&
+          partition_to_dir_map);
+
   // Returns trusted public key for an apex with the given |name|.
   android::base::Result<const std::string> GetPublicKey(
       const std::string& name) const;
 
   // Returns path to the pre-installed version of an apex with the given |name|.
+  // Temporarily returns the path that matches the pre-installed public key in
+  // case of brand-new APEX, e.g. the returned pre-installed path would be
+  // "/system/apex/brand_new" if a brand-new apex matches a public key in
+  // "/system/etc/brand_new_apex/".
+  // TODO: b/377111286 - populate preinstalled-partition for brand-new APEX
+  // instead of path
   android::base::Result<const std::string> GetPreinstalledPath(
-      const std::string& name) const;
+      const ApexFile& apex) const;
 
   // Returns path to the data version of an apex with the given |name|.
   android::base::Result<const std::string> GetDataPath(
@@ -129,6 +145,18 @@ class ApexFileRepository final {
   // Returns reference to all data APEX on device
   std::vector<ApexFileRef> GetDataApexFiles() const;
 
+  // Returns the partition of the pre-installed public key which exactly matches
+  // the |public_key|.
+  std::optional<ApexPartition> GetBrandNewApexPublicKeyPartition(
+      const std::string& public_key) const;
+
+  // Returns the blocked version number of a specific brand-new APEX in a
+  // specific partition. The brand-new APEX is only allowed when its version is
+  // larger than the blocked version.
+  // Returns |std::nullopt| if the |apex_name| is not configured in blocklist.
+  std::optional<int64_t> GetBrandNewApexBlockedVersion(
+      ApexPartition partition, const std::string& apex_name) const;
+
   // Group all ApexFiles on device by their package name
   std::unordered_map<std::string, std::vector<ApexFileRef>> AllApexFilesByName()
       const;
@@ -142,14 +170,23 @@ class ApexFileRepository final {
   // using |HasDataVersion| function.
   ApexFileRef GetDataApex(const std::string& name) const;
 
+  // Returns if installation of brand-new APEX is enabled.
+  static inline bool IsBrandNewApexEnabled() { return enable_brand_new_apex_; };
+
+  // Enables installation of brand-new APEX.
+  static inline void EnableBrandNewApex() { enable_brand_new_apex_ = true; };
+
   // Clears ApexFileRepostiry.
   // Only use in tests.
   void Reset(const std::string& decompression_dir = kApexDecompressedDir) {
     pre_installed_store_.clear();
     data_store_.clear();
+    brand_new_apex_blocked_version_.clear();
+    brand_new_apex_pubkeys_.clear();
     block_apex_overrides_.clear();
     decompression_dir_ = decompression_dir;
     block_disk_path_.reset();
+    enable_brand_new_apex_ = false;
   }
 
  private:
@@ -165,6 +202,13 @@ class ApexFileRepository final {
 
   std::unordered_map<std::string, ApexFile> pre_installed_store_, data_store_;
 
+  // Blocked versions for brand-new APEX mapped by their holding partition.
+  std::unordered_map<ApexPartition, std::unordered_map<std::string, int64_t>>
+      brand_new_apex_blocked_version_;
+
+  // Map from trusted public keys for brand-new APEX to their holding partition.
+  std::unordered_map<std::string, ApexPartition> brand_new_apex_pubkeys_;
+
   // Multi-installed APEX name -> all encountered public keys for this APEX.
   std::unordered_map<std::string, std::unordered_set<std::string>>
       multi_install_public_keys_;
@@ -177,6 +221,9 @@ class ApexFileRepository final {
   // Allows multi-install APEXes outside of expected partitions.
   // Only set false in tests.
   bool enforce_multi_install_partition_ = true;
+
+  // Disallows installation of brand-new APEX by default.
+  inline static bool enable_brand_new_apex_ = false;
 
   // Decompression directory which will be used to determine if apex is
   // decompressed or not
@@ -200,5 +247,4 @@ class ApexFileRepository final {
   std::unordered_map<std::string, BlockApexOverride> block_apex_overrides_;
 };
 
-}  // namespace apex
-}  // namespace android
+}  // namespace android::apex
