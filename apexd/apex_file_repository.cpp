@@ -23,8 +23,11 @@
 #include <android-base/strings.h>
 #include <microdroid/metadata.h>
 
+#include <cstdint>
+#include <filesystem>
 #include <unordered_map>
 
+#include "apex_blocklist.h"
 #include "apex_constants.h"
 #include "apex_file.h"
 #include "apexd_utils.h"
@@ -35,6 +38,7 @@ using android::base::EndsWith;
 using android::base::Error;
 using android::base::GetProperty;
 using android::base::Result;
+using ::apex::proto::ApexBlocklist;
 
 namespace android {
 namespace apex {
@@ -370,6 +374,47 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
   return {};
 }
 
+Result<void> ApexFileRepository::AddBrandNewApexCredentialAndBlocklist(
+    const std::unordered_map<ApexPartition, std::string>&
+        partition_to_dir_map) {
+  for (const auto& [partition, dir] : partition_to_dir_map) {
+    LOG(INFO)
+        << "Scanning " << dir
+        << " for pre-installed public keys and blocklists of brand-new APEX";
+    if (access(dir.c_str(), F_OK) != 0 && errno == ENOENT) {
+      continue;
+    }
+
+    std::vector<std::string> all_credential_files =
+        OR_RETURN(FindFilesBySuffix(dir, {kBrandNewApexPublicKeySuffix}));
+    for (const std::string& credential_path : all_credential_files) {
+      std::string content;
+      CHECK(android::base::ReadFileToString(credential_path, &content));
+      const auto& [it, inserted] =
+          brand_new_apex_pubkeys_.emplace(content, partition);
+      CHECK(inserted || it->second == partition)
+          << "Duplicate public keys are found in different partitions.";
+    }
+
+    const std::string& blocklist_path =
+        std::filesystem::path(dir) / kBrandNewApexBlocklistFileName;
+    const auto blocklist_exists = OR_RETURN(PathExists(blocklist_path));
+    if (!blocklist_exists) {
+      continue;
+    }
+
+    std::unordered_map<std::string, int64_t> apex_name_to_version;
+    ApexBlocklist blocklist = OR_RETURN(ReadBlocklist(blocklist_path));
+    for (const auto& block_item : blocklist.blocked_apex()) {
+      const auto& [it, inserted] =
+          apex_name_to_version.emplace(block_item.name(), block_item.version());
+      CHECK(inserted) << "Duplicate APEX names are found in blocklist.";
+    }
+    brand_new_apex_blocked_version_.emplace(partition, apex_name_to_version);
+  }
+  return {};
+}
+
 // TODO(b/179497746): remove this method when we add api for fetching ApexFile
 //  by name
 Result<const std::string> ApexFileRepository::GetPublicKey(
@@ -472,6 +517,30 @@ std::vector<ApexFileRef> ApexFileRepository::GetDataApexFiles() const {
     result.emplace_back(std::cref(it.second));
   }
   return result;
+}
+
+std::optional<ApexPartition>
+ApexFileRepository::GetBrandNewApexPublicKeyPartition(
+    const std::string& public_key) const {
+  auto it = brand_new_apex_pubkeys_.find(public_key);
+  if (it == brand_new_apex_pubkeys_.end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+
+std::optional<int64_t> ApexFileRepository::GetBrandNewApexBlockedVersion(
+    ApexPartition partition, const std::string& apex_name) const {
+  auto it = brand_new_apex_blocked_version_.find(partition);
+  if (it == brand_new_apex_blocked_version_.end()) {
+    return std::nullopt;
+  }
+  const auto& apex_name_to_version = it->second;
+  auto itt = apex_name_to_version.find(apex_name);
+  if (itt == apex_name_to_version.end()) {
+    return std::nullopt;
+  }
+  return itt->second;
 }
 
 // Group pre-installed APEX and data APEX by name

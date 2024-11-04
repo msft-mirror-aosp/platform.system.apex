@@ -2301,6 +2301,13 @@ void Initialize(CheckpointInterface* checkpoint_service) {
     return;
   }
 
+  if (ApexFileRepository::IsBrandNewApexEnabled()) {
+    Result<void> result = instance.AddBrandNewApexCredentialAndBlocklist(
+        kPartitionToBrandNewApexConfigDirs);
+    CHECK(result.ok()) << "Failed to collect pre-installed public keys and "
+                          "blocklists for brand-new APEX";
+  }
+
   gMountedApexes.PopulateFromMounts(
       {gConfig->active_apex_data_dir, gConfig->decompression_dir});
 }
