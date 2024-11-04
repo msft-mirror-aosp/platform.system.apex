@@ -724,3 +724,15 @@ genrule {
         "statslog_apex.cpp",
     ],
 }
+
+aconfig_declarations {
+    name: "enable_brand_new_apex",
+    package: "com.android.apex.flags",
+    srcs: ["apexd.aconfig"],
+    container: "system",
+}
+
+cc_aconfig_library {
+    name: "brand_new_apex_flag_c_lib",
+    aconfig_declarations: "enable_brand_new_apex",
+}
