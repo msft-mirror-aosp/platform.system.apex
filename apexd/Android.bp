@@ -85,6 +85,7 @@ cc_defaults {
         "libvintf",
     ],
     static_libs: [
+        "lib_apex_blocklist_proto",
         "lib_microdroid_metadata_proto",
         "libapex",
         "libavb",
@@ -186,6 +187,7 @@ cc_library_static {
         "libapexd-deps",
     ],
     srcs: [
+        "apex_blocklist.cpp",
         "apex_classpath.cpp",
         "apex_database.cpp",
         "apex_file_repository.cpp",
@@ -533,6 +535,7 @@ cc_test {
         ":test.rebootless_apex_priv_app_in_apex",
     ],
     srcs: [
+        "apex_blocklist_test.cpp",
         "apex_classpath_test.cpp",
         "apex_database_test.cpp",
         "apex_file_test.cpp",
