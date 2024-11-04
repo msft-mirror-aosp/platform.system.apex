@@ -48,7 +48,7 @@ cc_binary {
     apex_available: ["com.android.apex.test.pony"],
 }
 
-genrule {
+java_genrule {
     name: "com.android.apex.test.pony_stripped",
     out: ["com.android.apex.test.pony_stripped.apex"],
     defaults: ["apexer_test_host_tools_list"],
