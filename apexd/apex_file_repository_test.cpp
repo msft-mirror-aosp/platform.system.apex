@@ -34,6 +34,7 @@
 #include "apex_constants.h"
 #include "apex_file.h"
 #include "apexd.h"
+#include "apexd_brand_new_verifier.h"
 #include "apexd_metrics.h"
 #include "apexd_private.h"
 #include "apexd_test_utils.h"
@@ -1036,6 +1037,71 @@ TEST(ApexFileRepositoryTestBrandNewApex,
             {{expected_partition, blocklist_dir.path}});
       },
       "Duplicate APEX names are found in blocklist.");
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex,
+     AddDataApexSucceedVerifiedBrandNewApex) {
+  // Prepares test data.
+  ApexFileRepository::EnableBrandNewApex();
+  const auto partition = ApexPartition::System;
+  TemporaryDir data_dir, trusted_key_dir;
+  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+
+  ApexFileRepository& instance = ApexFileRepository::GetInstance();
+  instance.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  // Now test that apexes were scanned correctly;
+  auto test_fn = [&](const std::string& apex_name) {
+    auto apex = ApexFile::Open(GetTestFile(apex_name));
+    ASSERT_RESULT_OK(apex);
+
+    ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
+
+    {
+      auto ret = instance.GetDataPath(apex->GetManifest().name());
+      ASSERT_RESULT_OK(ret);
+      ASSERT_EQ(StringPrintf("%s/%s", data_dir.path, apex_name.c_str()), *ret);
+    }
+
+    ASSERT_FALSE(instance.HasPreInstalledVersion(apex->GetManifest().name()));
+    ASSERT_TRUE(instance.HasDataVersion(apex->GetManifest().name()));
+  };
+
+  test_fn("com.android.apex.brand.new.apex");
+  instance.Reset();
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex,
+     AddDataApexFailUnverifiedBrandNewApex) {
+  ApexFileRepository::EnableBrandNewApex();
+  TemporaryDir data_dir;
+  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
+
+  ApexFileRepository& instance = ApexFileRepository::GetInstance();
+  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
+  ASSERT_RESULT_OK(apex);
+  ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
+
+  ASSERT_THAT(instance.GetDataPath(apex->GetManifest().name()), Not(Ok()));
+  ASSERT_FALSE(instance.HasDataVersion(apex->GetManifest().name()));
+  instance.Reset();
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex, AddDataApexFailBrandNewApexDisabled) {
+  TemporaryDir data_dir;
+  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
+
+  ApexFileRepository& instance = ApexFileRepository::GetInstance();
+  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
+  ASSERT_RESULT_OK(apex);
+  ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
+
+  ASSERT_THAT(instance.GetDataPath(apex->GetManifest().name()), Not(Ok()));
+  ASSERT_FALSE(instance.HasDataVersion(apex->GetManifest().name()));
+  instance.Reset();
 }
 
 }  // namespace apex
