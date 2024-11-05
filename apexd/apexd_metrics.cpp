@@ -23,6 +23,7 @@
 
 #include <utility>
 
+#include "apex_constants.h"
 #include "apex_file.h"
 #include "apex_file_repository.h"
 #include "apex_sha.h"
@@ -37,25 +38,6 @@ namespace android::apex {
 namespace {
 
 std::unique_ptr<Metrics> gMetrics;
-
-Partition GetPartition(const std::string& path) {
-  if (InVendorPartition(path)) {
-    return Partition::Vendor;
-  }
-  if (InOdmPartition(path)) {
-    return Partition::Odm;
-  }
-  if (StartsWith(path, "/system_ext/apex/")) {
-    return Partition::SystemExt;
-  }
-  if (StartsWith(path, "/system/apex/")) {
-    return Partition::System;
-  }
-  if (StartsWith(path, "/product/apex/")) {
-    return Partition::Product;
-  }
-  return Partition::Unknown;
-}
 
 }  // namespace
 
@@ -92,9 +74,9 @@ void SendApexInstallationRequestedAtom(const std::string& package_path,
   }
 
   const auto& instance = ApexFileRepository::GetInstance();
-  auto preinstalled_path = instance.GetPreinstalledPath(*apex_file);
-  if (!preinstalled_path.ok()) {
-    LOG(WARNING) << preinstalled_path.error();
+  auto partition = instance.GetPartition(*apex_file);
+  if (!partition.ok()) {
+    LOG(WARNING) << partition.error();
     return;
   }
 
@@ -103,7 +85,7 @@ void SendApexInstallationRequestedAtom(const std::string& package_path,
 
   gMetrics->InstallationRequested(
       module_name, apex_file->GetManifest().version(), apex_file_size, *hash,
-      GetPartition(*preinstalled_path), install_type, is_rollback,
+      *partition, install_type, is_rollback,
       apex_file->GetManifest().providesharedapexlibs(), hal_list);
 }
 
