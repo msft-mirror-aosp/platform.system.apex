@@ -361,8 +361,7 @@ static ApexInfo GetApexInfo(const ApexFile& package) {
   out.versionName = package.GetManifest().versionname();
   out.isFactory = instance.IsPreInstalledApex(package);
   out.isActive = false;
-  Result<std::string> preinstalled_path =
-      instance.GetPreinstalledPath(package.GetManifest().name());
+  Result<std::string> preinstalled_path = instance.GetPreinstalledPath(package);
   if (preinstalled_path.ok()) {
     out.preinstalledModulePath = *preinstalled_path;
   }
