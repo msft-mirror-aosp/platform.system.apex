@@ -18,18 +18,21 @@
 
 #include "apexd_vendor_apex.h"
 
+#include <android-base/logging.h>
 #include <android-base/strings.h>
 #include <vintf/VintfObject.h>
 
 #include "apex_file_repository.h"
 #include "apexd_private.h"
-#include "statslog_apex.h"
+#include "apexd_utils.h"
 
 using android::base::Error;
 using android::base::StartsWith;
 
 namespace android {
 namespace apex {
+
+using apexd_private::GetActiveMountPoint;
 
 bool InVendorPartition(const std::string& path) {
   return StartsWith(path, "/vendor/apex/") ||
@@ -46,29 +49,45 @@ bool InOdmPartition(const std::string& path) {
 // version.
 bool IsVendorApex(const ApexFile& apex_file) {
   const auto& instance = ApexFileRepository::GetInstance();
-  const auto& preinstalled =
-      instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& path = preinstalled.get().GetPath();
-  return InVendorPartition(path) || InOdmPartition(path);
+  const auto& path = instance.GetPreinstalledPath(apex_file);
+  return InVendorPartition(*path) || InOdmPartition(*path);
 }
 
-// Checks Compatibility for incoming vendor apex.
+static Result<bool> HasVintfIn(std::span<const std::string> apex_mounts) {
+  for (const auto& mount : apex_mounts) {
+    if (OR_RETURN(PathExists(mount + "/etc/vintf"))) return true;
+  }
+  return false;
+}
+
+// Checks Compatibility for incoming APEXes.
 //    Adds the data from apex's vintf_fragment(s) and tests compatibility.
-base::Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
-                                         const std::string& apex_mount_point) {
+base::Result<void> CheckVintf(std::span<const ApexFile> apex_files,
+                              std::span<const std::string> mount_points) {
   std::string error;
 
-  const std::string apex_name = apex_file.GetManifest().name();
+  std::vector<std::string> current_mounts;
+  for (const auto& apex : apex_files) {
+    current_mounts.push_back(GetActiveMountPoint(apex.GetManifest()));
+  }
 
-  std::string path_to_replace =
-      apexd_private::GetActiveMountPoint(apex_file.GetManifest());
+  // Skip the check unless any of the current/incoming APEXes has etc/vintf.
+  if (!OR_RETURN(HasVintfIn(current_mounts)) &&
+      !OR_RETURN(HasVintfIn(mount_points))) {
+    return {};
+  }
 
   // Create PathReplacingFileSystem instance containing caller's path
-  // substitution
+  // substitutions
+  std::map<std::string, std::string> replacements;
+  CHECK(apex_files.size() == mount_points.size()) << "size mismatch";
+  for (size_t i = 0; i < current_mounts.size(); i++) {
+    replacements.emplace(current_mounts[i], mount_points[i]);
+  }
   std::unique_ptr<vintf::FileSystem> path_replaced_fs =
       std::make_unique<vintf::details::PathReplacingFileSystem>(
-          std::move(path_to_replace), apex_mount_point,
-          std::make_unique<vintf::details::FileSystemImpl>());
+          std::make_unique<vintf::details::FileSystemImpl>(),
+          std::move(replacements));
 
   // Create a new VintfObject that uses our path-replacing FileSystem instance
   auto vintf_with_replaced_path =
@@ -83,53 +102,14 @@ base::Result<void> CheckVendorApexUpdate(const ApexFile& apex_file,
 
   // checkCompatibility on vintfObj using the replacement vintf directory
   int ret = vintf_with_replaced_path->checkCompatibility(&error, flags);
-  LOG(DEBUG) << "CheckVendorApexUpdate: check on vendor apex " << apex_name
-             << " returned " << ret << " (want " << vintf::COMPATIBLE
-             << " == COMPATIBLE)";
   if (ret == vintf::INCOMPATIBLE) {
-    return Error() << "vendor apex is not compatible, error=" << error;
-  } else if (ret != vintf::COMPATIBLE) {
-    return Error() << "Check of vendor apex failed, error=" << error;
+    return Error() << "CheckVintf failed: not compatible. error=" << error;
+  }
+  if (ret != vintf::COMPATIBLE) {
+    return Error() << "CheckVintf failed: error=" << error;
   }
 
   return {};
-}
-
-// GetPreinstallPartitionEnum returns the enumeration value of the preinstall-
-//    partition of the passed apex_file
-int GetPreinstallPartitionEnum(const ApexFile& apex_file) {
-  const auto& instance = ApexFileRepository::GetInstance();
-  // We must test if this apex has a pre-installed version before calling
-  // GetPreInstalledApex() - throws an exception if apex doesn't have one
-  if (!instance.IsPreInstalledApex(apex_file)) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_OTHER;
-  }
-  const auto& preinstalled =
-      instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& preinstalled_path = preinstalled.get().GetPath();
-  if (InVendorPartition(preinstalled_path)) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_VENDOR;
-  }
-  if (InOdmPartition(preinstalled_path)) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_ODM;
-  }
-  if (StartsWith(preinstalled_path, "/system_ext/apex/")) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_SYSTEM_EXT;
-  }
-  if (StartsWith(preinstalled_path, "/system/apex/")) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_SYSTEM;
-  }
-  if (StartsWith(preinstalled_path, "/product/apex/")) {
-    return stats::apex::
-        APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_PRODUCT;
-  }
-  return stats::apex::
-      APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_OTHER;
 }
 
 }  // namespace apex

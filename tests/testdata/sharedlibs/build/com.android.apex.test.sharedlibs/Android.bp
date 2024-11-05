@@ -45,7 +45,7 @@ apex {
     },
 }
 
-genrule {
+java_genrule {
     name: "com.android.apex.test.sharedlibs_generated",
     out: ["com.android.apex.test.sharedlibs_generated.apex"],
     defaults: ["apexer_test_host_tools_list"],

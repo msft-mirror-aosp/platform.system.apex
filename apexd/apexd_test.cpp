@@ -288,8 +288,7 @@ class ApexdUnitTest : public ::testing::Test {
   ApexdConfig config_;
 };
 
-// Apex that does not have pre-installed version, does not get selected
-TEST_F(ApexdUnitTest, ApexMustHavePreInstalledVersionForSelection) {
+TEST_F(ApexdUnitTest, SelectApexForActivationSuccess) {
   AddPreInstalledApex("apex.apexd_test.apex");
   AddPreInstalledApex("com.android.apex.cts.shim.apex");
   auto shared_lib_1 = ApexFile::Open(AddPreInstalledApex(
@@ -307,11 +306,11 @@ TEST_F(ApexdUnitTest, ApexMustHavePreInstalledVersionForSelection) {
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
   const auto all_apex = instance.AllApexFilesByName();
-  // Pass a blank instance so that the data apex files are not considered
+  // Pass a blank instance so that no apex file is considered
   // pre-installed
   const ApexFileRepository instance_blank;
   auto result = SelectApexForActivation(all_apex, instance_blank);
-  ASSERT_EQ(result.size(), 0u);
+  ASSERT_EQ(result.size(), 6u);
   // When passed proper instance they should get selected
   result = SelectApexForActivation(all_apex, instance);
   ASSERT_EQ(result.size(), 3u);
@@ -4183,201 +4182,6 @@ TEST_F(ApexdMountTest, OnStartInVmModeFailsWithWrongRootDigest) {
   ASSERT_EQ(1, OnStartInVmMode());
 }
 
-// Test that OnStart works with only block devices
-TEST_F(ApexdMountTest, OnStartOnlyBlockDevices) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
-  // Set system property to enable block apexes
-  SetBlockApexEnabled(true);
-
-  auto path1 = AddBlockApex("apex.apexd_test.apex");
-
-  ASSERT_THAT(android::apex::AddBlockApex(ApexFileRepository::GetInstance()),
-              Ok());
-
-  OnStart();
-  UnmountOnTearDown(path1);
-
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
-  auto apex_mounts = GetApexMounts();
-
-  ASSERT_THAT(apex_mounts,
-              UnorderedElementsAre("/apex/com.android.apex.test_package",
-                                   "/apex/com.android.apex.test_package@1"));
-}
-
-// Test that we can have a mix of both block and system apexes
-TEST_F(ApexdMountTest, OnStartBlockAndSystemInstalled) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
-  // Set system property to enable block apexes
-  SetBlockApexEnabled(true);
-
-  auto path1 = AddPreInstalledApex("apex.apexd_test.apex");
-  auto path2 = AddBlockApex("apex.apexd_test_different_app.apex");
-
-  auto& instance = ApexFileRepository::GetInstance();
-
-  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
-  ASSERT_THAT(android::apex::AddBlockApex(instance), Ok());
-
-  OnStart();
-  UnmountOnTearDown(path1);
-  UnmountOnTearDown(path2);
-
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
-  auto apex_mounts = GetApexMounts();
-
-  ASSERT_THAT(apex_mounts,
-              UnorderedElementsAre("/apex/com.android.apex.test_package",
-                                   "/apex/com.android.apex.test_package@1",
-                                   "/apex/com.android.apex.test_package_2",
-                                   "/apex/com.android.apex.test_package_2@1"));
-}
-
-TEST_F(ApexdMountTest, OnStartBlockAndCompressedInstalled) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
-  // Set system property to enable block apexes
-  SetBlockApexEnabled(true);
-
-  auto path1 = AddPreInstalledApex("com.android.apex.compressed.v1.capex");
-  auto path2 = AddBlockApex("apex.apexd_test.apex");
-
-  auto& instance = ApexFileRepository::GetInstance();
-
-  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
-  ASSERT_THAT(android::apex::AddBlockApex(instance), Ok());
-
-  OnStart();
-  UnmountOnTearDown(path1);
-  UnmountOnTearDown(path2);
-
-  // Decompressed APEX should be mounted
-  std::string decompressed_active_apex = StringPrintf(
-      "%s/com.android.apex.compressed@1%s", GetDecompressionDir().c_str(),
-      kDecompressedApexPackageSuffix);
-  UnmountOnTearDown(decompressed_active_apex);
-
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
-  auto apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts,
-              UnorderedElementsAre("/apex/com.android.apex.compressed",
-                                   "/apex/com.android.apex.compressed@1",
-                                   "/apex/com.android.apex.test_package",
-                                   "/apex/com.android.apex.test_package@1"));
-}
-
-// Test that data version of apex is used if newer
-TEST_F(ApexdMountTest, BlockAndNewerData) {
-  // MockCheckpointInterface checkpoint_interface;
-  //// Need to call InitializeVold before calling OnStart
-  // InitializeVold(&checkpoint_interface);
-
-  // Set system property to enable block apexes
-  SetBlockApexEnabled(true);
-
-  auto& instance = ApexFileRepository::GetInstance();
-  AddBlockApex("apex.apexd_test.apex");
-  ASSERT_THAT(android::apex::AddBlockApex(instance), Ok());
-
-  TemporaryDir data_dir;
-  auto apexd_test_file_v2 =
-      ApexFile::Open(AddDataApex("apex.apexd_test_v2.apex"));
-  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
-
-  auto all_apex = instance.AllApexFilesByName();
-  auto result = SelectApexForActivation(all_apex, instance);
-  ASSERT_EQ(result.size(), 1u);
-
-  ASSERT_THAT(result,
-              UnorderedElementsAre(ApexFileEq(ByRef(*apexd_test_file_v2))));
-}
-
-// Test that data version of apex not is used if older
-TEST_F(ApexdMountTest, BlockApexAndOlderData) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
-  // Set system property to enable block apexes
-  SetBlockApexEnabled(true);
-
-  auto& instance = ApexFileRepository::GetInstance();
-  auto apexd_test_file_v2 =
-      ApexFile::Open(AddBlockApex("apex.apexd_test_v2.apex"));
-  ASSERT_THAT(android::apex::AddBlockApex(instance), Ok());
-
-  TemporaryDir data_dir;
-  AddDataApex("apex.apexd_test.apex");
-  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
-
-  auto all_apex = instance.AllApexFilesByName();
-  auto result = SelectApexForActivation(all_apex, instance);
-  ASSERT_EQ(result.size(), 1u);
-
-  ASSERT_THAT(result,
-              UnorderedElementsAre(ApexFileEq(ByRef(*apexd_test_file_v2))));
-}
-
-// Test that AddBlockApex does nothing if system property not set.
-TEST_F(ApexdMountTest, AddBlockApexWithoutSystemProp) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
-  auto& instance = ApexFileRepository::GetInstance();
-  AddBlockApex("apex.apexd_test.apex");
-  ASSERT_THAT(android::apex::AddBlockApex(instance), Ok());
-  ASSERT_EQ(instance.AllApexFilesByName().size(), 0ul);
-}
-
-// Test that adding block apex fails if preinstalled version exists
-TEST_F(ApexdMountTest, AddBlockApexFailsWithDuplicate) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
-  // Set system property to enable block apexes
-  SetBlockApexEnabled(true);
-
-  AddPreInstalledApex("apex.apexd_test.apex");
-  AddBlockApex("apex.apexd_test_v2.apex");
-
-  auto& instance = ApexFileRepository::GetInstance();
-
-  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
-  ASSERT_THAT(android::apex::AddBlockApex(instance),
-              HasError(WithMessage(HasSubstr(
-                  "duplicate of com.android.apex.test_package found"))));
-}
-
-// Test that adding block apex fails if preinstalled compressed version exists
-TEST_F(ApexdMountTest, AddBlockApexFailsWithCompressedDuplicate) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
-  // Set system property to enable block apexes
-  SetBlockApexEnabled(true);
-
-  auto path1 = AddPreInstalledApex("com.android.apex.compressed.v1.capex");
-  auto path2 = AddBlockApex("com.android.apex.compressed.v1.apex");
-
-  auto& instance = ApexFileRepository::GetInstance();
-
-  ASSERT_THAT(instance.AddPreInstalledApex({GetBuiltInDir()}), Ok());
-  ASSERT_THAT(android::apex::AddBlockApex(instance),
-              HasError(WithMessage(HasSubstr(
-                  "duplicate of com.android.apex.compressed found"))));
-}
-
 class ApexActivationFailureTests : public ApexdMountTest {};
 
 TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent) {
@@ -4563,13 +4367,27 @@ TEST_F(ApexdMountTest, OnBootstrapCreatesEmptyDmDevices) {
             dm.GetState("com.android.apex.compressed"));
 }
 
+TEST_F(ApexdMountTest, OnBootstrapLoadBootstrapApexOnly) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  AddPreInstalledApex("apex.apexd_bootstrap_test.apex");
+
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Check bootstrap apex was loaded
+  auto active_bootstrap_apex =
+      GetActivePackage("com.android.apex.bootstrap_test_package");
+  ASSERT_THAT(active_bootstrap_apex, Ok());
+  // Check that non-bootstrap apex was not loaded
+  ASSERT_THAT(GetActivePackage("com.android.apex.test_package"), Not(Ok()));
+}
+
 TEST_F(ApexdUnitTest, StagePackagesFailKey) {
   auto status =
       StagePackages({GetTestFile("apex.apexd_test_no_inst_key.apex")});
 
   ASSERT_THAT(
       status,
-      HasError(WithMessage(("No preinstalled apex found for package "
+      HasError(WithMessage(("No preinstalled apex found for unverified package "
                             "com.android.apex.test_package.no_inst_key"))));
 }
 
@@ -4988,6 +4806,254 @@ TEST_F(ApexdMountTest, SubmitSingleStagedSessionKeepsPreviousSessions) {
 
   ASSERT_EQ(239, sessions[3].GetId());
   ASSERT_EQ(SessionState::VERIFIED, sessions[3].GetState());
+}
+
+TEST(Loop, CreateWithApexFile) {
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(apex, Ok());
+  ASSERT_TRUE(apex->GetImageOffset().has_value());
+  ASSERT_TRUE(apex->GetImageSize().has_value());
+
+  auto loop = loop::CreateAndConfigureLoopDevice(apex->GetPath(),
+                                                 apex->GetImageOffset().value(),
+                                                 apex->GetImageSize().value());
+  ASSERT_THAT(loop, Ok());
+}
+
+TEST(Loop, NoSuchFile) {
+  CaptureStderr();
+  {
+    auto loop = loop::CreateAndConfigureLoopDevice("invalid_path", 0, 0);
+    ASSERT_THAT(loop, Not(Ok()));
+  }
+  ASSERT_EQ(GetCapturedStderr(), "");
+}
+
+TEST_F(ApexdMountTest, SubmitStagedSessionSucceedVerifiedBrandNewApex) {
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  PrepareStagedSession("com.android.apex.brand.new.apex", 239);
+  ASSERT_RESULT_OK(SubmitStagedSession(239, {}, false, false, -1));
+
+  auto sessions = GetSessionManager()->GetSessions();
+  ASSERT_EQ(1u, sessions.size());
+  ASSERT_EQ(239, sessions[0].GetId());
+  ASSERT_EQ(SessionState::VERIFIED, sessions[0].GetState());
+  file_repository.Reset();
+}
+
+TEST_F(ApexdMountTest,
+       SubmitStagedSessionSucceedVerifiedBrandNewApexWithActiveVersion) {
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir, data_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+  ASSERT_RESULT_OK(file_repository.AddDataApex(data_dir.path));
+
+  PrepareStagedSession("com.android.apex.brand.new.v2.apex", 239);
+  ASSERT_RESULT_OK(SubmitStagedSession(239, {}, false, false, -1));
+
+  auto sessions = GetSessionManager()->GetSessions();
+  ASSERT_EQ(1u, sessions.size());
+  ASSERT_EQ(239, sessions[0].GetId());
+  ASSERT_EQ(SessionState::VERIFIED, sessions[0].GetState());
+  file_repository.Reset();
+}
+
+TEST_F(ApexdMountTest,
+       SubmitStagedSessionFailBrandNewApexMismatchActiveVersion) {
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir, data_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  fs::copy(GetTestFile(
+               "apexd_testdata/com.android.apex.brand.new.another.avbpubkey"),
+           trusted_key_dir.path);
+  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+  ASSERT_RESULT_OK(file_repository.AddDataApex(data_dir.path));
+
+  PrepareStagedSession("com.android.apex.brand.new.v2.diffkey.apex", 239);
+  auto ret = SubmitStagedSession(239, {}, false, false, -1);
+
+  ASSERT_THAT(
+      ret,
+      HasError(WithMessage(("Brand-new APEX public key doesn't match existing "
+                            "active APEX: com.android.apex.brand.new"))));
+  file_repository.Reset();
+}
+
+TEST_F(ApexdMountTest, SubmitStagedSessionFailBrandNewApexDisabled) {
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  PrepareStagedSession("com.android.apex.brand.new.apex", 239);
+  auto ret = SubmitStagedSession(239, {}, false, false, -1);
+
+  ASSERT_THAT(ret,
+              HasError(WithMessage(("No preinstalled apex found for unverified "
+                                    "package com.android.apex.brand.new"))));
+  file_repository.Reset();
+}
+
+TEST_F(ApexdUnitTest, StagePackagesSucceedVerifiedBrandNewApex) {
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  auto status = StagePackages({GetTestFile("com.android.apex.brand.new.apex")});
+
+  ASSERT_RESULT_OK(status);
+  auto staged_path = StringPrintf("%s/com.android.apex.brand.new@1.apex",
+                                  GetDataDir().c_str());
+  ASSERT_EQ(0, access(staged_path.c_str(), F_OK));
+  file_repository.Reset();
+}
+
+TEST_F(ApexdUnitTest, StagePackagesFailUnverifiedBrandNewApex) {
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir;
+  fs::copy(GetTestFile(
+               "apexd_testdata/com.android.apex.brand.new.another.avbpubkey"),
+           trusted_key_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  auto status = StagePackages({GetTestFile("com.android.apex.brand.new.apex")});
+
+  ASSERT_THAT(status,
+              HasError(WithMessage(("No preinstalled apex found for unverified "
+                                    "package com.android.apex.brand.new"))));
+
+  file_repository.Reset();
+}
+
+TEST_F(ApexdMountTest, ActivatesStagedSessionSucceedVerifiedBrandNewApex) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  auto apex_session =
+      CreateStagedSession("com.android.apex.brand.new.apex", 37);
+  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+
+  std::string active_apex =
+      GetDataDir() + "/" + "com.android.apex.brand.new@1.apex";
+
+  UnmountOnTearDown(active_apex);
+  OnStart();
+
+  // Quick check that session was activated
+  {
+    auto session = GetSessionManager()->GetSession(37);
+    ASSERT_THAT(session, Ok());
+    ASSERT_EQ(session->GetState(), SessionState::ACTIVATED);
+  }
+
+  auto updated_apexes = GetChangedActiveApexesForTesting();
+  ASSERT_EQ(updated_apexes.size(), 1u);
+  auto apex_file = ApexFile::Open(active_apex);
+  ASSERT_THAT(apex_file, Ok());
+  ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+
+  file_repository.Reset();
+}
+
+TEST_F(ApexdMountTest, ActivatesStagedSessionFailUnverifiedBrandNewApex) {
+  MockCheckpointInterface checkpoint_interface;
+  // Need to call InitializeVold before calling OnStart
+  InitializeVold(&checkpoint_interface);
+
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir;
+  fs::copy(GetTestFile(
+               "apexd_testdata/com.android.apex.brand.new.another.avbpubkey"),
+           trusted_key_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  auto apex_session =
+      CreateStagedSession("com.android.apex.brand.new.apex", 37);
+  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+
+  std::string active_apex =
+      GetDataDir() + "/" + "com.android.apex.brand.new@1.apex";
+
+  UnmountOnTearDown(active_apex);
+  OnStart();
+
+  // Quick check that session was activated
+  {
+    auto session = GetSessionManager()->GetSession(37);
+    ASSERT_THAT(session, Ok());
+    ASSERT_EQ(session->GetState(), SessionState::ACTIVATION_FAILED);
+  }
+
+  auto updated_apexes = GetChangedActiveApexesForTesting();
+  ASSERT_EQ(updated_apexes.size(), 0u);
+
+  file_repository.Reset();
+}
+
+TEST_F(ApexdMountTest, NonStagedUpdateFailVerifiedBrandNewApex) {
+  ApexFileRepository::EnableBrandNewApex();
+  auto& file_repository = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  TemporaryDir trusted_key_dir, data_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+  file_repository.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+  auto file_path = AddDataApex("com.android.apex.brand.new.apex");
+  ASSERT_THAT(ActivatePackage(file_path), Ok());
+  UnmountOnTearDown(file_path);
+
+  auto ret = InstallPackage(GetTestFile("com.android.apex.brand.new.apex"),
+                            /* force= */ false);
+  ASSERT_THAT(
+      ret,
+      HasError(WithMessage(HasSubstr("No preinstalled apex found for package "
+                                     "com.android.apex.brand.new"))));
+
+  file_repository.Reset();
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {

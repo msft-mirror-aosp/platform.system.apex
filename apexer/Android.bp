@@ -104,16 +104,18 @@ python_test_host {
         "apexer_test.py",
     ],
     data: [
-        ":com.android.example.apex",
-        ":com.android.example-legacy.apex",
-        ":com.android.example-logging_parent.apex",
-        ":com.android.example-overridden_package_name.apex",
         ":apexer_test_host_tools",
         "testdata/com.android.example.apex.avbpubkey",
         "testdata/com.android.example.apex.pem",
         "testdata/com.android.example.apex.pk8",
         "testdata/com.android.example.apex.x509.pem",
         "testdata/manifest.json",
+    ],
+    device_common_data: [
+        ":com.android.example.apex",
+        ":com.android.example-legacy.apex",
+        ":com.android.example-logging_parent.apex",
+        ":com.android.example-overridden_package_name.apex",
     ],
     test_suites: ["general-tests"],
     libs: [

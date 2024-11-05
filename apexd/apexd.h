@@ -186,10 +186,6 @@ int UnmountAll(bool also_include_staged_apexes);
 android::base::Result<MountedApexDatabase::MountedApexData>
 GetTempMountedApexData(const std::string& package);
 
-// Optimistically tries to remount as many APEX packages as possible.
-// For more documentation see corresponding binder call in IApexService.aidl.
-android::base::Result<void> RemountPackages();
-
 // Exposed for unit tests
 bool ShouldAllocateSpaceForDecompression(const std::string& new_apex_name,
                                          int64_t new_apex_version,
@@ -221,9 +217,6 @@ android::apex::MountedApexDatabase& GetApexDatabaseForTesting();
 // TODO(ioffe): add more documentation.
 android::base::Result<ApexFile> InstallPackage(const std::string& package_path,
                                                bool force);
-
-// Exposed for testing.
-android::base::Result<int> AddBlockApex(ApexFileRepository& instance);
 
 bool IsActiveApexChanged(const ApexFile& apex);
 

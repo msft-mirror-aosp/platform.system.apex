@@ -106,11 +106,8 @@ class ApexService : public BnApexService {
   BinderStatus destroyCeSnapshots(int user_id, int rollback_id) override;
   BinderStatus destroyCeSnapshotsNotSpecified(
       int user_id, const std::vector<int>& retain_rollback_ids) override;
-  BinderStatus remountPackages() override;
   BinderStatus recollectPreinstalledData(
       const std::vector<std::string>& paths) override;
-  BinderStatus recollectDataApex(const std::string& path,
-                                 const std::string& decompression_dir) override;
   BinderStatus markBootCompleted() override;
   BinderStatus calculateSizeForCompressedApex(
       const CompressedApexInfoList& compressed_apex_info_list,
@@ -364,20 +361,9 @@ static ApexInfo GetApexInfo(const ApexFile& package) {
   out.versionName = package.GetManifest().versionname();
   out.isFactory = instance.IsPreInstalledApex(package);
   out.isActive = false;
-  Result<std::string> preinstalled_path =
-      instance.GetPreinstalledPath(package.GetManifest().name());
+  Result<std::string> preinstalled_path = instance.GetPreinstalledPath(package);
   if (preinstalled_path.ok()) {
-    // We replace the preinstalled paths for block devices to /system/apex
-    // because PackageManager will not resolve them if they aren't in one of
-    // the SYSTEM_PARTITIONS defined in PackagePartitions.java.
-    // b/195363518 for more context.
-    const std::string block_path = "/dev/block/";
-    const std::string sys_apex_path =
-        std::string(kApexPackageSystemDir) + "/" +
-        preinstalled_path->substr(block_path.length());
-    out.preinstalledModulePath = preinstalled_path->starts_with(block_path)
-                                     ? sys_apex_path
-                                     : *preinstalled_path;
+    out.preinstalledModulePath = *preinstalled_path;
   }
   out.activeApexChanged = ::android::apex::IsActiveApexChanged(package);
   return out;
@@ -726,23 +712,6 @@ BinderStatus ApexService::destroyCeSnapshotsNotSpecified(
   return BinderStatus::ok();
 }
 
-BinderStatus ApexService::remountPackages() {
-  LOG(INFO) << "remountPackages() received by ApexService";
-
-  if (auto debug = CheckDebuggable("remountPackages"); !debug.isOk()) {
-    return debug;
-  }
-  if (auto root = CheckCallerIsRoot("remountPackages"); !root.isOk()) {
-    return root;
-  }
-  if (auto res = ::android::apex::RemountPackages(); !res.ok()) {
-    return BinderStatus::fromExceptionCode(
-        BinderStatus::EX_SERVICE_SPECIFIC,
-        String8(res.error().message().c_str()));
-  }
-  return BinderStatus::ok();
-}
-
 BinderStatus ApexService::recollectPreinstalledData(
     const std::vector<std::string>& paths) {
   LOG(INFO) << "recollectPreinstalledData() received by ApexService, paths: "
@@ -758,26 +727,6 @@ BinderStatus ApexService::recollectPreinstalledData(
   }
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
   if (auto res = instance.AddPreInstalledApex(paths); !res.ok()) {
-    return BinderStatus::fromExceptionCode(
-        BinderStatus::EX_SERVICE_SPECIFIC,
-        String8(res.error().message().c_str()));
-  }
-  return BinderStatus::ok();
-}
-
-BinderStatus ApexService::recollectDataApex(
-    const std::string& path, const std::string& decompression_dir) {
-  LOG(INFO) << "recollectDataApex() received by ApexService, paths " << path
-            << " and " << decompression_dir;
-
-  if (auto debug = CheckDebuggable("recollectDataApex"); !debug.isOk()) {
-    return debug;
-  }
-  if (auto root = CheckCallerIsRoot("recollectDataApex"); !root.isOk()) {
-    return root;
-  }
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  if (auto res = instance.AddDataApex(path); !res.ok()) {
     return BinderStatus::fromExceptionCode(
         BinderStatus::EX_SERVICE_SPECIFIC,
         String8(res.error().message().c_str()));
@@ -896,17 +845,6 @@ status_t ApexService::shellCommand(int in, int out, int err,
         << std::endl
         << "  submitStagedSession [sessionId] - attempts to submit the "
            "installer session with given id"
-        << std::endl
-        << "  remountPackages - Force apexd to remount active packages. This "
-           "call can be used to speed up development workflow of an APEX "
-           "package. Example of usage:\n"
-           "    1. adb shell stop\n"
-           "    2. adb sync\n"
-           "    3. adb shell cmd -w apexservice remountPackages\n"
-           "    4. adb shell start\n"
-           "\n"
-           "Note: APEX package will be successfully remounted only if there "
-           "are no alive processes holding a reference to it"
         << std::endl;
     dprintf(fd, "%s", log.operator std::string().c_str());
   };
@@ -1097,17 +1035,6 @@ status_t ApexService::shellCommand(int in, int out, int err,
       return OK;
     }
     std::string msg = StringLog() << "Failed to submit session: "
-                                  << status.toString8().c_str() << std::endl;
-    dprintf(err, "%s", msg.c_str());
-    return BAD_VALUE;
-  }
-
-  if (cmd == String16("remountPackages")) {
-    BinderStatus status = remountPackages();
-    if (status.isOk()) {
-      return OK;
-    }
-    std::string msg = StringLog() << "remountPackages failed: "
                                   << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
