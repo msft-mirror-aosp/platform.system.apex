@@ -24,11 +24,15 @@
 
 #include <memory>
 
+#include "apex_file_repository.h"
 #include "apexd.h"
 #include "apexd_checkpoint_vold.h"
 #include "apexd_lifecycle.h"
 #include "apexd_metrics_stats.h"
 #include "apexservice.h"
+#include "com_android_apex_flags.h"
+
+namespace flags = com::android::apex::flags;
 
 namespace {
 
@@ -132,6 +136,19 @@ int main(int argc, char** argv) {
   android::base::InitLogging(argv, &android::base::KernelLogger);
   // TODO(b/158468454): add a -v flag or an external setting to change severity.
   android::base::SetMinimumLogSeverity(android::base::INFO);
+
+  // Two flags are used here:
+  // CLI flag `--enable-brand-new-apex`: used to control the feature usage in
+  // individual targets
+  // AConfig flag `enable_brand_new_apex`: used to advance
+  // the feature to different release stages, and applies to all targets
+  if (flags::enable_brand_new_apex()) {
+    if (argv[1] != nullptr && strcmp("--enable-brand-new-apex", argv[1]) == 0) {
+      android::apex::ApexFileRepository::EnableBrandNewApex();
+      argc--;
+      argv++;
+    }
+  }
 
   const bool has_subcommand = argv[1] != nullptr;
   LOG(INFO) << "Started. subcommand = "
