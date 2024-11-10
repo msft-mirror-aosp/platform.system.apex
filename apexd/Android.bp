@@ -85,6 +85,7 @@ cc_defaults {
         "libvintf",
     ],
     static_libs: [
+        "lib_apex_blocklist_proto",
         "lib_microdroid_metadata_proto",
         "libapex",
         "libavb",
@@ -132,6 +133,10 @@ cc_binary {
     ],
     srcs: [
         "apexd_main.cpp",
+    ],
+    shared_libs: [
+        "server_configurable_flags",
+        "brand_new_apex_flag_c_lib",
     ],
     static_libs: [
         "libapex",
@@ -186,9 +191,11 @@ cc_library_static {
         "libapexd-deps",
     ],
     srcs: [
+        "apex_blocklist.cpp",
         "apex_classpath.cpp",
         "apex_database.cpp",
         "apex_file_repository.cpp",
+        "apexd_brand_new_verifier.cpp",
         "apexd.cpp",
         "apexd_dm.cpp",
         "apexd_lifecycle.cpp",
@@ -498,6 +505,9 @@ cc_test {
         ":gen_capex_without_apex",
         ":gen_capex_with_v2_apex",
         ":gen_key_mismatch_with_original_capex",
+        ":com.android.apex.brand.new",
+        ":com.android.apex.brand.new.v2",
+        ":com.android.apex.brand.new.v2.diffkey",
         ":com.android.apex.cts.shim.v1_prebuilt",
         ":com.android.apex.cts.shim.v2_prebuilt",
         ":com.android.apex.cts.shim.v2_wrong_sha_prebuilt",
@@ -515,6 +525,11 @@ cc_test {
         ":gen_manifest_mismatch_compressed_apex_v2",
         "apexd_testdata/com.android.apex.test_package.avbpubkey",
         "apexd_testdata/com.android.apex.compressed.avbpubkey",
+        "apexd_testdata/com.android.apex.brand.new.avbpubkey",
+        "apexd_testdata/com.android.apex.brand.new.another.avbpubkey",
+        "apexd_testdata/com.android.apex.brand.new.renamed.avbpubkey",
+        "apexd_testdata/blocklist.json",
+        "apexd_testdata/blocklist_invalid.json",
         ":com.android.apex.test.sharedlibs_generated.v1.libvX_prebuilt",
         ":com.android.apex.test.sharedlibs_generated.v2.libvY_prebuilt",
         ":test.rebootless_apex_v1",
@@ -533,11 +548,13 @@ cc_test {
         ":test.rebootless_apex_priv_app_in_apex",
     ],
     srcs: [
+        "apex_blocklist_test.cpp",
         "apex_classpath_test.cpp",
         "apex_database_test.cpp",
         "apex_file_test.cpp",
         "apex_file_repository_test.cpp",
         "apex_manifest_test.cpp",
+        "apexd_brand_new_verifier_test.cpp",
         "apexd_test.cpp",
         "apexd_session_test.cpp",
         "apexd_utils_test.cpp",
@@ -723,4 +740,16 @@ genrule {
     out: [
         "statslog_apex.cpp",
     ],
+}
+
+aconfig_declarations {
+    name: "enable_brand_new_apex",
+    package: "com.android.apex.flags",
+    srcs: ["apexd.aconfig"],
+    container: "system",
+}
+
+cc_aconfig_library {
+    name: "brand_new_apex_flag_c_lib",
+    aconfig_declarations: "enable_brand_new_apex",
 }

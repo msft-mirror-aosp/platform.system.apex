@@ -77,6 +77,7 @@
 #include "apex_manifest.h"
 #include "apex_sha.h"
 #include "apex_shim.h"
+#include "apexd_brand_new_verifier.h"
 #include "apexd_checkpoint.h"
 #include "apexd_dm.h"
 #include "apexd_lifecycle.h"
@@ -405,18 +406,13 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   }
   LOG(VERBOSE) << "Loopback device created: " << loopback_device.name;
 
-  auto& instance = ApexFileRepository::GetInstance();
-
-  auto public_key = instance.GetPublicKey(apex.GetManifest().name());
-  if (!public_key.ok()) {
-    return public_key.error();
-  }
-
-  auto verity_data = apex.VerifyApexVerity(*public_key);
+  auto verity_data = apex.VerifyApexVerity(apex.GetBundledPublicKey());
   if (!verity_data.ok()) {
     return Error() << "Failed to verify Apex Verity data for " << full_path
                    << ": " << verity_data.error();
   }
+
+  auto& instance = ApexFileRepository::GetInstance();
   if (instance.IsBlockApex(apex)) {
     auto root_digest = instance.GetBlockApexRootDigest(apex.GetPath());
     if (root_digest.has_value() &&
@@ -666,12 +662,9 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
 // each boot. Try to avoid putting expensive checks inside this function.
 Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
   // TODO(ioffe): why do we need this here?
-  auto& instance = ApexFileRepository::GetInstance();
-  auto public_key = instance.GetPublicKey(apex_file.GetManifest().name());
-  if (!public_key.ok()) {
-    return public_key.error();
-  }
-  Result<ApexVerityData> verity_or = apex_file.VerifyApexVerity(*public_key);
+  const auto& public_key =
+      OR_RETURN(apexd_private::GetVerifiedPublicKey(apex_file));
+  Result<ApexVerityData> verity_or = apex_file.VerifyApexVerity(public_key);
   if (!verity_or.ok()) {
     return verity_or.error();
   }
@@ -701,6 +694,13 @@ Result<void> VerifyPackagesStagedInstall(
     const std::vector<ApexFile>& apex_files) {
   for (const auto& apex_file : apex_files) {
     OR_RETURN(VerifyPackageBoot(apex_file));
+
+    // Extra verification for brand-new APEX. The case that brand-new APEX is
+    // not enabled when there is install request for brand-new APEX is already
+    // covered in |VerifyPackageBoot|.
+    if (ApexFileRepository::IsBrandNewApexEnabled()) {
+      OR_RETURN(VerifyBrandNewPackageAgainstActive(apex_file));
+    }
   }
 
   // Since there can be multiple staged sessions, let's verify incoming APEXes
@@ -917,6 +917,19 @@ Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
 }
 
 namespace apexd_private {
+
+Result<std::string> GetVerifiedPublicKey(const ApexFile& apex) {
+  auto preinstalled_public_key =
+      ApexFileRepository::GetInstance().GetPublicKey(apex.GetManifest().name());
+  if (preinstalled_public_key.ok()) {
+    return *preinstalled_public_key;
+  } else if (ApexFileRepository::IsBrandNewApexEnabled() &&
+             VerifyBrandNewPackageAgainstPreinstalled(apex).ok()) {
+    return apex.GetBundledPublicKey();
+  }
+  return Error() << "No preinstalled apex found for unverified package "
+                 << apex.GetManifest().name();
+}
 
 bool IsMounted(const std::string& full_path) {
   bool found_mounted = false;
@@ -2301,6 +2314,13 @@ void Initialize(CheckpointInterface* checkpoint_service) {
     return;
   }
 
+  if (ApexFileRepository::IsBrandNewApexEnabled()) {
+    Result<void> result = instance.AddBrandNewApexCredentialAndBlocklist(
+        kPartitionToBrandNewApexConfigDirs);
+    CHECK(result.ok()) << "Failed to collect pre-installed public keys and "
+                          "blocklists for brand-new APEX";
+  }
+
   gMountedApexes.PopulateFromMounts(
       {gConfig->active_apex_data_dir, gConfig->decompression_dir});
 }
@@ -2346,13 +2366,6 @@ std::vector<ApexFileRef> SelectApexForActivation(
       LOG(FATAL) << "Unexpectedly found more than two versions or none for "
                     "APEX package "
                  << package_name;
-      continue;
-    }
-
-    // The package must have a pre-installed version before we consider it for
-    // activation
-    if (!instance.HasPreInstalledVersion(package_name)) {
-      LOG(INFO) << "Package " << package_name << " is not pre-installed";
       continue;
     }
 
@@ -3063,8 +3076,7 @@ void CollectApexInfoList(std::ostream& os,
                                           bool is_active) {
     auto& instance = ApexFileRepository::GetInstance();
 
-    auto preinstalled_path =
-        instance.GetPreinstalledPath(apex.GetManifest().name());
+    auto preinstalled_path = instance.GetPreinstalledPath(apex);
     std::optional<std::string> preinstalled_module_path;
     if (preinstalled_path.ok()) {
       preinstalled_module_path = *preinstalled_path;
