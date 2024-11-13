@@ -20,12 +20,15 @@
 
 #include <string>
 
+#include "apex_constants.h"
 #include "apex_file.h"
 
 namespace android::apex {
 
-// Returns the verification result of a specific brand-new package against the
-// pre-installed public keys and blocklists. Verifies a brand-new APEX in that
+// Verifies a specific brand-new package against the
+// pre-installed public keys and blocklists. The housing partition of the public
+// key and blocklist is returned if the verification succeeds. Verifies a
+// brand-new APEX in that
 // 1. brand-new APEX is enabled
 // 2. it matches exactly one certificate in one of the built-in partitions
 // 3. its name and version are not blocked by the blocklist in the matching
@@ -35,7 +38,7 @@ namespace android::apex {
 // |SubmitStagedSession| (brand-new apex becomes 'staged')
 // |ScanStagedSessionsDirAndStage| ('staged' apex becomes 'active')
 // |ApexFileRepository::AddDataApex| (add 'active' apex to repository)
-android::base::Result<void> VerifyBrandNewPackageAgainstPreinstalled(
+android::base::Result<ApexPartition> VerifyBrandNewPackageAgainstPreinstalled(
     const ApexFile& apex);
 
 // Returns the verification result of a specific brand-new package.
