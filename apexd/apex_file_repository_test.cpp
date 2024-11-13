@@ -87,12 +87,14 @@ TEST(ApexFileRepositoryTest, InitializeSuccess) {
   fs::copy(GetTestFile("apex.apexd_test.apex"), built_in_dir.path);
   fs::copy(GetTestFile("apex.apexd_test_different_app.apex"),
            built_in_dir.path);
+  ApexPartition partition = ApexPartition::System;
 
   fs::copy(GetTestFile("apex.apexd_test.apex"), data_dir.path);
   fs::copy(GetTestFile("apex.apexd_test_different_app.apex"), data_dir.path);
 
   ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({built_in_dir.path}));
+  ASSERT_RESULT_OK(
+      instance.AddPreInstalledApex({{partition, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   // Now test that apexes were scanned correctly;
@@ -119,6 +121,12 @@ TEST(ApexFileRepositoryTest, InitializeSuccess) {
       ASSERT_EQ(StringPrintf("%s/%s", data_dir.path, apex_name.c_str()), *ret);
     }
 
+    {
+      auto ret = instance.GetPartition(*apex);
+      ASSERT_RESULT_OK(ret);
+      ASSERT_EQ(partition, *ret);
+    }
+
     ASSERT_TRUE(instance.HasPreInstalledVersion(apex->GetManifest().name()));
     ASSERT_TRUE(instance.HasDataVersion(apex->GetManifest().name()));
   };
@@ -127,7 +135,8 @@ TEST(ApexFileRepositoryTest, InitializeSuccess) {
   test_fn("apex.apexd_test_different_app.apex");
 
   // Check that second call will succeed as well.
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({built_in_dir.path}));
+  ASSERT_RESULT_OK(
+      instance.AddPreInstalledApex({{partition, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   test_fn("apex.apexd_test.apex");
@@ -142,7 +151,8 @@ TEST(ApexFileRepositoryTest, InitializeFailureCorruptApex) {
            td.path);
 
   ApexFileRepository instance;
-  ASSERT_THAT(instance.AddPreInstalledApex({td.path}), Not(Ok()));
+  ASSERT_THAT(instance.AddPreInstalledApex({{ApexPartition::System, td.path}}),
+              Not(Ok()));
 }
 
 TEST(ApexFileRepositoryTest, InitializeCompressedApexWithoutApex) {
@@ -153,7 +163,8 @@ TEST(ApexFileRepositoryTest, InitializeCompressedApexWithoutApex) {
 
   ApexFileRepository instance;
   // Compressed APEX without APEX cannot be opened
-  ASSERT_THAT(instance.AddPreInstalledApex({td.path}), Not(Ok()));
+  ASSERT_THAT(instance.AddPreInstalledApex({{ApexPartition::System, td.path}}),
+              Not(Ok()));
 }
 
 TEST(ApexFileRepositoryTest, InitializeSameNameDifferentPathAborts) {
@@ -166,7 +177,7 @@ TEST(ApexFileRepositoryTest, InitializeSameNameDifferentPathAborts) {
   ASSERT_DEATH(
       {
         ApexFileRepository instance;
-        instance.AddPreInstalledApex({td.path});
+        instance.AddPreInstalledApex({{ApexPartition::System, td.path}});
       },
       "");
 }
@@ -187,7 +198,8 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSuccess) {
                                   persist_prefix, bootconfig_prefix});
 
   auto test_fn = [&](const std::string& selected_filename) {
-    ASSERT_RESULT_OK(instance.AddPreInstalledApex({td.path}));
+    ASSERT_RESULT_OK(
+        instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
     auto ret = instance.GetPreinstalledPath(*apex);
     ASSERT_RESULT_OK(ret);
     ASSERT_EQ(StringPrintf("%s/%s", td.path, selected_filename.c_str()), *ret);
@@ -224,7 +236,8 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSkipsForDifferingKeys) {
   ApexFileRepository instance(
       /*enforce_multi_install_partition=*/false,
       /*multi_install_select_prop_prefixes=*/{prop_prefix});
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({td.path}));
+  ASSERT_RESULT_OK(
+      instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
   // Neither version should be have been installed.
   ASSERT_THAT(instance.GetPreinstalledPath(*apex), Not(Ok()));
 
@@ -249,7 +262,8 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSkipsForInvalidPartition) {
   ApexFileRepository instance(
       /*enforce_multi_install_partition=*/true,
       /*multi_install_select_prop_prefixes=*/{prop_prefix});
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({td.path}));
+  ASSERT_RESULT_OK(
+      instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
   // Neither version should be have been installed.
   ASSERT_THAT(instance.GetPreinstalledPath(*apex), Not(Ok()));
 
@@ -267,7 +281,7 @@ TEST(ApexFileRepositoryTest,
   ASSERT_DEATH(
       {
         ApexFileRepository instance;
-        instance.AddPreInstalledApex({td.path});
+        instance.AddPreInstalledApex({{ApexPartition::System, td.path}});
       },
       "");
 }
@@ -278,7 +292,8 @@ TEST(ApexFileRepositoryTest, InitializePublicKeyUnexpectdlyChangedAborts) {
   fs::copy(GetTestFile("apex.apexd_test.apex"), td.path);
 
   ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({td.path}));
+  ASSERT_RESULT_OK(
+      instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
 
   auto apex_file = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
 
@@ -304,7 +319,9 @@ TEST(ApexFileRepositoryTest, InitializePublicKeyUnexpectdlyChangedAborts) {
     ASSERT_NE(*public_key, apex->GetBundledPublicKey());
   }
 
-  ASSERT_DEATH({ instance.AddPreInstalledApex({td.path}); }, "");
+  ASSERT_DEATH(
+      { instance.AddPreInstalledApex({{ApexPartition::System, td.path}}); },
+      "");
 }
 
 TEST(ApexFileRepositoryTest,
@@ -314,7 +331,8 @@ TEST(ApexFileRepositoryTest,
   fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"), td.path);
 
   ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({td.path}));
+  ASSERT_RESULT_OK(
+      instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
 
   // Check that apex was loaded.
   auto apex_file =
@@ -341,7 +359,9 @@ TEST(ApexFileRepositoryTest,
     ASSERT_NE(*public_key, apex->GetBundledPublicKey());
   }
 
-  ASSERT_DEATH({ instance.AddPreInstalledApex({td.path}); }, "");
+  ASSERT_DEATH(
+      { instance.AddPreInstalledApex({{ApexPartition::System, td.path}}); },
+      "");
 }
 
 TEST(ApexFileRepositoryTest, IsPreInstalledApex) {
@@ -351,7 +371,8 @@ TEST(ApexFileRepositoryTest, IsPreInstalledApex) {
   fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"), td.path);
 
   ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({td.path}));
+  ASSERT_RESULT_OK(
+      instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
 
   auto compressed_apex = ApexFile::Open(
       StringPrintf("%s/com.android.apex.compressed.v1.capex", td.path));
@@ -413,7 +434,8 @@ TEST(ApexFileRepositoryTest, AddAndGetDataApex) {
                         kDecompressedApexPackageSuffix));
 
   ApexFileRepository instance(decompression_dir.path);
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({built_in_dir.path}));
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   // ApexFileRepository should only deal with APEX in /data/apex/active.
@@ -457,7 +479,8 @@ TEST(ApexFileRepositoryTest, AddDataApexPrioritizeHigherVersionApex) {
   fs::copy(GetTestFile("apex.apexd_test_v2.apex"), data_dir.path);
 
   ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({built_in_dir.path}));
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   auto data_apexs = instance.GetDataApexFiles();
@@ -474,7 +497,8 @@ TEST(ApexFileRepositoryTest, AddDataApexDoesNotScanDecompressedApex) {
                         built_in_dir.path, decompression_dir.path);
 
   ApexFileRepository instance(decompression_dir.path);
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({built_in_dir.path}));
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   auto data_apexs = instance.GetDataApexFiles();
@@ -488,7 +512,8 @@ TEST(ApexFileRepositoryTest, AddDataApexIgnoreWrongPublicKey) {
   fs::copy(GetTestFile("apex.apexd_test_different_key.apex"), data_dir.path);
 
   ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({built_in_dir.path}));
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   auto data_apexs = instance.GetDataApexFiles();
@@ -503,7 +528,8 @@ TEST(ApexFileRepositoryTest, GetPreInstalledApexFiles) {
            built_in_dir.path);
 
   ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({built_in_dir.path}));
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
 
   auto pre_installed_apexs = instance.GetPreInstalledApexFiles();
   auto pre_apex_1 = ApexFile::Open(
@@ -522,7 +548,8 @@ TEST(ApexFileRepositoryTest, AllApexFilesByName) {
   fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"),
            built_in_dir.path);
   ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({built_in_dir.path}));
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
 
   TemporaryDir data_dir;
   fs::copy(GetTestFile("com.android.apex.cts.shim.v2.apex"), data_dir.path);
@@ -557,7 +584,8 @@ TEST(ApexFileRepositoryTest, GetDataApex) {
   fs::copy(GetTestFile("apex.apexd_test_v2.apex"), data_dir.path);
 
   ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({built_in_dir.path}));
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   auto apex =
@@ -583,7 +611,8 @@ TEST(ApexFileRepositoryTest, GetPreInstalledApex) {
   fs::copy(GetTestFile("apex.apexd_test.apex"), built_in_dir.path);
 
   ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex({built_in_dir.path}));
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
 
   auto apex = ApexFile::Open(
       StringPrintf("%s/apex.apexd_test.apex", built_in_dir.path));
@@ -675,11 +704,17 @@ TEST_F(ApexFileRepositoryTestAddBlockApex,
   auto ret_foo = instance.GetPreInstalledApex("com.android.apex.test_package");
   ASSERT_THAT(ret_foo, ApexFileEq(ByRef(*apex_foo)));
 
+  auto partition_foo = instance.GetPartition(*apex_foo);
+  ASSERT_EQ(*partition_foo, ApexPartition::System);
+
   auto apex_bar = ApexFile::Open(apex_bar_path);
   ASSERT_RESULT_OK(apex_bar);
   auto ret_bar =
       instance.GetPreInstalledApex("com.android.apex.test_package_2");
   ASSERT_THAT(ret_bar, ApexFileEq(ByRef(*apex_bar)));
+
+  auto partition_bar = instance.GetPartition(*apex_bar);
+  ASSERT_EQ(*partition_bar, ApexPartition::System);
 }
 
 TEST_F(ApexFileRepositoryTestAddBlockApex,
@@ -1073,6 +1108,12 @@ TEST(ApexFileRepositoryTestBrandNewApex,
       ASSERT_EQ(StringPrintf("%s/%s", data_dir.path, apex_name.c_str()), *ret);
     }
 
+    {
+      auto ret = instance.GetPartition(*apex);
+      ASSERT_RESULT_OK(ret);
+      ASSERT_EQ(partition, *ret);
+    }
+
     ASSERT_FALSE(instance.HasPreInstalledVersion(apex->GetManifest().name()));
     ASSERT_TRUE(instance.HasDataVersion(apex->GetManifest().name()));
   };
@@ -1160,6 +1201,58 @@ TEST(ApexFileRepositoryTestBrandNewApex,
   ASSERT_RESULT_OK(apex);
 
   auto ret = instance.GetPreinstalledPath(*apex);
+  ASSERT_THAT(ret, Not(Ok()));
+  instance.Reset();
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex,
+     GetPartitionSucceedVerifiedBrandNewApex) {
+  ApexFileRepository::EnableBrandNewApex();
+  TemporaryDir trusted_key_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+
+  ApexFileRepository& instance = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  instance.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
+  ASSERT_RESULT_OK(apex);
+
+  auto ret = instance.GetPartition(*apex);
+  ASSERT_RESULT_OK(ret);
+  ASSERT_EQ(*ret, partition);
+  instance.Reset();
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex,
+     GetPartitionFailUnverifiedBrandNewApex) {
+  ApexFileRepository::EnableBrandNewApex();
+  ApexFileRepository& instance = ApexFileRepository::GetInstance();
+
+  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
+  ASSERT_RESULT_OK(apex);
+
+  auto ret = instance.GetPartition(*apex);
+  ASSERT_THAT(ret, Not(Ok()));
+  instance.Reset();
+}
+
+TEST(ApexFileRepositoryTestBrandNewApex, GetPartitionFailBrandNewApexDisabled) {
+  TemporaryDir trusted_key_dir;
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           trusted_key_dir.path);
+
+  ApexFileRepository& instance = ApexFileRepository::GetInstance();
+  const auto partition = ApexPartition::System;
+  instance.AddBrandNewApexCredentialAndBlocklist(
+      {{partition, trusted_key_dir.path}});
+
+  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
+  ASSERT_RESULT_OK(apex);
+
+  auto ret = instance.GetPartition(*apex);
   ASSERT_THAT(ret, Not(Ok()));
   instance.Reset();
 }
