@@ -62,7 +62,8 @@ std::string GetApexSelectFilenameFromProp(
   return "";
 }
 
-Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
+Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir,
+                                                ApexPartition partition) {
   LOG(INFO) << "Scanning " << dir << " for pre-installed ApexFiles";
   if (access(dir.c_str(), F_OK) != 0 && errno == ENOENT) {
     LOG(WARNING) << dir << " does not exist. Skipping";
@@ -118,6 +119,7 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
         if (auto it = pre_installed_store_.find(name);
             it != pre_installed_store_.end()) {
           pre_installed_store_.erase(it);
+          partition_store_.erase(name);
         }
         continue;
       }
@@ -128,6 +130,7 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
                   << name;
         // Add the APEX file to the store if its filename matches the property.
         pre_installed_store_.emplace(name, std::move(*apex_file));
+        partition_store_.emplace(name, partition);
       } else {
         LOG(INFO) << "Skipping APEX at path " << path
                   << " because it does not match expected multi-install"
@@ -140,6 +143,7 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
     auto it = pre_installed_store_.find(name);
     if (it == pre_installed_store_.end()) {
       pre_installed_store_.emplace(name, std::move(*apex_file));
+      partition_store_.emplace(name, partition);
     } else if (it->second.GetPath() != apex_file->GetPath()) {
       LOG(FATAL) << "Found two apex packages " << it->second.GetPath()
                  << " and " << apex_file->GetPath()
@@ -160,9 +164,10 @@ ApexFileRepository& ApexFileRepository::GetInstance() {
 }
 
 android::base::Result<void> ApexFileRepository::AddPreInstalledApex(
-    const std::vector<std::string>& prebuilt_dirs) {
-  for (const auto& dir : prebuilt_dirs) {
-    if (auto result = ScanBuiltInDir(dir); !result.ok()) {
+    const std::unordered_map<ApexPartition, std::string>&
+        partition_to_prebuilt_dirs) {
+  for (const auto& [partition, dir] : partition_to_prebuilt_dirs) {
+    if (auto result = ScanBuiltInDir(dir, partition); !result.ok()) {
       return result.error();
     }
   }
@@ -296,6 +301,7 @@ Result<int> ApexFileRepository::AddBlockApex(
                      << it->second.GetPath();
     }
     store.emplace(name, std::move(*apex_file));
+    partition_store_.emplace(name, ApexPartition::System);
 
     ret++;
   }
@@ -337,13 +343,15 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
         continue;
       }
     } else if (ApexFileRepository::IsBrandNewApexEnabled()) {
-      auto brand_new_verified =
+      auto verified_partition =
           VerifyBrandNewPackageAgainstPreinstalled(*apex_file);
-      if (!brand_new_verified.ok()) {
+      if (!verified_partition.ok()) {
         LOG(ERROR) << "Skipping " << file << " : "
-                   << brand_new_verified.error();
+                   << verified_partition.error();
         continue;
       }
+      // Stores partition for already-verified brand-new APEX.
+      partition_store_.emplace(name, *verified_partition);
     } else {
       LOG(ERROR) << "Skipping " << file << " : no preinstalled apex";
       // Ignore data apex without corresponding pre-installed apex
@@ -422,6 +430,21 @@ Result<void> ApexFileRepository::AddBrandNewApexCredentialAndBlocklist(
     brand_new_apex_blocked_version_.emplace(partition, apex_name_to_version);
   }
   return {};
+}
+
+Result<ApexPartition> ApexFileRepository::GetPartition(
+    const ApexFile& apex) const {
+  const std::string& name = apex.GetManifest().name();
+  auto it = partition_store_.find(name);
+  if (it != partition_store_.end()) {
+    return it->second;
+  }
+
+  // Supports staged but not-yet-activated brand-new APEX.
+  if (!ApexFileRepository::IsBrandNewApexEnabled()) {
+    return Error() << "No preinstalled data found for package " << name;
+  }
+  return OR_RETURN(VerifyBrandNewPackageAgainstPreinstalled(apex));
 }
 
 // TODO(b/179497746): remove this method when we add api for fetching ApexFile
