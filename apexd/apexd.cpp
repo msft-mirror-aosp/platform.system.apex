@@ -62,6 +62,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -2204,7 +2205,7 @@ int OnBootstrap() {
 
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
   Result<void> status =
-      instance.AddPreInstalledApex(gConfig->apex_built_in_dirs);
+      instance.AddPreInstalledApex(gConfig->apex_partition_to_built_in_dirs);
   if (!status.ok()) {
     LOG(ERROR) << "Failed to collect APEX keys : " << status.error();
     return 1;
@@ -2307,7 +2308,8 @@ void InitializeSessionManager(ApexSessionManager* session_manager) {
 void Initialize(CheckpointInterface* checkpoint_service) {
   InitializeVold(checkpoint_service);
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  Result<void> status = instance.AddPreInstalledApex(kApexPackageBuiltinDirs);
+  Result<void> status =
+      instance.AddPreInstalledApex(kPartitionToApexPackageDirs);
   if (!status.ok()) {
     LOG(ERROR) << "Failed to collect pre-installed APEX files : "
                << status.error();
@@ -3067,6 +3069,21 @@ int64_t CalculateSizeForCompressedApex(
   return result;
 }
 
+std::string CastPartition(ApexPartition in) {
+  switch (in) {
+    case ApexPartition::System:
+      return "SYSTEM";
+    case ApexPartition::SystemExt:
+      return "SYSTEM_EXT";
+    case ApexPartition::Product:
+      return "PRODUCT";
+    case ApexPartition::Vendor:
+      return "VENDOR";
+    case ApexPartition::Odm:
+      return "ODM";
+  }
+}
+
 void CollectApexInfoList(std::ostream& os,
                          const std::vector<ApexFile>& active_apexs,
                          const std::vector<ApexFile>& inactive_apexs) {
@@ -3082,6 +3099,9 @@ void CollectApexInfoList(std::ostream& os,
       preinstalled_module_path = *preinstalled_path;
     }
 
+    Result<ApexPartition> partition = instance.GetPartition(apex);
+    CHECK(partition.ok());
+
     std::optional<int64_t> mtime =
         instance.GetBlockApexLastUpdateSeconds(apex.GetPath());
     if (!mtime.has_value()) {
@@ -3096,7 +3116,7 @@ void CollectApexInfoList(std::ostream& os,
         apex.GetManifest().name(), apex.GetPath(), preinstalled_module_path,
         apex.GetManifest().version(), apex.GetManifest().versionname(),
         instance.IsPreInstalledApex(apex), is_active, mtime,
-        apex.GetManifest().providesharedapexlibs());
+        apex.GetManifest().providesharedapexlibs(), CastPartition(*partition));
     apex_infos.emplace_back(std::move(apex_info));
   };
   for (const auto& apex : active_apexs) {
@@ -3205,7 +3225,8 @@ int OnStartInVmMode() {
   auto& instance = ApexFileRepository::GetInstance();
 
   // Scan pre-installed apexes
-  if (auto status = instance.AddPreInstalledApex(gConfig->apex_built_in_dirs);
+  if (auto status = instance.AddPreInstalledApex(
+          gConfig->apex_partition_to_built_in_dirs);
       !status.ok()) {
     LOG(ERROR) << "Failed to scan pre-installed APEX files: " << status.error();
     return 1;
@@ -3238,10 +3259,12 @@ int OnStartInVmMode() {
 
 int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
   auto& instance = ApexFileRepository::GetInstance();
-  if (auto status = instance.AddPreInstalledApex(gConfig->apex_built_in_dirs);
+  if (auto status = instance.AddPreInstalledApex(
+          gConfig->apex_partition_to_built_in_dirs);
       !status.ok()) {
     LOG(ERROR) << "Failed to scan pre-installed apexes from "
-               << Join(gConfig->apex_built_in_dirs, ',');
+               << std::format("{}", gConfig->apex_partition_to_built_in_dirs |
+                                        std::views::values);
     return 1;
   }
   if (also_include_staged_apexes) {
