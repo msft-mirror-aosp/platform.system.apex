@@ -95,7 +95,8 @@ MATCHER_P(ApexInfoEq, other, "") {
                   Eq(other.preinstalledModulePath)),
             Field("versionCode", &ApexInfo::versionCode, Eq(other.versionCode)),
             Field("isFactory", &ApexInfo::isFactory, Eq(other.isFactory)),
-            Field("isActive", &ApexInfo::isActive, Eq(other.isActive))),
+            Field("isActive", &ApexInfo::isActive, Eq(other.isActive)),
+            Field("partition", &ApexInfo::partition, Eq(other.partition))),
       arg, result_listener);
 }
 
@@ -159,6 +160,7 @@ inline void PrintTo(const ApexInfo& apex, std::ostream* os) {
   *os << "  versionCode : " << apex.versionCode << "\n";
   *os << "  isFactory : " << apex.isFactory << "\n";
   *os << "  isActive : " << apex.isActive << "\n";
+  *os << "  partition : " << toString(apex.partition) << "\n";
   *os << "}";
 }
 
@@ -486,7 +488,9 @@ MATCHER_P(ApexInfoXmlEq, other, "") {
                    Eq(other.getIsFactory())),
           Property("isActive", &ApexInfo::getIsActive, Eq(other.getIsActive())),
           Property("lastUpdateMillis", &ApexInfo::getLastUpdateMillis,
-                   Eq(other.getLastUpdateMillis()))),
+                   Eq(other.getLastUpdateMillis())),
+          Property("partition", &ApexInfo::getPartition,
+                   Eq(other.getPartition()))),
       arg, result_listener);
 }
 
@@ -504,6 +508,7 @@ inline void PrintTo(const ApexInfo& apex, std::ostream* os) {
   *os << "  versionCode : " << apex.getVersionCode() << "\n";
   *os << "  isFactory : " << apex.getIsFactory() << "\n";
   *os << "  isActive : " << apex.getIsActive() << "\n";
+  *os << "  partition : " << apex.getPartition() << "\n";
   *os << "}";
 }
 
