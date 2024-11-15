@@ -268,6 +268,10 @@ class Apex(object):
       # TODO(b/279688635) f2fs is not supported yet.
       sys.exit(f"{self._payload_fs_type} is not supported for `extract`.")
 
+  @property
+  def payload_fs_type(self) -> str:
+    return self._payload_fs_type
+
 
 def RunList(args):
   if GetType(args.apex) == ApexType.COMPRESSED:
@@ -339,6 +343,8 @@ def RunInfo(args):
       print(args.apex + ' is not a valid apex')
       sys.exit(1)
     print(res.name)
+  elif args.print_payload_type:
+    print(Apex(args).payload_fs_type)
   else:
     manifest = apex_manifest.fromApex(args.apex)
     print(apex_manifest.toJsonString(manifest))
@@ -415,6 +421,9 @@ def main(argv):
   parser_info.add_argument('apex', type=str, help='APEX file')
   parser_info.add_argument('--print-type',
                            help='Prints type of the apex (COMPRESSED or UNCOMPRESSED)',
+                           action='store_true')
+  parser_info.add_argument('--print-payload-type',
+                           help='Prints filesystem type of the apex payload',
                            action='store_true')
   parser_info.set_defaults(func=RunInfo)
 
