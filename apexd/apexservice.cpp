@@ -375,14 +375,13 @@ static ApexInfo GetApexInfo(const ApexFile& package) {
   out.versionName = package.GetManifest().versionname();
   out.isFactory = instance.IsPreInstalledApex(package);
   out.isActive = false;
-  Result<std::string> preinstalled_path = instance.GetPreinstalledPath(package);
+  Result<std::string> preinstalled_path =
+      instance.GetPreinstalledPath(package.GetManifest().name());
   if (preinstalled_path.ok()) {
     out.preinstalledModulePath = *preinstalled_path;
   }
   out.activeApexChanged = ::android::apex::IsActiveApexChanged(package);
-  Result<ApexPartition> partition = instance.GetPartition(package);
-  CHECK(partition.ok());
-  out.partition = Cast(*partition);
+  out.partition = Cast(OR_FATAL(instance.GetPartition(package)));
   return out;
 }
 
@@ -742,7 +741,7 @@ BinderStatus ApexService::recollectPreinstalledData() {
   }
 
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  if (auto res = instance.AddPreInstalledApex(kPartitionToApexPackageDirs);
+  if (auto res = instance.AddPreInstalledApex(kBuiltinApexPackageDirs);
       !res.ok()) {
     return BinderStatus::fromExceptionCode(
         BinderStatus::EX_SERVICE_SPECIFIC,
