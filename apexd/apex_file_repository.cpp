@@ -102,8 +102,9 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir,
                    << apex_file->GetPath();
         continue;
       }
-      if (enforce_multi_install_partition_ && !InVendorPartition(path) &&
-          !InOdmPartition(path)) {
+      if (enforce_multi_install_partition_ &&
+          partition != ApexPartition::Vendor &&
+          partition != ApexPartition::Odm) {
         LOG(ERROR) << "Multi-install APEX " << path
                    << " can only be preinstalled on /{odm,vendor}/apex/.";
         continue;
@@ -301,6 +302,8 @@ Result<int> ApexFileRepository::AddBlockApex(
                      << it->second.GetPath();
     }
     store.emplace(name, std::move(*apex_file));
+    // NOTE: We consider block APEXes are SYSTEM. APEX Config should be extended
+    //       to support non-system block APEXes.
     partition_store_.emplace(name, ApexPartition::System);
 
     ret++;
@@ -444,7 +447,7 @@ Result<ApexPartition> ApexFileRepository::GetPartition(
   if (!ApexFileRepository::IsBrandNewApexEnabled()) {
     return Error() << "No preinstalled data found for package " << name;
   }
-  return OR_RETURN(VerifyBrandNewPackageAgainstPreinstalled(apex));
+  return VerifyBrandNewPackageAgainstPreinstalled(apex);
 }
 
 // TODO(b/179497746): remove this method when we add api for fetching ApexFile
@@ -469,28 +472,10 @@ Result<const std::string> ApexFileRepository::GetPublicKey(
 // TODO(b/179497746): remove this method when we add api for fetching ApexFile
 //  by name
 Result<const std::string> ApexFileRepository::GetPreinstalledPath(
-    const ApexFile& apex) const {
-  auto name = apex.GetManifest().name();
+    const std::string& name) const {
   auto it = pre_installed_store_.find(name);
   if (it == pre_installed_store_.end()) {
-    if (!ApexFileRepository::IsBrandNewApexEnabled()) {
-      return Error() << "No preinstalled data found for package " << name;
-    }
-
-    if (!HasDataVersion(name)) {
-      // Skips verification if there is already data version. It happens when
-      // APEX is staged but not yet activated.
-      OR_RETURN(VerifyBrandNewPackageAgainstPreinstalled(apex));
-    }
-    // There must be a matching partition because the APEX is verified above.
-    auto partition =
-        GetBrandNewApexPublicKeyPartition(apex.GetBundledPublicKey()).value();
-    auto itt = kPartitionToApexPackageDirs.find(partition);
-    if (itt == kPartitionToApexPackageDirs.end()) {
-      return Error() << "No preinstalled data found for brand-new APEX package "
-                     << name;
-    }
-    return itt->second + "/brand_new";
+    return Error() << "No preinstalled data found for package " << name;
   }
   return it->second.GetPath();
 }
