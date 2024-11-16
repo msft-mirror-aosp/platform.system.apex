@@ -109,7 +109,7 @@ TEST(ApexFileRepositoryTest, InitializeSuccess) {
     }
 
     {
-      auto ret = instance.GetPreinstalledPath(*apex);
+      auto ret = instance.GetPreinstalledPath(apex->GetManifest().name());
       ASSERT_RESULT_OK(ret);
       ASSERT_EQ(StringPrintf("%s/%s", built_in_dir.path, apex_name.c_str()),
                 *ret);
@@ -200,7 +200,7 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSuccess) {
   auto test_fn = [&](const std::string& selected_filename) {
     ASSERT_RESULT_OK(
         instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
-    auto ret = instance.GetPreinstalledPath(*apex);
+    auto ret = instance.GetPreinstalledPath(apex->GetManifest().name());
     ASSERT_RESULT_OK(ret);
     ASSERT_EQ(StringPrintf("%s/%s", td.path, selected_filename.c_str()), *ret);
     instance.Reset();
@@ -239,7 +239,8 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSkipsForDifferingKeys) {
   ASSERT_RESULT_OK(
       instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
   // Neither version should be have been installed.
-  ASSERT_THAT(instance.GetPreinstalledPath(*apex), Not(Ok()));
+  ASSERT_THAT(instance.GetPreinstalledPath(apex->GetManifest().name()),
+              Not(Ok()));
 
   android::base::SetProperty(prop, "");
 }
@@ -265,7 +266,8 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSkipsForInvalidPartition) {
   ASSERT_RESULT_OK(
       instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
   // Neither version should be have been installed.
-  ASSERT_THAT(instance.GetPreinstalledPath(*apex), Not(Ok()));
+  ASSERT_THAT(instance.GetPreinstalledPath(apex->GetManifest().name()),
+              Not(Ok()));
 
   android::base::SetProperty(prop, "");
 }
@@ -298,7 +300,7 @@ TEST(ApexFileRepositoryTest, InitializePublicKeyUnexpectdlyChangedAborts) {
   auto apex_file = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
 
   // Check that apex was loaded.
-  auto path = instance.GetPreinstalledPath(*apex_file);
+  auto path = instance.GetPreinstalledPath(apex_file->GetManifest().name());
   ASSERT_RESULT_OK(path);
   ASSERT_EQ(StringPrintf("%s/apex.apexd_test.apex", td.path), *path);
 
@@ -337,7 +339,7 @@ TEST(ApexFileRepositoryTest,
   // Check that apex was loaded.
   auto apex_file =
       ApexFile::Open(GetTestFile("com.android.apex.compressed.v1.capex"));
-  auto path = instance.GetPreinstalledPath(*apex_file);
+  auto path = instance.GetPreinstalledPath(apex_file->GetManifest().name());
   ASSERT_RESULT_OK(path);
   ASSERT_EQ(StringPrintf("%s/com.android.apex.compressed.v1.capex", td.path),
             *path);
@@ -700,11 +702,12 @@ TEST_F(ApexFileRepositoryTestAddBlockApex,
   // block apexes can be identified with IsBlockApex
   ASSERT_TRUE(instance.IsBlockApex(*apex_foo));
 
-  // "block" apexes are treated as "pre-installed"
+  // "block" apexes are treated as "pre-installed" with "is_factory: true"
   auto ret_foo = instance.GetPreInstalledApex("com.android.apex.test_package");
   ASSERT_THAT(ret_foo, ApexFileEq(ByRef(*apex_foo)));
 
   auto partition_foo = instance.GetPartition(*apex_foo);
+  ASSERT_RESULT_OK(partition_foo);
   ASSERT_EQ(*partition_foo, ApexPartition::System);
 
   auto apex_bar = ApexFile::Open(apex_bar_path);
@@ -742,14 +745,9 @@ TEST_F(ApexFileRepositoryTestAddBlockApex,
   ASSERT_RESULT_OK(status);
 
   // foo is added, but bar is not
-  auto apex_foo = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
-  auto ret_foo = instance.GetPreinstalledPath(*apex_foo);
-  ASSERT_RESULT_OK(ret_foo);
-  ASSERT_EQ(apex_foo_path, *ret_foo);
-  auto apex_bar =
-      ApexFile::Open(GetTestFile("apex.apexd_test_different_app.apex"));
-  auto ret_bar = instance.GetPreinstalledPath(*apex_bar);
-  ASSERT_THAT(ret_bar, Not(Ok()));
+  ASSERT_TRUE(instance.HasPreInstalledVersion("com.android.apex.test_package"));
+  ASSERT_FALSE(
+      instance.HasPreInstalledVersion("com.android.apex.test_package_2"));
 }
 
 TEST_F(ApexFileRepositoryTestAddBlockApex, FailsWhenTheresDuplicateNames) {
@@ -1096,29 +1094,29 @@ TEST(ApexFileRepositoryTestBrandNewApex,
       {{partition, trusted_key_dir.path}});
 
   // Now test that apexes were scanned correctly;
-  auto test_fn = [&](const std::string& apex_name) {
-    auto apex = ApexFile::Open(GetTestFile(apex_name));
-    ASSERT_RESULT_OK(apex);
+  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
+  ASSERT_RESULT_OK(apex);
 
-    ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
+  ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
-    {
-      auto ret = instance.GetDataPath(apex->GetManifest().name());
-      ASSERT_RESULT_OK(ret);
-      ASSERT_EQ(StringPrintf("%s/%s", data_dir.path, apex_name.c_str()), *ret);
-    }
+  {
+    auto ret = instance.GetDataPath(apex->GetManifest().name());
+    ASSERT_RESULT_OK(ret);
+    ASSERT_EQ(StringPrintf("%s/com.android.apex.brand.new.apex", data_dir.path),
+              *ret);
+  }
 
-    {
-      auto ret = instance.GetPartition(*apex);
-      ASSERT_RESULT_OK(ret);
-      ASSERT_EQ(partition, *ret);
-    }
+  {
+    auto ret = instance.GetPartition(*apex);
+    ASSERT_RESULT_OK(ret);
+    ASSERT_EQ(partition, *ret);
+  }
 
-    ASSERT_FALSE(instance.HasPreInstalledVersion(apex->GetManifest().name()));
-    ASSERT_TRUE(instance.HasDataVersion(apex->GetManifest().name()));
-  };
+  ASSERT_THAT(instance.GetPreinstalledPath(apex->GetManifest().name()),
+              Not(Ok()));
+  ASSERT_FALSE(instance.HasPreInstalledVersion(apex->GetManifest().name()));
+  ASSERT_TRUE(instance.HasDataVersion(apex->GetManifest().name()));
 
-  test_fn("com.android.apex.brand.new.apex");
   instance.Reset();
 }
 
@@ -1149,59 +1147,6 @@ TEST(ApexFileRepositoryTestBrandNewApex, AddDataApexFailBrandNewApexDisabled) {
 
   ASSERT_THAT(instance.GetDataPath(apex->GetManifest().name()), Not(Ok()));
   ASSERT_FALSE(instance.HasDataVersion(apex->GetManifest().name()));
-  instance.Reset();
-}
-
-TEST(ApexFileRepositoryTestBrandNewApex,
-     GetPreinstalledPathSucceedVerifiedBrandNewApex) {
-  ApexFileRepository::EnableBrandNewApex();
-  TemporaryDir trusted_key_dir;
-  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
-           trusted_key_dir.path);
-
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  const auto partition = ApexPartition::System;
-  instance.AddBrandNewApexCredentialAndBlocklist(
-      {{partition, trusted_key_dir.path}});
-
-  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
-  ASSERT_RESULT_OK(apex);
-
-  auto ret = instance.GetPreinstalledPath(*apex);
-  ASSERT_RESULT_OK(ret);
-  ASSERT_EQ(*ret, "/system/apex/brand_new");
-  instance.Reset();
-}
-
-TEST(ApexFileRepositoryTestBrandNewApex,
-     GetPreinstalledPathFailUnverifiedBrandNewApex) {
-  ApexFileRepository::EnableBrandNewApex();
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-
-  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
-  ASSERT_RESULT_OK(apex);
-
-  auto ret = instance.GetPreinstalledPath(*apex);
-  ASSERT_THAT(ret, Not(Ok()));
-  instance.Reset();
-}
-
-TEST(ApexFileRepositoryTestBrandNewApex,
-     GetPreinstalledPathFailBrandNewApexDisabled) {
-  TemporaryDir trusted_key_dir;
-  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
-           trusted_key_dir.path);
-
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  const auto partition = ApexPartition::System;
-  instance.AddBrandNewApexCredentialAndBlocklist(
-      {{partition, trusted_key_dir.path}});
-
-  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
-  ASSERT_RESULT_OK(apex);
-
-  auto ret = instance.GetPreinstalledPath(*apex);
-  ASSERT_THAT(ret, Not(Ok()));
   instance.Reset();
 }
 
