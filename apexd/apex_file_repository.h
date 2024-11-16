@@ -109,14 +109,10 @@ class ApexFileRepository final {
       const std::string& name) const;
 
   // Returns path to the pre-installed version of an apex with the given |name|.
-  // Temporarily returns the path that matches the pre-installed public key in
-  // case of brand-new APEX, e.g. the returned pre-installed path would be
-  // "/system/apex/brand_new" if a brand-new apex matches a public key in
-  // "/system/etc/brand_new_apex/".
-  // TODO: b/377111286 - populate preinstalled-partition for brand-new APEX
-  // instead of path
+  // For brand-new APEX, returns Error.
+  // For block APEX which is not set as factory, returns Error.
   android::base::Result<const std::string> GetPreinstalledPath(
-      const ApexFile& apex) const;
+      const std::string& name) const;
 
   // Returns path to the data version of an apex with the given |name|.
   android::base::Result<const std::string> GetDataPath(
