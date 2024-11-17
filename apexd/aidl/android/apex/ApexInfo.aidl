@@ -38,4 +38,18 @@ parcelable ApexInfo {
     // Note: this field can only be set to true during boot, after boot is completed
     //  (sys.boot_completed = 1) value of this field will always be false.
     boolean activeApexChanged;
+
+    /**
+    * The partition that an APEX is pre-installed in or maps to.
+    */
+    enum Partition {
+      SYSTEM,
+      SYSTEM_EXT,
+      PRODUCT,
+      VENDOR,
+      ODM
+    }
+
+    // For pre-installed APEX, this is the partition where it is pre-installed. For brand-new APEX, this is the partition where its credential is pre-installed.
+    Partition partition;
 }

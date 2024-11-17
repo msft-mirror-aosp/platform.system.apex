@@ -19,6 +19,7 @@
 #include <android-base/logging.h>
 #include <unistd.h>
 
+#include "apex_constants.h"
 #include "apexd_metrics.h"
 #include "statslog_apex.h"
 
@@ -48,24 +49,24 @@ int Cast(InstallResult install_result) {
   }
 }
 
-int Cast(Partition partition) {
+int Cast(ApexPartition partition) {
   switch (partition) {
-    case Partition::System:
+    case ApexPartition::System:
       return stats::apex::
           APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_SYSTEM;
-    case Partition::SystemExt:
+    case ApexPartition::SystemExt:
       return stats::apex::
           APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_SYSTEM_EXT;
-    case Partition::Product:
+    case ApexPartition::Product:
       return stats::apex::
           APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_PRODUCT;
-    case Partition::Vendor:
+    case ApexPartition::Vendor:
       return stats::apex::
           APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_VENDOR;
-    case Partition::Odm:
+    case ApexPartition::Odm:
       return stats::apex::
           APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_ODM;
-    case Partition::Unknown:
+    default:
       return stats::apex::
           APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_UNKNOWN;
   }
@@ -75,9 +76,9 @@ int Cast(Partition partition) {
 
 void StatsLog::InstallationRequested(
     const std::string& module_name, int64_t version_code,
-    int64_t file_size_bytes, const std::string& file_hash, Partition partition,
-    InstallType install_type, bool is_rollback, bool shared_libs,
-    const std::vector<std::string>& hals) {
+    int64_t file_size_bytes, const std::string& file_hash,
+    ApexPartition partition, InstallType install_type, bool is_rollback,
+    bool shared_libs, const std::vector<std::string>& hals) {
   if (!IsAvailable()) {
     LOG(WARNING) << "Unable to send atom: libstatssocket is not available";
     return;
