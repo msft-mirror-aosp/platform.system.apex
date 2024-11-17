@@ -8,6 +8,7 @@ package com.android.apex {
     method public long getLastUpdateMillis();
     method public String getModuleName();
     method public String getModulePath();
+    method public String getPartition();
     method public String getPreinstalledModulePath();
     method public boolean getProvideSharedApexLibs();
     method public long getVersionCode();
@@ -17,6 +18,7 @@ package com.android.apex {
     method public void setLastUpdateMillis(long);
     method public void setModuleName(String);
     method public void setModulePath(String);
+    method public void setPartition(String);
     method public void setPreinstalledModulePath(String);
     method public void setProvideSharedApexLibs(boolean);
     method public void setVersionCode(long);

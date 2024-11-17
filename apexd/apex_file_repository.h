@@ -55,12 +55,13 @@ class ApexFileRepository final {
   static ApexFileRepository& GetInstance();
 
   // Populate instance by collecting pre-installed apex files from the given
-  // |prebuilt_dirs|.
+  // |partition_to_prebuilt_dirs|.
   // Note: this call is **not thread safe** and is expected to be performed in a
   // single thread during initialization of apexd. After initialization is
   // finished, all queries to the instance are thread safe.
   android::base::Result<void> AddPreInstalledApex(
-      const std::vector<std::string>& prebuilt_dirs);
+      const std::unordered_map<ApexPartition, std::string>&
+          partition_to_prebuilt_dirs);
 
   // Populate instance by collecting host-provided apex files via
   // |metadata_partition|. Host can provide its apexes to a VM instance via the
@@ -97,19 +98,21 @@ class ApexFileRepository final {
       const std::unordered_map<ApexPartition, std::string>&
           partition_to_dir_map);
 
+  // Returns the mapping partition of a specific apex.
+  // For pre-installed APEX, it is the partition where the pre-installed package
+  // resides. For brand-new APEX, it is the partition where the
+  // credentials to verify the package reside.
+  android::base::Result<ApexPartition> GetPartition(const ApexFile& apex) const;
+
   // Returns trusted public key for an apex with the given |name|.
   android::base::Result<const std::string> GetPublicKey(
       const std::string& name) const;
 
   // Returns path to the pre-installed version of an apex with the given |name|.
-  // Temporarily returns the path that matches the pre-installed public key in
-  // case of brand-new APEX, e.g. the returned pre-installed path would be
-  // "/system/apex/brand_new" if a brand-new apex matches a public key in
-  // "/system/etc/brand_new_apex/".
-  // TODO: b/377111286 - populate preinstalled-partition for brand-new APEX
-  // instead of path
+  // For brand-new APEX, returns Error.
+  // For block APEX which is not set as factory, returns Error.
   android::base::Result<const std::string> GetPreinstalledPath(
-      const ApexFile& apex) const;
+      const std::string& name) const;
 
   // Returns path to the data version of an apex with the given |name|.
   android::base::Result<const std::string> GetDataPath(
@@ -181,6 +184,7 @@ class ApexFileRepository final {
   void Reset(const std::string& decompression_dir = kApexDecompressedDir) {
     pre_installed_store_.clear();
     data_store_.clear();
+    partition_store_.clear();
     brand_new_apex_blocked_version_.clear();
     brand_new_apex_pubkeys_.clear();
     block_apex_overrides_.clear();
@@ -197,10 +201,16 @@ class ApexFileRepository final {
   ApexFileRepository(ApexFileRepository&&) = delete;
 
   // Scans apexes in the given directory and adds collected data into
-  // |pre_installed_store_|.
-  android::base::Result<void> ScanBuiltInDir(const std::string& dir);
+  // |pre_installed_store_| and |partition_store_|.
+  android::base::Result<void> ScanBuiltInDir(const std::string& dir,
+                                             ApexPartition partition);
 
   std::unordered_map<std::string, ApexFile> pre_installed_store_, data_store_;
+
+  // Map from APEX name to their partition. For pre-installed APEX, this is the
+  // partition where it is pre-installed. For brand-new APEX, this is the
+  // partition where its credential is pre-installed.
+  std::unordered_map<std::string, ApexPartition> partition_store_;
 
   // Blocked versions for brand-new APEX mapped by their holding partition.
   std::unordered_map<ApexPartition, std::unordered_map<std::string, int64_t>>

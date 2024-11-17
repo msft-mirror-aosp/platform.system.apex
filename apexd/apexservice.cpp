@@ -16,32 +16,32 @@
 
 #include "apexservice.h"
 
-#include <dirent.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android-base/result.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
+#include <android/apex/BnApexService.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IResultReceiver.h>
 #include <binder/IServiceManager.h>
 #include <binder/LazyServiceRegistrar.h>
 #include <binder/ProcessState.h>
 #include <binder/Status.h>
+#include <dirent.h>
 #include <private/android_filesystem_config.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <utils/String16.h>
 
+#include "apex_constants.h"
 #include "apex_file.h"
 #include "apex_file_repository.h"
 #include "apexd.h"
+#include "apexd_metrics.h"
 #include "apexd_session.h"
 #include "string_log.h"
-
-#include <android/apex/BnApexService.h>
 
 using android::base::Join;
 using android::base::Result;
@@ -106,8 +106,7 @@ class ApexService : public BnApexService {
   BinderStatus destroyCeSnapshots(int user_id, int rollback_id) override;
   BinderStatus destroyCeSnapshotsNotSpecified(
       int user_id, const std::vector<int>& retain_rollback_ids) override;
-  BinderStatus recollectPreinstalledData(
-      const std::vector<std::string>& paths) override;
+  BinderStatus recollectPreinstalledData() override;
   BinderStatus markBootCompleted() override;
   BinderStatus calculateSizeForCompressedApex(
       const CompressedApexInfoList& compressed_apex_info_list,
@@ -352,6 +351,21 @@ void ConvertToApexSessionInfo(const ApexSession& session,
   }
 }
 
+static ::android::apex::ApexInfo::Partition Cast(ApexPartition in) {
+  switch (in) {
+    case ApexPartition::System:
+      return ::android::apex::ApexInfo::Partition::SYSTEM;
+    case ApexPartition::SystemExt:
+      return ::android::apex::ApexInfo::Partition::SYSTEM_EXT;
+    case ApexPartition::Product:
+      return ::android::apex::ApexInfo::Partition::PRODUCT;
+    case ApexPartition::Vendor:
+      return ::android::apex::ApexInfo::Partition::VENDOR;
+    case ApexPartition::Odm:
+      return ::android::apex::ApexInfo::Partition::ODM;
+  }
+}
+
 static ApexInfo GetApexInfo(const ApexFile& package) {
   auto& instance = ApexFileRepository::GetInstance();
   ApexInfo out;
@@ -361,23 +375,25 @@ static ApexInfo GetApexInfo(const ApexFile& package) {
   out.versionName = package.GetManifest().versionname();
   out.isFactory = instance.IsPreInstalledApex(package);
   out.isActive = false;
-  Result<std::string> preinstalled_path = instance.GetPreinstalledPath(package);
+  Result<std::string> preinstalled_path =
+      instance.GetPreinstalledPath(package.GetManifest().name());
   if (preinstalled_path.ok()) {
     out.preinstalledModulePath = *preinstalled_path;
   }
   out.activeApexChanged = ::android::apex::IsActiveApexChanged(package);
+  out.partition = Cast(OR_FATAL(instance.GetPartition(package)));
   return out;
 }
 
 static std::string ToString(const ApexInfo& package) {
-  std::string msg = StringLog()
-                    << "Module: " << package.moduleName
-                    << " Version: " << package.versionCode
-                    << " VersionName: " << package.versionName
-                    << " Path: " << package.modulePath
-                    << " IsActive: " << std::boolalpha << package.isActive
-                    << " IsFactory: " << std::boolalpha << package.isFactory
-                    << std::endl;
+  std::string msg =
+      StringLog() << "Module: " << package.moduleName
+                  << " Version: " << package.versionCode
+                  << " VersionName: " << package.versionName
+                  << " Path: " << package.modulePath
+                  << " IsActive: " << std::boolalpha << package.isActive
+                  << " IsFactory: " << std::boolalpha << package.isFactory
+                  << " Partition: " << toString(package.partition) << std::endl;
   return msg;
 }
 
@@ -712,10 +728,8 @@ BinderStatus ApexService::destroyCeSnapshotsNotSpecified(
   return BinderStatus::ok();
 }
 
-BinderStatus ApexService::recollectPreinstalledData(
-    const std::vector<std::string>& paths) {
-  LOG(INFO) << "recollectPreinstalledData() received by ApexService, paths: "
-            << Join(paths, ',');
+BinderStatus ApexService::recollectPreinstalledData() {
+  LOG(INFO) << "recollectPreinstalledData() received by ApexService";
 
   if (auto debug = CheckDebuggable("recollectPreinstalledData");
       !debug.isOk()) {
@@ -725,8 +739,10 @@ BinderStatus ApexService::recollectPreinstalledData(
       !root.isOk()) {
     return root;
   }
+
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  if (auto res = instance.AddPreInstalledApex(paths); !res.ok()) {
+  if (auto res = instance.AddPreInstalledApex(kBuiltinApexPackageDirs);
+      !res.ok()) {
     return BinderStatus::fromExceptionCode(
         BinderStatus::EX_SERVICE_SPECIFIC,
         String8(res.error().message().c_str()));
