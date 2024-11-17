@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "apex_constants.h"
 #include "apexd_metrics.h"
 
 namespace android::apex {
@@ -30,9 +31,9 @@ class StatsLog : public Metrics {
 
   void InstallationRequested(const std::string& module_name,
                              int64_t version_code, int64_t file_size_bytes,
-                             const std::string& file_hash, Partition partition,
-                             InstallType install_type, bool is_rollback,
-                             bool shared_libs,
+                             const std::string& file_hash,
+                             ApexPartition partition, InstallType install_type,
+                             bool is_rollback, bool shared_libs,
                              const std::vector<std::string>& hals);
   void InstallationEnded(const std::string& file_hash,
                          InstallResult result) override;

@@ -20,6 +20,8 @@
 #include <string>
 #include <vector>
 
+#include "apex_constants.h"
+
 namespace android::apex {
 
 class ApexFile;
@@ -35,22 +37,13 @@ enum class InstallResult {
   Failure,
 };
 
-enum class Partition {
-  System,
-  SystemExt,
-  Product,
-  Vendor,
-  Odm,
-  Unknown,
-};
-
 class Metrics {
  public:
   virtual ~Metrics() = default;
   virtual void InstallationRequested(
       const std::string& module_name, int64_t version_code,
       int64_t file_size_bytes, const std::string& file_hash,
-      Partition partition, InstallType install_type, bool is_rollback,
+      ApexPartition partition, InstallType install_type, bool is_rollback,
       bool shared_libs, const std::vector<std::string>& hals) = 0;
   virtual void InstallationEnded(const std::string& file_hash,
                                  InstallResult result) = 0;
