@@ -42,8 +42,7 @@ namespace apex {
 // this config should do the trick.
 struct ApexdConfig {
   const char* apex_status_sysprop;
-  std::unordered_map<ApexPartition, std::string>
-      apex_partition_to_built_in_dirs;
+  std::unordered_map<ApexPartition, std::string> builtin_dirs;
   const char* active_apex_data_dir;
   const char* decompression_dir;
   const char* ota_reserved_dir;
@@ -59,7 +58,7 @@ struct ApexdConfig {
 
 static const ApexdConfig kDefaultConfig = {
     kApexStatusSysprop,
-    kPartitionToApexPackageDirs,
+    kBuiltinApexPackageDirs,
     kActiveApexPackagesDataDir,
     kApexDecompressedDir,
     kOtaReservedDir,
