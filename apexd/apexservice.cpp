@@ -841,26 +841,14 @@ status_t ApexService::shellCommand(int in, int out, int err,
     }
     log << "ApexService:" << std::endl
         << "  help - display this help" << std::endl
-        << "  stagePackages [package_path1] ([package_path2]...) - stage "
-           "multiple packages from the given path"
-        << std::endl
         << "  getActivePackage [package_name] - return info for active package "
            "with given name, if present"
         << std::endl
         << "  getAllPackages - return the list of all packages" << std::endl
         << "  getActivePackages - return the list of active packages"
         << std::endl
-        << "  activatePackage [package_path] - activate package from the "
-           "given path"
-        << std::endl
-        << "  deactivatePackage [package_path] - deactivate package from the "
-           "given path"
-        << std::endl
         << "  getStagedSessionInfo [sessionId] - displays information about a "
            "given session previously submitted"
-        << std::endl
-        << "  submitStagedSession [sessionId] - attempts to submit the "
-           "installer session with given id"
         << std::endl;
     dprintf(fd, "%s", log.operator std::string().c_str());
   };
@@ -872,25 +860,6 @@ status_t ApexService::shellCommand(int in, int out, int err,
 
   const String16& cmd = args[0];
 
-  if (cmd == String16("stagePackages")) {
-    if (args.size() < 2) {
-      print_help(err, "stagePackages requires at least one package_path");
-      return BAD_VALUE;
-    }
-    std::vector<std::string> pkgs;
-    pkgs.reserve(args.size() - 1);
-    for (size_t i = 1; i != args.size(); ++i) {
-      pkgs.emplace_back(String8(args[i]).c_str());
-    }
-    BinderStatus status = stagePackages(pkgs);
-    if (status.isOk()) {
-      return OK;
-    }
-    std::string msg = StringLog() << "Failed to stage package(s): "
-                                  << status.toString8().c_str() << std::endl;
-    dprintf(err, "%s", msg.c_str());
-    return BAD_VALUE;
-  }
   if (cmd == String16("getAllPackages")) {
     if (args.size() != 1) {
       print_help(err, "Unrecognized options");
@@ -953,38 +922,6 @@ status_t ApexService::shellCommand(int in, int out, int err,
     return BAD_VALUE;
   }
 
-  if (cmd == String16("activatePackage")) {
-    if (args.size() != 2) {
-      print_help(err, "activatePackage requires one package_path");
-      return BAD_VALUE;
-    }
-    std::string path = String8(args[1]).c_str();
-    auto status = ::android::apex::ActivatePackage(path);
-    if (status.ok()) {
-      return OK;
-    }
-    std::string msg = StringLog() << "Failed to activate package: "
-                                  << status.error().message() << std::endl;
-    dprintf(err, "%s", msg.c_str());
-    return BAD_VALUE;
-  }
-
-  if (cmd == String16("deactivatePackage")) {
-    if (args.size() != 2) {
-      print_help(err, "deactivatePackage requires one package_path");
-      return BAD_VALUE;
-    }
-    std::string path = String8(args[1]).c_str();
-    auto status = ::android::apex::DeactivatePackage(path);
-    if (status.ok()) {
-      return OK;
-    }
-    std::string msg = StringLog() << "Failed to deactivate package: "
-                                  << status.error().message() << std::endl;
-    dprintf(err, "%s", msg.c_str());
-    return BAD_VALUE;
-  }
-
   if (cmd == String16("getStagedSessionInfo")) {
     if (args.size() != 2) {
       print_help(err, "getStagedSessionInfo requires one session id");
@@ -1019,38 +956,6 @@ status_t ApexService::shellCommand(int in, int out, int err,
       return OK;
     }
     std::string msg = StringLog() << "Failed to query session: "
-                                  << status.toString8().c_str() << std::endl;
-    dprintf(err, "%s", msg.c_str());
-    return BAD_VALUE;
-  }
-
-  if (cmd == String16("submitStagedSession")) {
-    if (args.size() != 2) {
-      print_help(err, "submitStagedSession requires one session id");
-      return BAD_VALUE;
-    }
-    int session_id = strtol(String8(args[1]).c_str(), nullptr, 10);
-    if (session_id < 0) {
-      std::string msg = StringLog()
-                        << "Failed to parse session id. Must be an integer.";
-      dprintf(err, "%s", msg.c_str());
-      return BAD_VALUE;
-    }
-
-    ApexInfoList list;
-    std::vector<int> empty_child_session_ids;
-    ApexSessionParams params;
-    params.sessionId = session_id;
-    params.childSessionIds = empty_child_session_ids;
-    BinderStatus status = submitStagedSession(params, &list);
-    if (status.isOk()) {
-        for (const auto& item : list.apexInfos) {
-          std::string msg = ToString(item);
-          dprintf(out, "%s", msg.c_str());
-        }
-      return OK;
-    }
-    std::string msg = StringLog() << "Failed to submit session: "
                                   << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
