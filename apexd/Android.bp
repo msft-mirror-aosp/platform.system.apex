@@ -546,6 +546,8 @@ cc_test {
         ":test.rebootless_apex_remove_native_lib",
         ":test.rebootless_apex_app_in_apex",
         ":test.rebootless_apex_priv_app_in_apex",
+        ":com.android.apex.vendor.foo",
+        ":com.android.apex.vendor.foo.with_vintf",
     ],
     srcs: [
         "apex_blocklist_test.cpp",

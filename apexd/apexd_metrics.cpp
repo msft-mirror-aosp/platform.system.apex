@@ -123,8 +123,16 @@ void InstallRequestedEvent::AddFiles(std::span<const ApexFile> files) {
       continue;
     }
 
-    // TODO(b/366217822): Populate HAL information
     files_.push_back(std::move(info));
+  }
+}
+
+void InstallRequestedEvent::AddHals(
+    const std::map<std::string, std::vector<std::string>>& hals) {
+  for (auto& info : files_) {
+    if (auto it = hals.find(info.name); it != hals.end()) {
+      info.hals = it->second;
+    }
   }
 }
 
