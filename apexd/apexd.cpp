@@ -2263,13 +2263,6 @@ int OnBootstrap() {
   return 0;
 }
 
-Result<void> RemountApexFile(const std::string& path) {
-  if (auto ret = DeactivatePackage(path); !ret.ok()) {
-    return ret;
-  }
-  return ActivatePackage(path);
-}
-
 void InitializeVold(CheckpointInterface* checkpoint_service) {
   if (checkpoint_service != nullptr) {
     gVoldService = checkpoint_service;
