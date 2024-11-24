@@ -29,13 +29,6 @@ using android::base::Result;
 namespace android {
 namespace apex {
 
-bool InVendorPartition(const std::string& path);
-
-bool InOdmPartition(const std::string& path);
-
-// Determines if an incoming apex is a vendor apex
-bool IsVendorApex(const ApexFile& apex_file);
-
 // Check VINTF for incoming apex updates.
 Result<void> CheckVintf(std::span<const ApexFile> apex_files,
                         std::span<const std::string> mount_points);
