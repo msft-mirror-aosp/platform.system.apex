@@ -14,27 +14,25 @@
  * limitations under the License.
  */
 
-#pragma once
+syntax = "proto3";
 
-#include <string>
+package apex.proto;
 
-#include "apex_constants.h"
-#include "apexd_metrics.h"
+option java_package = "com.android.apex";
+option java_outer_classname = "Protos";
 
-namespace android::apex {
+message ApexBlocklist {
+  message ApexItem {
+    // Required.
+    // APEX name defined in manifest.
+    string name = 1;
 
-class StatsLog : public Metrics {
- public:
-  StatsLog() = default;
-  ~StatsLog() override = default;
+    // Required.
+    // Version number. Must be positive. Any version that is equal to or lower
+    // than the specified version is blocked.
+    int64 version = 2;
+  }
 
-  void InstallationRequested(InstallType install_type, bool is_rollback,
-                             const ApexFileInfo& info) override;
-  void InstallationEnded(const std::string& file_hash,
-                         InstallResult result) override;
-
- private:
-  bool IsAvailable();
-};
-
-}  // namespace android::apex
+  // The list of APEX that should be blocked from installation.
+  repeated ApexItem blocked_apex = 1;
+}
