@@ -680,11 +680,15 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
   return {};
 }
 
+struct VerificationResult {
+  std::map<std::string, std::vector<std::string>> apex_hals;
+};
+
 // A version of apex verification that happens on SubmitStagedSession.
 // This function contains checks that might be expensive to perform, e.g. temp
 // mounting a package and reading entire dm-verity device, and shouldn't be run
 // during boot.
-Result<void> VerifyPackagesStagedInstall(
+Result<VerificationResult> VerifyPackagesStagedInstall(
     const std::vector<ApexFile>& apex_files) {
   for (const auto& apex_file : apex_files) {
     OR_RETURN(VerifyPackageBoot(apex_file));
@@ -720,10 +724,11 @@ Result<void> VerifyPackagesStagedInstall(
     all_apex_files.push_back(apex_file);
   }
 
-  auto check_fn =
-      [&](const std::vector<std::string>& mount_points) -> Result<void> {
-    OR_RETURN(CheckVintf(all_apex_files, mount_points));
-    return {};
+  auto check_fn = [&](const std::vector<std::string>& mount_points)
+      -> Result<VerificationResult> {
+    VerificationResult result;
+    result.apex_hals = OR_RETURN(CheckVintf(all_apex_files, mount_points));
+    return result;
   };
   return RunVerifyFnInsideTempMounts(all_apex_files, check_fn);
 }
@@ -2785,7 +2790,8 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   auto ret = OR_RETURN(OpenSessionApexFiles(session_id, child_session_ids));
   event.AddFiles(ret);
 
-  OR_RETURN(VerifyPackagesStagedInstall(ret));
+  auto result = OR_RETURN(VerifyPackagesStagedInstall(ret));
+  event.AddHals(result.apex_hals);
 
   auto session = gSessionManager->CreateSession(session_id);
   if (!session.ok()) {
@@ -3356,26 +3362,26 @@ android::apex::MountedApexDatabase& GetApexDatabaseForTesting() {
 
 // A version of apex verification that happens during non-staged APEX
 // installation.
-Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file,
-                                           bool force) {
-  const auto& verify_package_boot_status = VerifyPackageBoot(apex_file);
-  if (!verify_package_boot_status.ok()) {
-    return verify_package_boot_status;
-  }
+Result<VerificationResult> VerifyPackageNonStagedInstall(
+    const ApexFile& apex_file, bool force) {
+  OR_RETURN(VerifyPackageBoot(apex_file));
 
-  auto check_fn = [&apex_file,
-                   &force](const std::string& mount_point) -> Result<void> {
+  auto check_fn =
+      [&apex_file,
+       &force](const std::string& mount_point) -> Result<VerificationResult> {
     if (force) {
-      return Result<void>{};
+      return {};
     }
+    VerificationResult result;
     if (access((mount_point + "/app").c_str(), F_OK) == 0) {
       return Error() << apex_file.GetPath() << " contains app inside";
     }
     if (access((mount_point + "/priv-app").c_str(), F_OK) == 0) {
       return Error() << apex_file.GetPath() << " contains priv-app inside";
     }
-    OR_RETURN(CheckVintf(Single(apex_file), Single(mount_point)));
-    return Result<void>{};
+    result.apex_hals =
+        OR_RETURN(CheckVintf(Single(apex_file), Single(mount_point)));
+    return result;
   };
   return RunVerifyFnInsideTempMount(apex_file, check_fn);
 }
@@ -3551,9 +3557,8 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
   // 1. Verify that APEX is correct. This is a heavy check that involves
   // mounting an APEX on a temporary mount point and reading the entire
   // dm-verity block device.
-  if (auto res = VerifyPackageNonStagedInstall(*temp_apex, force); !res.ok()) {
-    return res.error();
-  }
+  auto result = OR_RETURN(VerifyPackageNonStagedInstall(*temp_apex, force));
+  event.AddHals(result.apex_hals);
 
   // 2. Compute params for mounting new apex.
   auto new_id_minor = ComputePackageIdMinor(*temp_apex);

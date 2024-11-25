@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
 #include <span>
 #include <string>
@@ -71,6 +72,7 @@ class InstallRequestedEvent {
   ~InstallRequestedEvent();
 
   void AddFiles(std::span<const ApexFile> files);
+  void AddHals(const std::map<std::string, std::vector<std::string>>& hals);
 
   // Marks the current installation request has succeeded.
   void Commit();

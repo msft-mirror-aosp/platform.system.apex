@@ -4947,14 +4947,20 @@ TEST_F(ApexdMountTest, SendEventOnSubmitStagedSession) {
 
   InitMetrics(std::make_unique<SpyMetrics>());
 
-  std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
+  std::string preinstalled_apex =
+      AddPreInstalledApex("com.android.apex.vendor.foo.apex");
 
+  // Test APEX is a "vendor" APEX. Preinstalled partition should be vendor.
   ASSERT_RESULT_OK(ApexFileRepository::GetInstance().AddPreInstalledApex(
-      {{GetPartition(), GetBuiltInDir()}}));
+      {{ApexPartition::Vendor, GetBuiltInDir()}}));
 
   UnmountOnTearDown(preinstalled_apex);
+  OnStart();
+  // checkvintf needs apex-info-list.xml to identify vendor APEXes.
+  // OnAllPackagesActivated() generates it.
+  OnAllPackagesActivated(/*bootstrap*/ false);
 
-  PrepareStagedSession("apex.apexd_test.apex", 239);
+  PrepareStagedSession("com.android.apex.vendor.foo.with_vintf.apex", 239);
   ASSERT_RESULT_OK(SubmitStagedSession(239, {}, false, false, -1));
 
   auto spy = std::unique_ptr<SpyMetrics>(
@@ -4964,7 +4970,8 @@ TEST_F(ApexdMountTest, SendEventOnSubmitStagedSession) {
   ASSERT_EQ(1u, spy->requested.size());
   const auto& requested = spy->requested[0];
   ASSERT_EQ(InstallType::Staged, std::get<0>(requested));
-  ASSERT_EQ("com.android.apex.test_package"s, std::get<2>(requested).name);
+  ASSERT_EQ("com.android.apex.vendor.foo"s, std::get<2>(requested).name);
+  ASSERT_THAT(std::get<2>(requested).hals, ElementsAre("android.apex.foo@1"s));
 
   ASSERT_EQ(0u, spy->ended.size());
 }
