@@ -2764,6 +2764,8 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     const int session_id, const std::vector<int>& child_session_ids,
     const bool has_rollback_enabled, const bool is_rollback,
     const int rollback_id) {
+  auto event = InstallRequestedEvent(InstallType::Staged, is_rollback);
+
   if (session_id == 0) {
     return Error() << "Session id was not provided.";
   }
@@ -2781,23 +2783,9 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   }
 
   auto ret = OR_RETURN(OpenSessionApexFiles(session_id, child_session_ids));
-
-  for (const auto& apex : ret) {
-    SendApexInstallationRequestedAtom(apex.GetPath(), is_rollback,
-                                      InstallType::Staged);
-  }
-  auto guard = android::base::make_scope_guard([&]() {
-    for (const auto& apex : ret) {
-      SendApexInstallationEndedAtom(apex.GetPath(), InstallResult::Failure);
-    }
-  });
+  event.AddFiles(ret);
 
   OR_RETURN(VerifyPackagesStagedInstall(ret));
-
-  std::vector<std::string> file_hashes;
-  for (const auto& apex_file : ret) {
-    file_hashes.push_back(OR_RETURN(CalculateSha256(apex_file.GetPath())));
-  }
 
   auto session = gSessionManager->CreateSession(session_id);
   if (!session.ok()) {
@@ -2812,7 +2800,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   for (const auto& apex_file : ret) {
     session->AddApexName(apex_file.GetManifest().name());
   }
-  session->SetApexFileHashes(file_hashes);
+  session->SetApexFileHashes(event.GetFileHashes());
   Result<void> commit_status =
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {
@@ -2824,8 +2812,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     ReleaseF2fsCompressedBlocks(apex.GetPath());
   }
 
-  // Disabling scope guard to stop Failure atoms from being sent
-  guard.Disable();
+  event.Commit();
 
   return ret;
 }
@@ -3531,12 +3518,16 @@ Result<void> LoadApexFromInit(const std::string& apex_name) {
   return {};
 }
 
-Result<ApexFile> InstallPackageImpl(const std::string& package_path,
-                                    bool force) {
+Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
+  auto event = InstallRequestedEvent(InstallType::NonStaged,
+                                     /*is_rollback=*/false);
+
   auto temp_apex = ApexFile::Open(package_path);
   if (!temp_apex.ok()) {
     return temp_apex.error();
   }
+
+  event.AddFiles(Single(*temp_apex));
 
   const std::string& module_name = temp_apex->GetManifest().name();
   // Don't allow non-staged update if there are no active versions of this APEX.
@@ -3652,18 +3643,9 @@ Result<ApexFile> InstallPackageImpl(const std::string& package_path,
   // filesystem.
   ReleaseF2fsCompressedBlocks(target_file);
 
-  return new_apex;
-}
+  event.Commit();
 
-Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
-  LOG(INFO) << "Installing " << package_path;
-  SendApexInstallationRequestedAtom(package_path, /*is_rollback=*/false,
-                                    InstallType::NonStaged);
-  // TODO: Add error-enums
-  Result<ApexFile> ret = InstallPackageImpl(package_path, force);
-  SendApexInstallationEndedAtom(
-      package_path, ret.ok() ? InstallResult::Success : InstallResult::Failure);
-  return ret;
+  return new_apex;
 }
 
 bool IsActiveApexChanged(const ApexFile& apex) {
