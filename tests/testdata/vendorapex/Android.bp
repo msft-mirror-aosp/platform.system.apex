@@ -70,6 +70,9 @@ apex_test {
     binaries: [
         "apex_vendor_foo_test_binary",
     ],
+    skip_validations: {
+        apex_sepolicy_tests: true, // we don't have a valid label for the test binary
+    },
 }
 
 cc_binary {
