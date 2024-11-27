@@ -394,8 +394,8 @@ def main(argv):
   debugfs_default = None
   fsckerofs_default = None
   if 'ANDROID_HOST_OUT' in os.environ:
-    debugfs_default = os.path.join(os.environ['ANDROID_HOST_OUT'], '/bin/debugfs_static')
-    fsckerofs_default = os.path.join(os.environ['ANDROID_HOST_OUT'], '/bin/fsck.erofs')
+    debugfs_default = os.path.join(os.environ['ANDROID_HOST_OUT'], 'bin/debugfs_static')
+    fsckerofs_default = os.path.join(os.environ['ANDROID_HOST_OUT'], 'bin/fsck.erofs')
   parser.add_argument(
       '--debugfs_path', help='The path to debugfs binary', default=debugfs_default)
   parser.add_argument(
