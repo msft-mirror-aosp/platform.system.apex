@@ -45,6 +45,8 @@ apex {
             ],
         },
     },
+    // This test apex is used by shared_libs_repack, which works with only ext4.
+    payload_fs_type: "ext4",
 }
 
 cc_binary {
