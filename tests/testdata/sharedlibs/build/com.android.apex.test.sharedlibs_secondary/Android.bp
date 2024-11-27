@@ -35,6 +35,8 @@ apex {
     // We want to force libc++.so to be available in this stub APEX, so put an empty binary.
     binaries: ["noop"],
     updatable: false,
+    // This test apex is used by shared_libs_repack, which works with only ext4.
+    payload_fs_type: "ext4",
 }
 
 java_genrule {
