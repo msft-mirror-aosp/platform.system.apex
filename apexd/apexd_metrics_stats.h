@@ -28,10 +28,10 @@ class StatsLog : public Metrics {
   StatsLog() = default;
   ~StatsLog() override = default;
 
-  void InstallationRequested(InstallType install_type, bool is_rollback,
-                             const ApexFileInfo& info) override;
-  void InstallationEnded(const std::string& file_hash,
-                         InstallResult result) override;
+  void SendInstallationRequested(InstallType install_type, bool is_rollback,
+                                 const ApexFileInfo& info) override;
+  void SendInstallationEnded(const std::string& file_hash,
+                             InstallResult result) override;
 
  private:
   bool IsAvailable();
