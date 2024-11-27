@@ -4930,12 +4930,12 @@ struct SpyMetrics : Metrics {
   std::vector<std::tuple<InstallType, bool, ApexFileInfo>> requested;
   std::vector<std::tuple<std::string, InstallResult>> ended;
 
-  void InstallationRequested(InstallType install_type, bool is_rollback,
-                             const ApexFileInfo& info) override {
+  void SendInstallationRequested(InstallType install_type, bool is_rollback,
+                                 const ApexFileInfo& info) override {
     requested.emplace_back(install_type, is_rollback, info);
   }
-  void InstallationEnded(const std::string& file_hash,
-                         InstallResult result) override {
+  void SendInstallationEnded(const std::string& file_hash,
+                             InstallResult result) override {
     ended.emplace_back(file_hash, result);
   }
 };

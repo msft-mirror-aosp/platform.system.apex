@@ -52,10 +52,11 @@ class Metrics {
   };
 
   virtual ~Metrics() = default;
-  virtual void InstallationRequested(InstallType install_type, bool is_rollback,
-                                     const ApexFileInfo& info) = 0;
-  virtual void InstallationEnded(const std::string& file_hash,
-                                 InstallResult result) = 0;
+  virtual void SendInstallationRequested(InstallType install_type,
+                                         bool is_rollback,
+                                         const ApexFileInfo& info) = 0;
+  virtual void SendInstallationEnded(const std::string& file_hash,
+                                     InstallResult result) = 0;
 };
 
 std::unique_ptr<Metrics> InitMetrics(std::unique_ptr<Metrics> metrics);
@@ -63,6 +64,8 @@ std::unique_ptr<Metrics> InitMetrics(std::unique_ptr<Metrics> metrics);
 void SendSessionApexInstallationEndedAtom(const ApexSession& session,
                                           InstallResult install_result);
 
+// Helper class to send "installation_requested" event. Events are
+// sent in its destructor using Metrics::Send* methods.
 class InstallRequestedEvent {
  public:
   InstallRequestedEvent(InstallType install_type, bool is_rollback)
@@ -72,10 +75,14 @@ class InstallRequestedEvent {
   ~InstallRequestedEvent();
 
   void AddFiles(std::span<const ApexFile> files);
+
+  // Adds HAL Information for each APEX.
+  // Since the event can contain multiple APEX files, HAL information is
+  // passed as a map of APEX name to a list of HAL names.
   void AddHals(const std::map<std::string, std::vector<std::string>>& hals);
 
   // Marks the current installation request has succeeded.
-  void Commit();
+  void MarkSucceeded();
 
   // Returns file hashes for APEX files added by AddFile()
   std::vector<std::string> GetFileHashes() const;
@@ -84,7 +91,7 @@ class InstallRequestedEvent {
   InstallType install_type_;
   bool is_rollback_;
   std::vector<Metrics::ApexFileInfo> files_;
-  bool committed_ = false;
+  bool succeeded_ = false;
 };
 
 }  // namespace android::apex
