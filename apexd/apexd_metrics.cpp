@@ -56,7 +56,7 @@ void SendApexInstallationEndedAtom(const std::string& package_path,
     LOG(WARNING) << "Unable to get sha256 of ApexFile: " << hash.error();
     return;
   }
-  gMetrics->InstallationEnded(*hash, install_result);
+  gMetrics->SendInstallationEnded(*hash, install_result);
 }
 
 void SendSessionApexInstallationEndedAtom(const ApexSession& session,
@@ -66,7 +66,7 @@ void SendSessionApexInstallationEndedAtom(const ApexSession& session,
   }
 
   for (const auto& hash : session.GetApexFileHashes()) {
-    gMetrics->InstallationEnded(hash, install_result);
+    gMetrics->SendInstallationEnded(hash, install_result);
   }
 }
 
@@ -75,19 +75,19 @@ InstallRequestedEvent::~InstallRequestedEvent() {
     return;
   }
   for (const auto& info : files_) {
-    gMetrics->InstallationRequested(install_type_, is_rollback_, info);
+    gMetrics->SendInstallationRequested(install_type_, is_rollback_, info);
   }
   // Staged installation ends later. No need to send "end" event now.
-  if (committed_ && install_type_ == InstallType::Staged) {
+  if (succeeded_ && install_type_ == InstallType::Staged) {
     return;
   }
-  auto result = committed_ ? InstallResult::Success : InstallResult::Failure;
+  auto result = succeeded_ ? InstallResult::Success : InstallResult::Failure;
   for (const auto& info : files_) {
-    gMetrics->InstallationEnded(info.file_hash, result);
+    gMetrics->SendInstallationEnded(info.file_hash, result);
   }
 }
 
-void InstallRequestedEvent::Commit() { committed_ = true; }
+void InstallRequestedEvent::MarkSucceeded() { succeeded_ = true; }
 
 void InstallRequestedEvent::AddFiles(std::span<const ApexFile> files) {
   auto& repo = ApexFileRepository::GetInstance();
