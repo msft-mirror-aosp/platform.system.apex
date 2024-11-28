@@ -122,7 +122,7 @@ class ApexServiceTest : public ::testing::Test {
         vold_service_->supportsCheckpoint(&supports_fs_checkpointing_);
     ASSERT_TRUE(IsOk(status));
     CleanUp();
-    service_->recollectPreinstalledData(kApexPackageBuiltinDirs);
+    service_->recollectPreinstalledData();
 
     session_manager_ = ApexSessionManager::Create(GetSessionsDir());
   }

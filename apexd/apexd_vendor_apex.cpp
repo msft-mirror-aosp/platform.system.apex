@@ -27,33 +27,12 @@
 #include "apexd_utils.h"
 
 using android::base::Error;
+using android::base::Result;
 using android::base::StartsWith;
 
-namespace android {
-namespace apex {
+namespace android::apex {
 
 using apexd_private::GetActiveMountPoint;
-
-bool InVendorPartition(const std::string& path) {
-  return StartsWith(path, "/vendor/apex/") ||
-         StartsWith(path, "/system/vendor/apex/");
-}
-
-bool InOdmPartition(const std::string& path) {
-  return StartsWith(path, "/odm/apex/") ||
-         StartsWith(path, "/vendor/odm/apex/") ||
-         StartsWith(path, "/system/vendor/odm/apex/");
-}
-
-// Returns if apex is a vendor apex, works by testing path of its preinstalled
-// version.
-bool IsVendorApex(const ApexFile& apex_file) {
-  const auto& instance = ApexFileRepository::GetInstance();
-  const auto& preinstalled =
-      instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& path = preinstalled.get().GetPath();
-  return InVendorPartition(path) || InOdmPartition(path);
-}
 
 static Result<bool> HasVintfIn(std::span<const std::string> apex_mounts) {
   for (const auto& mount : apex_mounts) {
@@ -64,8 +43,9 @@ static Result<bool> HasVintfIn(std::span<const std::string> apex_mounts) {
 
 // Checks Compatibility for incoming APEXes.
 //    Adds the data from apex's vintf_fragment(s) and tests compatibility.
-base::Result<void> CheckVintf(std::span<const ApexFile> apex_files,
-                              std::span<const std::string> mount_points) {
+Result<std::map<std::string, std::vector<std::string>>> CheckVintf(
+    std::span<const ApexFile> apex_files,
+    std::span<const std::string> mount_points) {
   std::string error;
 
   std::vector<std::string> current_mounts;
@@ -92,10 +72,9 @@ base::Result<void> CheckVintf(std::span<const ApexFile> apex_files,
           std::move(replacements));
 
   // Create a new VintfObject that uses our path-replacing FileSystem instance
-  auto vintf_with_replaced_path =
-      vintf::VintfObject::Builder()
-          .setFileSystem(std::move(path_replaced_fs))
-          .build();
+  auto vintf_object = vintf::VintfObject::Builder()
+                          .setFileSystem(std::move(path_replaced_fs))
+                          .build();
 
   // Disable RuntimeInfo components. Allows callers to run check
   // without requiring read permission of restricted resources
@@ -103,7 +82,7 @@ base::Result<void> CheckVintf(std::span<const ApexFile> apex_files,
   flags = flags.disableRuntimeInfo();
 
   // checkCompatibility on vintfObj using the replacement vintf directory
-  int ret = vintf_with_replaced_path->checkCompatibility(&error, flags);
+  int ret = vintf_object->checkCompatibility(&error, flags);
   if (ret == vintf::INCOMPATIBLE) {
     return Error() << "CheckVintf failed: not compatible. error=" << error;
   }
@@ -111,8 +90,22 @@ base::Result<void> CheckVintf(std::span<const ApexFile> apex_files,
     return Error() << "CheckVintf failed: error=" << error;
   }
 
-  return {};
+  // Compat check passed.
+  // Collect HAL information from incoming APEXes for metrics.
+  std::map<std::string, std::vector<std::string>> apex_hals;
+  auto collect_hals = [&](auto manifest) {
+    manifest->forEachInstance([&](const auto& instance) {
+      if (instance.updatableViaApex().has_value()) {
+        apex_hals[instance.updatableViaApex().value()].push_back(
+            instance.nameWithVersion());
+      }
+      return true;  // continue
+    });
+  };
+  collect_hals(vintf_object->getFrameworkHalManifest());
+  collect_hals(vintf_object->getDeviceHalManifest());
+
+  return apex_hals;
 }
 
-}  // namespace apex
-}  // namespace android
+}  // namespace android::apex
