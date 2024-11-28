@@ -46,49 +46,6 @@ std::unique_ptr<Metrics> InitMetrics(std::unique_ptr<Metrics> metrics) {
   return metrics;
 }
 
-void SendApexInstallationRequestedAtom(const std::string& package_path,
-                                       bool is_rollback,
-                                       InstallType install_type) {
-  if (!gMetrics) {
-    return;
-  }
-  auto apex_file = ApexFile::Open(package_path);
-  if (!apex_file.ok()) {
-    LOG(WARNING) << "Unable to send Apex Atom; Failed to open ApexFile "
-                 << package_path << ": " << apex_file.error();
-    return;
-  }
-  const std::string& module_name = apex_file->GetManifest().name();
-  struct stat stat_buf;
-  intmax_t apex_file_size;
-  if (stat(package_path.c_str(), &stat_buf) == 0) {
-    apex_file_size = stat_buf.st_size;
-  } else {
-    PLOG(WARNING) << "Failed to stat " << package_path;
-    return;
-  }
-  Result<std::string> hash = CalculateSha256(package_path);
-  if (!hash.ok()) {
-    LOG(WARNING) << "Unable to get sha256 of ApexFile: " << hash.error();
-    return;
-  }
-
-  const auto& instance = ApexFileRepository::GetInstance();
-  auto partition = instance.GetPartition(*apex_file);
-  if (!partition.ok()) {
-    LOG(WARNING) << partition.error();
-    return;
-  }
-
-  std::vector<std::string> hal_list;
-  // TODO(b/366217822): Populate HAL information
-
-  gMetrics->InstallationRequested(
-      module_name, apex_file->GetManifest().version(), apex_file_size, *hash,
-      *partition, install_type, is_rollback,
-      apex_file->GetManifest().providesharedapexlibs(), hal_list);
-}
-
 void SendApexInstallationEndedAtom(const std::string& package_path,
                                    InstallResult install_result) {
   if (!gMetrics) {
@@ -99,7 +56,7 @@ void SendApexInstallationEndedAtom(const std::string& package_path,
     LOG(WARNING) << "Unable to get sha256 of ApexFile: " << hash.error();
     return;
   }
-  gMetrics->InstallationEnded(*hash, install_result);
+  gMetrics->SendInstallationEnded(*hash, install_result);
 }
 
 void SendSessionApexInstallationEndedAtom(const ApexSession& session,
@@ -109,8 +66,83 @@ void SendSessionApexInstallationEndedAtom(const ApexSession& session,
   }
 
   for (const auto& hash : session.GetApexFileHashes()) {
-    gMetrics->InstallationEnded(hash, install_result);
+    gMetrics->SendInstallationEnded(hash, install_result);
   }
+}
+
+InstallRequestedEvent::~InstallRequestedEvent() {
+  if (!gMetrics) {
+    return;
+  }
+  for (const auto& info : files_) {
+    gMetrics->SendInstallationRequested(install_type_, is_rollback_, info);
+  }
+  // Staged installation ends later. No need to send "end" event now.
+  if (succeeded_ && install_type_ == InstallType::Staged) {
+    return;
+  }
+  auto result = succeeded_ ? InstallResult::Success : InstallResult::Failure;
+  for (const auto& info : files_) {
+    gMetrics->SendInstallationEnded(info.file_hash, result);
+  }
+}
+
+void InstallRequestedEvent::MarkSucceeded() { succeeded_ = true; }
+
+void InstallRequestedEvent::AddFiles(std::span<const ApexFile> files) {
+  auto& repo = ApexFileRepository::GetInstance();
+  files_.reserve(files.size());
+  for (const auto& file : files) {
+    Metrics::ApexFileInfo info;
+    info.name = file.GetManifest().name();
+    info.version = file.GetManifest().version();
+    info.shared_libs = file.GetManifest().providesharedapexlibs();
+
+    const auto& file_path = file.GetPath();
+    struct stat stat_buf;
+    if (stat(file_path.c_str(), &stat_buf) == 0) {
+      info.file_size = stat_buf.st_size;
+    } else {
+      PLOG(WARNING) << "Failed to stat " << file_path;
+      continue;
+    }
+
+    if (auto result = CalculateSha256(file_path); result.ok()) {
+      info.file_hash = result.value();
+    } else {
+      LOG(WARNING) << "Unable to get sha256 of " << file_path << ": "
+                   << result.error();
+      continue;
+    }
+
+    if (auto result = repo.GetPartition(file); result.ok()) {
+      info.partition = result.value();
+    } else {
+      LOG(WARNING) << "Failed to get partition of " << file_path << ": "
+                   << result.error();
+      continue;
+    }
+
+    files_.push_back(std::move(info));
+  }
+}
+
+void InstallRequestedEvent::AddHals(
+    const std::map<std::string, std::vector<std::string>>& hals) {
+  for (auto& info : files_) {
+    if (auto it = hals.find(info.name); it != hals.end()) {
+      info.hals = it->second;
+    }
+  }
+}
+
+std::vector<std::string> InstallRequestedEvent::GetFileHashes() const {
+  std::vector<std::string> hashes;
+  hashes.reserve(files_.size());
+  for (const auto& info : files_) {
+    hashes.push_back(info.file_hash);
+  }
+  return hashes;
 }
 
 }  // namespace android::apex
