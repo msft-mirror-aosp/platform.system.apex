@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -39,26 +41,57 @@ enum class InstallResult {
 
 class Metrics {
  public:
+  struct ApexFileInfo {
+    std::string name;
+    int64_t version;
+    bool shared_libs;
+    int64_t file_size;
+    std::string file_hash;
+    ApexPartition partition;
+    std::vector<std::string> hals;
+  };
+
   virtual ~Metrics() = default;
-  virtual void InstallationRequested(
-      const std::string& module_name, int64_t version_code,
-      int64_t file_size_bytes, const std::string& file_hash,
-      ApexPartition partition, InstallType install_type, bool is_rollback,
-      bool shared_libs, const std::vector<std::string>& hals) = 0;
-  virtual void InstallationEnded(const std::string& file_hash,
-                                 InstallResult result) = 0;
+  virtual void SendInstallationRequested(InstallType install_type,
+                                         bool is_rollback,
+                                         const ApexFileInfo& info) = 0;
+  virtual void SendInstallationEnded(const std::string& file_hash,
+                                     InstallResult result) = 0;
 };
 
 std::unique_ptr<Metrics> InitMetrics(std::unique_ptr<Metrics> metrics);
 
-void SendApexInstallationRequestedAtom(const std::string& package_path,
-                                       bool is_rollback,
-                                       InstallType install_type);
-
-void SendApexInstallationEndedAtom(const std::string& package_path,
-                                   InstallResult install_result);
-
 void SendSessionApexInstallationEndedAtom(const ApexSession& session,
                                           InstallResult install_result);
+
+// Helper class to send "installation_requested" event. Events are
+// sent in its destructor using Metrics::Send* methods.
+class InstallRequestedEvent {
+ public:
+  InstallRequestedEvent(InstallType install_type, bool is_rollback)
+      : install_type_(install_type), is_rollback_(is_rollback) {}
+  // Sends the "requested" event.
+  // Sends the "end" event if it's non-staged or failed.
+  ~InstallRequestedEvent();
+
+  void AddFiles(std::span<const ApexFile> files);
+
+  // Adds HAL Information for each APEX.
+  // Since the event can contain multiple APEX files, HAL information is
+  // passed as a map of APEX name to a list of HAL names.
+  void AddHals(const std::map<std::string, std::vector<std::string>>& hals);
+
+  // Marks the current installation request has succeeded.
+  void MarkSucceeded();
+
+  // Returns file hashes for APEX files added by AddFile()
+  std::vector<std::string> GetFileHashes() const;
+
+ private:
+  InstallType install_type_;
+  bool is_rollback_;
+  std::vector<Metrics::ApexFileInfo> files_;
+  bool succeeded_ = false;
+};
 
 }  // namespace android::apex

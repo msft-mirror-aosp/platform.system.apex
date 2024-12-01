@@ -66,38 +66,33 @@ int Cast(ApexPartition partition) {
     case ApexPartition::Odm:
       return stats::apex::
           APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_ODM;
-    default:
-      return stats::apex::
-          APEX_INSTALLATION_REQUESTED__APEX_PREINSTALL_PARTITION__PARTITION_UNKNOWN;
   }
 }
 
 }  // namespace
 
-void StatsLog::InstallationRequested(
-    const std::string& module_name, int64_t version_code,
-    int64_t file_size_bytes, const std::string& file_hash,
-    ApexPartition partition, InstallType install_type, bool is_rollback,
-    bool shared_libs, const std::vector<std::string>& hals) {
+void StatsLog::SendInstallationRequested(InstallType install_type,
+                                         bool is_rollback,
+                                         const ApexFileInfo& info) {
   if (!IsAvailable()) {
     LOG(WARNING) << "Unable to send atom: libstatssocket is not available";
     return;
   }
   std::vector<const char*> hals_cstr;
-  for (const auto& hal : hals) {
+  for (const auto& hal : info.hals) {
     hals_cstr.push_back(hal.c_str());
   }
   int ret = stats::apex::stats_write(
-      stats::apex::APEX_INSTALLATION_REQUESTED, module_name.c_str(),
-      version_code, file_size_bytes, file_hash.c_str(), Cast(partition),
-      Cast(install_type), is_rollback, shared_libs, hals_cstr);
+      stats::apex::APEX_INSTALLATION_REQUESTED, info.name.c_str(), info.version,
+      info.file_size, info.file_hash.c_str(), Cast(info.partition),
+      Cast(install_type), is_rollback, info.shared_libs, hals_cstr);
   if (ret < 0) {
     LOG(WARNING) << "Failed to report apex_installation_requested stats";
   }
 }
 
-void StatsLog::InstallationEnded(const std::string& file_hash,
-                                 InstallResult result) {
+void StatsLog::SendInstallationEnded(const std::string& file_hash,
+                                     InstallResult result) {
   if (!IsAvailable()) {
     LOG(WARNING) << "Unable to send atom: libstatssocket is not available";
     return;

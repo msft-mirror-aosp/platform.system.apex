@@ -680,11 +680,15 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
   return {};
 }
 
+struct VerificationResult {
+  std::map<std::string, std::vector<std::string>> apex_hals;
+};
+
 // A version of apex verification that happens on SubmitStagedSession.
 // This function contains checks that might be expensive to perform, e.g. temp
 // mounting a package and reading entire dm-verity device, and shouldn't be run
 // during boot.
-Result<void> VerifyPackagesStagedInstall(
+Result<VerificationResult> VerifyPackagesStagedInstall(
     const std::vector<ApexFile>& apex_files) {
   for (const auto& apex_file : apex_files) {
     OR_RETURN(VerifyPackageBoot(apex_file));
@@ -720,10 +724,11 @@ Result<void> VerifyPackagesStagedInstall(
     all_apex_files.push_back(apex_file);
   }
 
-  auto check_fn =
-      [&](const std::vector<std::string>& mount_points) -> Result<void> {
-    OR_RETURN(CheckVintf(all_apex_files, mount_points));
-    return {};
+  auto check_fn = [&](const std::vector<std::string>& mount_points)
+      -> Result<VerificationResult> {
+    VerificationResult result;
+    result.apex_hals = OR_RETURN(CheckVintf(all_apex_files, mount_points));
+    return result;
   };
   return RunVerifyFnInsideTempMounts(all_apex_files, check_fn);
 }
@@ -2764,6 +2769,8 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     const int session_id, const std::vector<int>& child_session_ids,
     const bool has_rollback_enabled, const bool is_rollback,
     const int rollback_id) {
+  auto event = InstallRequestedEvent(InstallType::Staged, is_rollback);
+
   if (session_id == 0) {
     return Error() << "Session id was not provided.";
   }
@@ -2781,23 +2788,10 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   }
 
   auto ret = OR_RETURN(OpenSessionApexFiles(session_id, child_session_ids));
+  event.AddFiles(ret);
 
-  for (const auto& apex : ret) {
-    SendApexInstallationRequestedAtom(apex.GetPath(), is_rollback,
-                                      InstallType::Staged);
-  }
-  auto guard = android::base::make_scope_guard([&]() {
-    for (const auto& apex : ret) {
-      SendApexInstallationEndedAtom(apex.GetPath(), InstallResult::Failure);
-    }
-  });
-
-  OR_RETURN(VerifyPackagesStagedInstall(ret));
-
-  std::vector<std::string> file_hashes;
-  for (const auto& apex_file : ret) {
-    file_hashes.push_back(OR_RETURN(CalculateSha256(apex_file.GetPath())));
-  }
+  auto result = OR_RETURN(VerifyPackagesStagedInstall(ret));
+  event.AddHals(result.apex_hals);
 
   auto session = gSessionManager->CreateSession(session_id);
   if (!session.ok()) {
@@ -2812,7 +2806,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   for (const auto& apex_file : ret) {
     session->AddApexName(apex_file.GetManifest().name());
   }
-  session->SetApexFileHashes(file_hashes);
+  session->SetApexFileHashes(event.GetFileHashes());
   Result<void> commit_status =
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {
@@ -2824,8 +2818,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     ReleaseF2fsCompressedBlocks(apex.GetPath());
   }
 
-  // Disabling scope guard to stop Failure atoms from being sent
-  guard.Disable();
+  event.MarkSucceeded();
 
   return ret;
 }
@@ -3369,26 +3362,26 @@ android::apex::MountedApexDatabase& GetApexDatabaseForTesting() {
 
 // A version of apex verification that happens during non-staged APEX
 // installation.
-Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file,
-                                           bool force) {
-  const auto& verify_package_boot_status = VerifyPackageBoot(apex_file);
-  if (!verify_package_boot_status.ok()) {
-    return verify_package_boot_status;
-  }
+Result<VerificationResult> VerifyPackageNonStagedInstall(
+    const ApexFile& apex_file, bool force) {
+  OR_RETURN(VerifyPackageBoot(apex_file));
 
-  auto check_fn = [&apex_file,
-                   &force](const std::string& mount_point) -> Result<void> {
+  auto check_fn =
+      [&apex_file,
+       &force](const std::string& mount_point) -> Result<VerificationResult> {
     if (force) {
-      return Result<void>{};
+      return {};
     }
+    VerificationResult result;
     if (access((mount_point + "/app").c_str(), F_OK) == 0) {
       return Error() << apex_file.GetPath() << " contains app inside";
     }
     if (access((mount_point + "/priv-app").c_str(), F_OK) == 0) {
       return Error() << apex_file.GetPath() << " contains priv-app inside";
     }
-    OR_RETURN(CheckVintf(Single(apex_file), Single(mount_point)));
-    return Result<void>{};
+    result.apex_hals =
+        OR_RETURN(CheckVintf(Single(apex_file), Single(mount_point)));
+    return result;
   };
   return RunVerifyFnInsideTempMount(apex_file, check_fn);
 }
@@ -3531,12 +3524,16 @@ Result<void> LoadApexFromInit(const std::string& apex_name) {
   return {};
 }
 
-Result<ApexFile> InstallPackageImpl(const std::string& package_path,
-                                    bool force) {
+Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
+  auto event = InstallRequestedEvent(InstallType::NonStaged,
+                                     /*is_rollback=*/false);
+
   auto temp_apex = ApexFile::Open(package_path);
   if (!temp_apex.ok()) {
     return temp_apex.error();
   }
+
+  event.AddFiles(Single(*temp_apex));
 
   const std::string& module_name = temp_apex->GetManifest().name();
   // Don't allow non-staged update if there are no active versions of this APEX.
@@ -3560,9 +3557,8 @@ Result<ApexFile> InstallPackageImpl(const std::string& package_path,
   // 1. Verify that APEX is correct. This is a heavy check that involves
   // mounting an APEX on a temporary mount point and reading the entire
   // dm-verity block device.
-  if (auto res = VerifyPackageNonStagedInstall(*temp_apex, force); !res.ok()) {
-    return res.error();
-  }
+  auto result = OR_RETURN(VerifyPackageNonStagedInstall(*temp_apex, force));
+  event.AddHals(result.apex_hals);
 
   // 2. Compute params for mounting new apex.
   auto new_id_minor = ComputePackageIdMinor(*temp_apex);
@@ -3652,18 +3648,9 @@ Result<ApexFile> InstallPackageImpl(const std::string& package_path,
   // filesystem.
   ReleaseF2fsCompressedBlocks(target_file);
 
-  return new_apex;
-}
+  event.MarkSucceeded();
 
-Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
-  LOG(INFO) << "Installing " << package_path;
-  SendApexInstallationRequestedAtom(package_path, /*is_rollback=*/false,
-                                    InstallType::NonStaged);
-  // TODO: Add error-enums
-  Result<ApexFile> ret = InstallPackageImpl(package_path, force);
-  SendApexInstallationEndedAtom(
-      package_path, ret.ok() ? InstallResult::Success : InstallResult::Failure);
-  return ret;
+  return new_apex;
 }
 
 bool IsActiveApexChanged(const ApexFile& apex) {
