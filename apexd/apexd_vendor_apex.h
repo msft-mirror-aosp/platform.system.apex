@@ -14,33 +14,23 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_APEXD_VENDOR_APEX_H_
-#define ANDROID_APEXD_VENDOR_APEX_H_
+#pragma once
 
 #include <android-base/result.h>
 
+#include <map>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "apex_file.h"
 
-using android::base::Result;
+namespace android::apex {
 
-namespace android {
-namespace apex {
+// Checks VINTF for incoming apex updates.
+// Returns a map with APEX name and its HAL list.
+base::Result<std::map<std::string, std::vector<std::string>>> CheckVintf(
+    std::span<const ApexFile> apex_files,
+    std::span<const std::string> mount_points);
 
-bool InVendorPartition(const std::string& path);
-
-bool InOdmPartition(const std::string& path);
-
-// Determines if an incoming apex is a vendor apex
-bool IsVendorApex(const ApexFile& apex_file);
-
-// Check VINTF for incoming apex updates.
-Result<void> CheckVintf(std::span<const ApexFile> apex_files,
-                        std::span<const std::string> mount_points);
-
-}  // namespace apex
-}  // namespace android
-
-#endif  // ANDROID_APEXD_VENDOR_APEX_H_
+}  // namespace android::apex

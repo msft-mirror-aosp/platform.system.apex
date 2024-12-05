@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -37,7 +38,7 @@ static constexpr const char* kApexPackageProductDir = "/product/apex";
 static constexpr const char* kApexPackageVendorDir = "/vendor/apex";
 static constexpr const char* kApexPackageOdmDir = "/odm/apex";
 static const std::unordered_map<ApexPartition, std::string>
-    kPartitionToApexPackageDirs = {
+    kBuiltinApexPackageDirs = {
         {ApexPartition::System, kApexPackageSystemDir},
         {ApexPartition::SystemExt, kApexPackageSystemExtDir},
         {ApexPartition::Product, kApexPackageProductDir},

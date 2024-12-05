@@ -62,7 +62,8 @@ std::string GetApexSelectFilenameFromProp(
   return "";
 }
 
-Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
+Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir,
+                                                ApexPartition partition) {
   LOG(INFO) << "Scanning " << dir << " for pre-installed ApexFiles";
   if (access(dir.c_str(), F_OK) != 0 && errno == ENOENT) {
     LOG(WARNING) << dir << " does not exist. Skipping";
@@ -101,8 +102,9 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
                    << apex_file->GetPath();
         continue;
       }
-      if (enforce_multi_install_partition_ && !InVendorPartition(path) &&
-          !InOdmPartition(path)) {
+      if (enforce_multi_install_partition_ &&
+          partition != ApexPartition::Vendor &&
+          partition != ApexPartition::Odm) {
         LOG(ERROR) << "Multi-install APEX " << path
                    << " can only be preinstalled on /{odm,vendor}/apex/.";
         continue;
@@ -118,6 +120,7 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
         if (auto it = pre_installed_store_.find(name);
             it != pre_installed_store_.end()) {
           pre_installed_store_.erase(it);
+          partition_store_.erase(name);
         }
         continue;
       }
@@ -128,6 +131,7 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
                   << name;
         // Add the APEX file to the store if its filename matches the property.
         pre_installed_store_.emplace(name, std::move(*apex_file));
+        partition_store_.emplace(name, partition);
       } else {
         LOG(INFO) << "Skipping APEX at path " << path
                   << " because it does not match expected multi-install"
@@ -140,6 +144,7 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
     auto it = pre_installed_store_.find(name);
     if (it == pre_installed_store_.end()) {
       pre_installed_store_.emplace(name, std::move(*apex_file));
+      partition_store_.emplace(name, partition);
     } else if (it->second.GetPath() != apex_file->GetPath()) {
       LOG(FATAL) << "Found two apex packages " << it->second.GetPath()
                  << " and " << apex_file->GetPath()
@@ -160,9 +165,10 @@ ApexFileRepository& ApexFileRepository::GetInstance() {
 }
 
 android::base::Result<void> ApexFileRepository::AddPreInstalledApex(
-    const std::vector<std::string>& prebuilt_dirs) {
-  for (const auto& dir : prebuilt_dirs) {
-    if (auto result = ScanBuiltInDir(dir); !result.ok()) {
+    const std::unordered_map<ApexPartition, std::string>&
+        partition_to_prebuilt_dirs) {
+  for (const auto& [partition, dir] : partition_to_prebuilt_dirs) {
+    if (auto result = ScanBuiltInDir(dir, partition); !result.ok()) {
       return result.error();
     }
   }
@@ -296,6 +302,9 @@ Result<int> ApexFileRepository::AddBlockApex(
                      << it->second.GetPath();
     }
     store.emplace(name, std::move(*apex_file));
+    // NOTE: We consider block APEXes are SYSTEM. APEX Config should be extended
+    //       to support non-system block APEXes.
+    partition_store_.emplace(name, ApexPartition::System);
 
     ret++;
   }
@@ -337,13 +346,15 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
         continue;
       }
     } else if (ApexFileRepository::IsBrandNewApexEnabled()) {
-      auto brand_new_verified =
+      auto verified_partition =
           VerifyBrandNewPackageAgainstPreinstalled(*apex_file);
-      if (!brand_new_verified.ok()) {
+      if (!verified_partition.ok()) {
         LOG(ERROR) << "Skipping " << file << " : "
-                   << brand_new_verified.error();
+                   << verified_partition.error();
         continue;
       }
+      // Stores partition for already-verified brand-new APEX.
+      partition_store_.emplace(name, *verified_partition);
     } else {
       LOG(ERROR) << "Skipping " << file << " : no preinstalled apex";
       // Ignore data apex without corresponding pre-installed apex
@@ -424,6 +435,21 @@ Result<void> ApexFileRepository::AddBrandNewApexCredentialAndBlocklist(
   return {};
 }
 
+Result<ApexPartition> ApexFileRepository::GetPartition(
+    const ApexFile& apex) const {
+  const std::string& name = apex.GetManifest().name();
+  auto it = partition_store_.find(name);
+  if (it != partition_store_.end()) {
+    return it->second;
+  }
+
+  // Supports staged but not-yet-activated brand-new APEX.
+  if (!ApexFileRepository::IsBrandNewApexEnabled()) {
+    return Error() << "No preinstalled data found for package " << name;
+  }
+  return VerifyBrandNewPackageAgainstPreinstalled(apex);
+}
+
 // TODO(b/179497746): remove this method when we add api for fetching ApexFile
 //  by name
 Result<const std::string> ApexFileRepository::GetPublicKey(
@@ -446,28 +472,10 @@ Result<const std::string> ApexFileRepository::GetPublicKey(
 // TODO(b/179497746): remove this method when we add api for fetching ApexFile
 //  by name
 Result<const std::string> ApexFileRepository::GetPreinstalledPath(
-    const ApexFile& apex) const {
-  auto name = apex.GetManifest().name();
+    const std::string& name) const {
   auto it = pre_installed_store_.find(name);
   if (it == pre_installed_store_.end()) {
-    if (!ApexFileRepository::IsBrandNewApexEnabled()) {
-      return Error() << "No preinstalled data found for package " << name;
-    }
-
-    if (!HasDataVersion(name)) {
-      // Skips verification if there is already data version. It happens when
-      // APEX is staged but not yet activated.
-      OR_RETURN(VerifyBrandNewPackageAgainstPreinstalled(apex));
-    }
-    // There must be a matching partition because the APEX is verified above.
-    auto partition =
-        GetBrandNewApexPublicKeyPartition(apex.GetBundledPublicKey()).value();
-    auto itt = kPartitionToApexPackageDirs.find(partition);
-    if (itt == kPartitionToApexPackageDirs.end()) {
-      return Error() << "No preinstalled data found for brand-new APEX package "
-                     << name;
-    }
-    return itt->second + "/brand_new";
+    return Error() << "No preinstalled data found for package " << name;
   }
   return it->second.GetPath();
 }

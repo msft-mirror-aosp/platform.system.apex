@@ -44,6 +44,9 @@ typedef enum AApexInfoError : int32_t {
   AAPEXINFO_INVALID_APEX,
 } AApexInfoError;
 
+// Defining #llndk symbols
+#if defined(__ANDROID_VNDK__) || !defined(__ANDROID_APEX__)
+
 /**
  * Creates an AApexInfo object from the current calling executable. For example,
  * when called by a binary from /apex/com.android.foo/bin/foo, this will set an
@@ -56,15 +59,16 @@ typedef enum AApexInfoError : int32_t {
  *
  * \returns AApexInfoError
  */
-__attribute__((warn_unused_result)) AApexInfoError
-AApexInfo_create(AApexInfo *_Nullable *_Nonnull info);
+__attribute__((warn_unused_result)) AApexInfoError AApexInfo_create(
+    AApexInfo *_Nullable *_Nonnull info) __INTRODUCED_IN(__ANDROID_API_V__);
 
 /**
  * Destroys an AApexInfo object created by AApexInfo_create().
  *
  * \param info pointer to the AApexInfo object created by AApexInfo_create()
  */
-void AApexInfo_destroy(AApexInfo *_Nonnull info);
+void AApexInfo_destroy(AApexInfo *_Nonnull info)
+    __INTRODUCED_IN(__ANDROID_API_V__);
 
 /**
  * Returns a C-string for the APEX name.
@@ -78,7 +82,8 @@ void AApexInfo_destroy(AApexInfo *_Nonnull info);
  * \return the APEX name.
  */
 __attribute__((warn_unused_result))
-const char *_Nonnull AApexInfo_getName(const AApexInfo *_Nonnull info);
+const char *_Nonnull AApexInfo_getName(const AApexInfo *_Nonnull info)
+    __INTRODUCED_IN(__ANDROID_API_V__);
 
 /**
  * Returns the APEX version.
@@ -87,10 +92,13 @@ const char *_Nonnull AApexInfo_getName(const AApexInfo *_Nonnull info);
  *
  * \return the APEX version.
  */
-int64_t AApexInfo_getVersion(const AApexInfo *_Nonnull info);
+int64_t AApexInfo_getVersion(const AApexInfo *_Nonnull info)
+    __INTRODUCED_IN(__ANDROID_API_V__);
+
+#endif
 
 // AApexSupport_loadLibrary is private to platform yet.
-#if !defined(__ANDROID_VENDOR__) && !defined(__ANDROID_PRODUCT__)
+#if !defined(__ANDROID_VNDK__) && !defined(__ANDROID_APEX__)
 /**
  * Opens a library from a given apex and returns its handle.
  *

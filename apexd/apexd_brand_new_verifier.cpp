@@ -20,6 +20,7 @@
 #include <string>
 
 #include "android-base/logging.h"
+#include "apex_constants.h"
 #include "apex_file_repository.h"
 
 using android::base::Error;
@@ -27,7 +28,8 @@ using android::base::Result;
 
 namespace android::apex {
 
-Result<void> VerifyBrandNewPackageAgainstPreinstalled(const ApexFile& apex) {
+Result<ApexPartition> VerifyBrandNewPackageAgainstPreinstalled(
+    const ApexFile& apex) {
   CHECK(ApexFileRepository::IsBrandNewApexEnabled())
       << "Brand-new APEX must be enabled in order to do verification.";
 
@@ -46,7 +48,7 @@ Result<void> VerifyBrandNewPackageAgainstPreinstalled(const ApexFile& apex) {
     return Error() << "Brand-new APEX is blocked: " << name;
   }
 
-  return {};
+  return partition.value();
 }
 
 Result<void> VerifyBrandNewPackageAgainstActive(const ApexFile& apex) {

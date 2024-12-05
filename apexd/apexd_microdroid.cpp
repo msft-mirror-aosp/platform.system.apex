@@ -17,6 +17,7 @@
 // Entry for microdroid-specific apexd. This should be kept as minimal as
 // possible.
 
+#include "apex_constants.h"
 #define LOG_TAG "apexd-vm"
 
 #include <android-base/logging.h>
@@ -26,7 +27,8 @@
 
 static const android::apex::ApexdConfig kMicrodroidConfig = {
     android::apex::kApexStatusSysprop,
-    {android::apex::kApexPackageSystemDir},
+    {{android::apex::ApexPartition::System,
+      android::apex::kApexPackageSystemDir}},
     // A bunch of things are not used in Microdroid, hence we use nullptr
     // instead of an actual value.
     nullptr, /* active_apex_data_dir */
