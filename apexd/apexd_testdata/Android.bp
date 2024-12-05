@@ -27,6 +27,20 @@ apex_key {
 }
 
 apex_key {
+    name: "com.android.apex.brand.new.key",
+    public_key: "com.android.apex.brand.new.avbpubkey",
+    private_key: "com.android.apex.brand.new.pem",
+    installable: false,
+}
+
+apex_key {
+    name: "com.android.apex.brand.new.another.key",
+    public_key: "com.android.apex.brand.new.another.avbpubkey",
+    private_key: "com.android.apex.brand.new.another.pem",
+    installable: false,
+}
+
+apex_key {
     name: "com.android.apex.compressed.key",
     public_key: "com.android.apex.compressed.avbpubkey",
     private_key: "com.android.apex.compressed.pem",
@@ -73,6 +87,36 @@ apex {
     installable: false,
     test_only_force_compression: true,
     updatable: false,
+}
+
+apex {
+    name: "com.android.apex.brand.new",
+    manifest: "manifest_brand_new.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.apex.brand.new.key",
+    installable: false,
+    min_sdk_version: "34",
+}
+
+apex {
+    name: "com.android.apex.brand.new.v2",
+    manifest: "manifest_brand_new_v2.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.apex.brand.new.key",
+    installable: false,
+    min_sdk_version: "34",
+}
+
+apex {
+    name: "com.android.apex.brand.new.v2.diffkey",
+    manifest: "manifest_brand_new_v2.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.apex.brand.new.another.key",
+    installable: false,
+    min_sdk_version: "34",
 }
 
 java_genrule {

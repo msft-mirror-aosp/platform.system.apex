@@ -90,6 +90,15 @@ cc_library_static {
     srcs: ["session_state.proto"],
 }
 
+cc_library_static {
+    name: "lib_apex_blocklist_proto",
+    host_supported: true,
+    proto: {
+        export_proto_headers: true,
+    },
+    srcs: ["apex_blocklist.proto"],
+}
+
 genrule {
     name: "apex-protos",
     tools: ["soong_zip"],
