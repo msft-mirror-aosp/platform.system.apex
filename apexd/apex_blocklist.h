@@ -16,25 +16,20 @@
 
 #pragma once
 
+#include <android-base/result.h>
+
 #include <string>
 
-#include "apex_constants.h"
-#include "apexd_metrics.h"
+#include "apex_blocklist.pb.h"
 
 namespace android::apex {
-
-class StatsLog : public Metrics {
- public:
-  StatsLog() = default;
-  ~StatsLog() override = default;
-
-  void SendInstallationRequested(InstallType install_type, bool is_rollback,
-                                 const ApexFileInfo& info) override;
-  void SendInstallationEnded(const std::string& file_hash,
-                             InstallResult result) override;
-
- private:
-  bool IsAvailable();
-};
-
+// Parses and validates APEX blocklist. The blocklist is used only to block
+// brand-new APEX. A brand-new APEX is blocked when the name exactly matches the
+// block item and the version is smaller than or equal to the configured
+// version.
+android::base::Result<::apex::proto::ApexBlocklist> ParseBlocklist(
+    const std::string& content);
+// Reads and parses APEX blocklist from the file on disk.
+android::base::Result<::apex::proto::ApexBlocklist> ReadBlocklist(
+    const std::string& path);
 }  // namespace android::apex

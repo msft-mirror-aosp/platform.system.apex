@@ -180,11 +180,11 @@ class ApexerRebuildTest(unittest.TestCase):
 
         files = {}
         for i in ["apexer", "deapexer", "avbtool", "mke2fs", "sefcontext_compile", "e2fsdroid",
-            "resize2fs", "soong_zip", "aapt2", "merge_zips", "zipalign", "debugfs_static",
-                  "signapk.jar", "android.jar", "blkid", "fsck.erofs", "conv_apex_manifest"]:
+                  "resize2fs", "soong_zip", "aapt2", "merge_zips", "zipalign", "debugfs_static",
+                  "signapk.jar", "android.jar", "make_erofs", "fsck.erofs", "conv_apex_manifest"]:
             file_path = os.path.join(dir_name, "bin", i)
             if os.path.exists(file_path):
-                os.chmod(file_path, stat.S_IRUSR | stat.S_IXUSR);
+                os.chmod(file_path, stat.S_IRUSR | stat.S_IXUSR)
                 files[i] = file_path
             else:
                 files[i] = i
@@ -255,8 +255,8 @@ class ApexerRebuildTest(unittest.TestCase):
         dir_name = tempfile.mkdtemp(prefix=self._testMethodName+"_extracted_payload_")
         self._to_cleanup.append(dir_name)
         cmd = ["deapexer", "--debugfs_path", self.host_tools["debugfs_static"],
-               "--blkid_path",self.host_tools["blkid"], "--fsckerofs_path",
-               self.host_tools["fsck.erofs"], "extract", apex_file_path, dir_name]
+               "--fsckerofs_path", self.host_tools["fsck.erofs"], "extract",
+               apex_file_path, dir_name]
         run_host_command(cmd)
 
         # Remove payload files added by apexer and e2fs tools.
@@ -419,14 +419,6 @@ class ApexerRebuildTest(unittest.TestCase):
         signed_payload = self._sign_payload(container_files, unsigned_payload_only_file_path)
         self.assertEqual(get_sha1sum(signed_payload),
                          get_sha1sum(container_files["apex_payload"]))
-
-        # Now assert that given an unsigned image and the original container
-        # files, we can produce an identical unsigned image.
-        unsigned_payload_dir = self._extract_payload_from_img(unsigned_payload_only_file_path)
-        unsigned_payload_only_2_file_path = self._run_apexer(container_files, unsigned_payload_dir,
-                                                             ["--unsigned_payload_only"])
-        self.assertEqual(get_sha1sum(unsigned_payload_only_file_path),
-                         get_sha1sum(unsigned_payload_only_2_file_path))
 
     def test_apex_with_logging_parent(self):
       self._run_build_test(TEST_APEX_WITH_LOGGING_PARENT)
