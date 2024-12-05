@@ -17,9 +17,10 @@
 #ifndef ANDROID_APEXD_APEXD_PRIVATE_H_
 #define ANDROID_APEXD_APEXD_PRIVATE_H_
 
+#include <android-base/result.h>
+
 #include <string>
 
-#include <android-base/result.h>
 #include "apex_database.h"
 #include "apex_file.h"
 #include "apex_manifest.h"
@@ -32,6 +33,8 @@ class ApexFile;
 static constexpr int kMkdirMode = 0755;
 
 namespace apexd_private {
+
+android::base::Result<std::string> GetVerifiedPublicKey(const ApexFile& apex);
 
 std::string GetPackageMountPoint(const ::apex::proto::ApexManifest& manifest);
 std::string GetPackageTempMountPoint(

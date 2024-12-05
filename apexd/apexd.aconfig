@@ -1,0 +1,10 @@
+package: "com.android.apex.flags"
+container: "system"
+
+flag {
+  name: "enable_brand_new_apex"
+  namespace: "aaos_sdv"
+  description: "This flag controls if allowing installation of brand-new APEX"
+  bug: "361500273"
+  is_fixed_read_only: true
+}
