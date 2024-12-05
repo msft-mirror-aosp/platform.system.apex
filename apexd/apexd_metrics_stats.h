@@ -17,7 +17,6 @@
 #pragma once
 
 #include <string>
-#include <vector>
 
 #include "apex_constants.h"
 #include "apexd_metrics.h"
@@ -29,14 +28,10 @@ class StatsLog : public Metrics {
   StatsLog() = default;
   ~StatsLog() override = default;
 
-  void InstallationRequested(const std::string& module_name,
-                             int64_t version_code, int64_t file_size_bytes,
-                             const std::string& file_hash,
-                             ApexPartition partition, InstallType install_type,
-                             bool is_rollback, bool shared_libs,
-                             const std::vector<std::string>& hals);
-  void InstallationEnded(const std::string& file_hash,
-                         InstallResult result) override;
+  void SendInstallationRequested(InstallType install_type, bool is_rollback,
+                                 const ApexFileInfo& info) override;
+  void SendInstallationEnded(const std::string& file_hash,
+                             InstallResult result) override;
 
  private:
   bool IsAvailable();
