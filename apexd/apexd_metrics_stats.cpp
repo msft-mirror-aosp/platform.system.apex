@@ -71,8 +71,9 @@ int Cast(ApexPartition partition) {
 
 }  // namespace
 
-void StatsLog::InstallationRequested(InstallType install_type, bool is_rollback,
-                                     const ApexFileInfo& info) {
+void StatsLog::SendInstallationRequested(InstallType install_type,
+                                         bool is_rollback,
+                                         const ApexFileInfo& info) {
   if (!IsAvailable()) {
     LOG(WARNING) << "Unable to send atom: libstatssocket is not available";
     return;
@@ -90,8 +91,8 @@ void StatsLog::InstallationRequested(InstallType install_type, bool is_rollback,
   }
 }
 
-void StatsLog::InstallationEnded(const std::string& file_hash,
-                                 InstallResult result) {
+void StatsLog::SendInstallationEnded(const std::string& file_hash,
+                                     InstallResult result) {
   if (!IsAvailable()) {
     LOG(WARNING) << "Unable to send atom: libstatssocket is not available";
     return;
