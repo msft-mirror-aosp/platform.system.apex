@@ -95,7 +95,8 @@ MATCHER_P(ApexInfoEq, other, "") {
                   Eq(other.preinstalledModulePath)),
             Field("versionCode", &ApexInfo::versionCode, Eq(other.versionCode)),
             Field("isFactory", &ApexInfo::isFactory, Eq(other.isFactory)),
-            Field("isActive", &ApexInfo::isActive, Eq(other.isActive))),
+            Field("isActive", &ApexInfo::isActive, Eq(other.isActive)),
+            Field("partition", &ApexInfo::partition, Eq(other.partition))),
       arg, result_listener);
 }
 
@@ -159,6 +160,7 @@ inline void PrintTo(const ApexInfo& apex, std::ostream* os) {
   *os << "  versionCode : " << apex.versionCode << "\n";
   *os << "  isFactory : " << apex.isFactory << "\n";
   *os << "  isActive : " << apex.isActive << "\n";
+  *os << "  partition : " << toString(apex.partition) << "\n";
   *os << "}";
 }
 
@@ -305,42 +307,9 @@ inline android::base::Result<void> SetUpApexTestEnvironment() {
   return {};
 }
 
-// Simpler version of loop::CreateLoopDevice. Uses LOOP_SET_FD/LOOP_SET_STATUS64
-// instead of LOOP_CONFIGURE.
-// TODO(b/191244059) use loop::CreateLoopDevice
-inline base::Result<loop::LoopbackDeviceUniqueFd> CreateLoopDeviceForTest(
-    const std::string& filepath) {
-  base::unique_fd ctl_fd(open("/dev/loop-control", O_RDWR | O_CLOEXEC));
-  if (ctl_fd.get() == -1) {
-    return base::ErrnoError() << "Failed to open loop-control";
-  }
-  int num = ioctl(ctl_fd.get(), LOOP_CTL_GET_FREE);
-  if (num == -1) {
-    return base::ErrnoError() << "Failed LOOP_CTL_GET_FREE";
-  }
-  auto loop_device = loop::WaitForDevice(num);
-  if (!loop_device.ok()) {
-    return loop_device.error();
-  }
-  base::unique_fd target_fd(open(filepath.c_str(), O_RDONLY | O_CLOEXEC));
-  if (target_fd.get() == -1) {
-    return base::ErrnoError() << "Failed to open " << filepath;
-  }
-  struct loop_info64 li = {};
-  strlcpy((char*)li.lo_crypt_name, filepath.c_str(), LO_NAME_SIZE);
-  li.lo_flags |= LO_FLAGS_AUTOCLEAR;
-  if (ioctl(loop_device->device_fd.get(), LOOP_SET_FD, target_fd.get()) == -1) {
-    return base::ErrnoError() << "Failed to LOOP_SET_FD";
-  }
-  if (ioctl(loop_device->device_fd.get(), LOOP_SET_STATUS64, &li) == -1) {
-    return base::ErrnoError() << "Failed to LOOP_SET_STATUS64";
-  }
-  return loop_device;
-}
-
 inline base::Result<loop::LoopbackDeviceUniqueFd> MountViaLoopDevice(
     const std::string& filepath, const std::string& mount_point) {
-  auto loop_device = CreateLoopDeviceForTest(filepath);
+  auto loop_device = loop::CreateAndConfigureLoopDevice(filepath, 0, 0);
   if (loop_device.ok()) {
     close(open(mount_point.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
                0644));
@@ -519,7 +488,9 @@ MATCHER_P(ApexInfoXmlEq, other, "") {
                    Eq(other.getIsFactory())),
           Property("isActive", &ApexInfo::getIsActive, Eq(other.getIsActive())),
           Property("lastUpdateMillis", &ApexInfo::getLastUpdateMillis,
-                   Eq(other.getLastUpdateMillis()))),
+                   Eq(other.getLastUpdateMillis())),
+          Property("partition", &ApexInfo::getPartition,
+                   Eq(other.getPartition()))),
       arg, result_listener);
 }
 
@@ -537,6 +508,7 @@ inline void PrintTo(const ApexInfo& apex, std::ostream* os) {
   *os << "  versionCode : " << apex.getVersionCode() << "\n";
   *os << "  isFactory : " << apex.getIsFactory() << "\n";
   *os << "  isActive : " << apex.getIsActive() << "\n";
+  *os << "  partition : " << apex.getPartition() << "\n";
   *os << "}";
 }
 

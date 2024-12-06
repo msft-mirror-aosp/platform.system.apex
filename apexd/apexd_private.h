@@ -17,9 +17,10 @@
 #ifndef ANDROID_APEXD_APEXD_PRIVATE_H_
 #define ANDROID_APEXD_APEXD_PRIVATE_H_
 
+#include <android-base/result.h>
+
 #include <string>
 
-#include <android-base/result.h>
 #include "apex_database.h"
 #include "apex_file.h"
 #include "apex_manifest.h"
@@ -33,6 +34,8 @@ static constexpr int kMkdirMode = 0755;
 
 namespace apexd_private {
 
+android::base::Result<std::string> GetVerifiedPublicKey(const ApexFile& apex);
+
 std::string GetPackageMountPoint(const ::apex::proto::ApexManifest& manifest);
 std::string GetPackageTempMountPoint(
     const ::apex::proto::ApexManifest& manifest);
@@ -40,9 +43,6 @@ std::string GetActiveMountPoint(const ::apex::proto::ApexManifest& manifest);
 
 android::base::Result<void> BindMount(const std::string& target,
                                       const std::string& source);
-android::base::Result<MountedApexDatabase::MountedApexData>
-GetTempMountedApexData(const std::string& package);
-android::base::Result<void> UnmountTempMount(const ApexFile& apex);
 
 }  // namespace apexd_private
 }  // namespace apex

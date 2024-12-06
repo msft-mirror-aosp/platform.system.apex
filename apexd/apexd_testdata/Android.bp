@@ -27,6 +27,20 @@ apex_key {
 }
 
 apex_key {
+    name: "com.android.apex.brand.new.key",
+    public_key: "com.android.apex.brand.new.avbpubkey",
+    private_key: "com.android.apex.brand.new.pem",
+    installable: false,
+}
+
+apex_key {
+    name: "com.android.apex.brand.new.another.key",
+    public_key: "com.android.apex.brand.new.another.avbpubkey",
+    private_key: "com.android.apex.brand.new.another.pem",
+    installable: false,
+}
+
+apex_key {
     name: "com.android.apex.compressed.key",
     public_key: "com.android.apex.compressed.avbpubkey",
     private_key: "com.android.apex.compressed.pem",
@@ -36,6 +50,16 @@ apex_key {
 apex {
     name: "apex.apexd_test",
     manifest: "manifest.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.apex.test_package.key",
+    installable: false,
+    min_sdk_version: "29", // test requires hashtree to be present.
+}
+
+apex {
+    name: "apex.apexd_bootstrap_test",
+    manifest: "manifest_bootstrap.json",
     file_contexts: ":apex.test-file_contexts",
     prebuilts: ["sample_prebuilt_file"],
     key: "com.android.apex.test_package.key",
@@ -65,7 +89,37 @@ apex {
     updatable: false,
 }
 
-genrule {
+apex {
+    name: "com.android.apex.brand.new",
+    manifest: "manifest_brand_new.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.apex.brand.new.key",
+    installable: false,
+    min_sdk_version: "34",
+}
+
+apex {
+    name: "com.android.apex.brand.new.v2",
+    manifest: "manifest_brand_new_v2.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.apex.brand.new.key",
+    installable: false,
+    min_sdk_version: "34",
+}
+
+apex {
+    name: "com.android.apex.brand.new.v2.diffkey",
+    manifest: "manifest_brand_new_v2.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.apex.brand.new.another.key",
+    installable: false,
+    min_sdk_version: "34",
+}
+
+java_genrule {
     // Generates an apex which has a different public key outside the filesystem image
     name: "gen_key_mismatch_with_image_apex",
     out: ["apex.apexd_test_wrong_public_key.apex"],
@@ -83,7 +137,7 @@ genrule {
         "$(genDir)/apex.apexd_test_wrong_public_key.apex",
 }
 
-genrule {
+java_genrule {
     // Generates a compressed apex which doesn't have an original_apex file in it
     name: "gen_capex_without_apex",
     out: ["com.android.apex.compressed.v1_without_apex.capex"],
@@ -94,7 +148,7 @@ genrule {
         "-o $(genDir)/com.android.apex.compressed.v1_without_apex.capex",
 }
 
-genrule {
+java_genrule {
     // Generates a compressed apex which has different version of original_apex in it
     name: "gen_capex_with_v2_apex",
     out: ["com.android.apex.compressed.v1_with_v2_apex.capex"],
@@ -109,7 +163,7 @@ genrule {
         "-o $(genDir)/com.android.apex.compressed.v1_with_v2_apex.capex",
 }
 
-genrule {
+java_genrule {
     // Generates a compressed apex which can be opened but not decompressed
     name: "gen_capex_not_decompressible",
     out: ["com.android.apex.compressed.v1_not_decompressible.capex"],
@@ -123,7 +177,7 @@ genrule {
         "-o $(genDir)/com.android.apex.compressed.v1_not_decompressible.capex",
 }
 
-genrule {
+java_genrule {
     // Generates a capex which has same module name as com.android.apex.compressed, but
     // is contains a different public key.
     name: "gen_key_mismatch_capex",
@@ -150,7 +204,7 @@ genrule {
         "--output=$(genDir)/com.android.apex.compressed_different_key.capex",
 }
 
-genrule {
+java_genrule {
     // Generates a capex which has a different public key than original_apex
     name: "gen_key_mismatch_with_original_capex",
     out: ["com.android.apex.compressed_key_mismatch_with_original.capex"],
@@ -162,7 +216,7 @@ genrule {
         "-o $(genDir)/com.android.apex.compressed_key_mismatch_with_original.capex",
 }
 
-genrule {
+java_genrule {
     // Generates an apex which has a different manifest outside the filesystem
     // image.
     name: "gen_manifest_mismatch_compressed_apex_v2",
@@ -259,7 +313,7 @@ apex {
     min_sdk_version: "29", // add apex_manifest.json as well
 }
 
-genrule {
+java_genrule {
     name: "apex.apexd_test_v2_no_pb",
     srcs: [":apex.apexd_test_v2_legacy"],
     out: ["apex.apexd_test_v2_no_pb.apex"],

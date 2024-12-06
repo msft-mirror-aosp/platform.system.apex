@@ -1,0 +1,5 @@
+{
+  "name": "com.android.apex.bootstrap_test_package",
+  "version": 1,
+  "bootstrap": true
+}

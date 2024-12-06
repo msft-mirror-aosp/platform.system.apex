@@ -45,6 +45,8 @@ apex {
             ],
         },
     },
+    // This test apex is used by shared_libs_repack, which works with only ext4.
+    payload_fs_type: "ext4",
 }
 
 cc_binary {
@@ -67,7 +69,7 @@ cc_binary {
     apex_available: ["com.android.apex.test.bar"],
 }
 
-genrule {
+java_genrule {
     name: "com.android.apex.test.bar_stripped",
     out: ["com.android.apex.test.bar_stripped.apex"],
     defaults: ["apexer_test_host_tools_list"],

@@ -325,11 +325,20 @@ Result<void> PreAllocateLoopDevices(size_t num) {
   return {};
 }
 
-Result<void> ConfigureLoopDevice(const int device_fd, const std::string& target,
-                                 const uint32_t image_offset,
-                                 const size_t image_size) {
+// This is a temporary/empty object for a loop device before the backing file is
+// set.
+struct EmptyLoopDevice {
+  unique_fd fd;
+  std::string name;
+  LoopbackDeviceUniqueFd ToOwned() { return {std::move(fd), std::move(name)}; }
+};
+
+static Result<LoopbackDeviceUniqueFd> ConfigureLoopDevice(
+    EmptyLoopDevice&& inner, const std::string& target,
+    const uint32_t image_offset, const size_t image_size) {
   static bool use_loop_configure;
   static std::once_flag once_flag;
+  auto device_fd = inner.fd.get();
   std::call_once(once_flag, [&]() {
     // LOOP_CONFIGURE is a new ioctl in Linux 5.8 (and backported in Android
     // common) that allows atomically configuring a loop device. It is a lot
@@ -396,11 +405,13 @@ Result<void> ConfigureLoopDevice(const int device_fd, const std::string& target,
       return ErrnoError() << "Failed to LOOP_CONFIGURE";
     }
 
-    return {};
+    return inner.ToOwned();
   } else {
     if (ioctl(device_fd, LOOP_SET_FD, target_fd.get()) == -1) {
       return ErrnoError() << "Failed to LOOP_SET_FD";
     }
+    // Now, we have a fully-owned loop device.
+    LoopbackDeviceUniqueFd loop_device = inner.ToOwned();
 
     if (ioctl(device_fd, LOOP_SET_STATUS64, &li) == -1) {
       return ErrnoError() << "Failed to LOOP_SET_STATUS64";
@@ -433,12 +444,12 @@ Result<void> ConfigureLoopDevice(const int device_fd, const std::string& target,
     if (ioctl(device_fd, LOOP_SET_BLOCK_SIZE, 4096) == -1) {
       PLOG(WARNING) << "Failed to LOOP_SET_BLOCK_SIZE";
     }
+    return loop_device;
   }
-  return {};
 }
 
-Result<LoopbackDeviceUniqueFd> WaitForDevice(int num) {
-  const std::vector<std::string> candidate_devices = {
+static Result<EmptyLoopDevice> WaitForLoopDevice(int num) {
+  std::vector<std::string> candidate_devices = {
       StringPrintf("/dev/block/loop%d", num),
       StringPrintf("/dev/loop%d", num),
   };
@@ -462,7 +473,7 @@ Result<LoopbackDeviceUniqueFd> WaitForDevice(int num) {
     for (const auto& device : candidate_devices) {
       unique_fd sysfs_fd(open(device.c_str(), O_RDWR | O_CLOEXEC));
       if (sysfs_fd.get() != -1) {
-        return LoopbackDeviceUniqueFd(std::move(sysfs_fd), device);
+        return EmptyLoopDevice{std::move(sysfs_fd), std::move(device)};
       }
     }
     PLOG(WARNING) << "Loopback device " << num << " not ready. Waiting 50ms...";
@@ -476,9 +487,8 @@ Result<LoopbackDeviceUniqueFd> WaitForDevice(int num) {
   return Error() << "Failed to open loopback device " << num;
 }
 
-Result<LoopbackDeviceUniqueFd> CreateLoopDevice(const std::string& target,
-                                                uint32_t image_offset,
-                                                size_t image_size) {
+static Result<LoopbackDeviceUniqueFd> CreateLoopDevice(
+    const std::string& target, uint32_t image_offset, size_t image_size) {
   ATRACE_NAME("CreateLoopDevice");
 
   unique_fd ctl_fd(open("/dev/loop-control", O_RDWR | O_CLOEXEC));
@@ -493,24 +503,11 @@ Result<LoopbackDeviceUniqueFd> CreateLoopDevice(const std::string& target,
     return ErrnoError() << "Failed LOOP_CTL_GET_FREE";
   }
 
-  Result<LoopbackDeviceUniqueFd> loop_device = WaitForDevice(num);
-  if (!loop_device.ok()) {
-    return loop_device.error();
-  }
-  CHECK_NE(loop_device->device_fd.get(), -1);
+  auto loop_device = OR_RETURN(WaitForLoopDevice(num));
+  CHECK_NE(loop_device.fd.get(), -1);
 
-  Result<void> configure_status = ConfigureLoopDevice(
-      loop_device->device_fd.get(), target, image_offset, image_size);
-  if (!configure_status.ok() && configure_status.error().code() == EBUSY) {
-    // EBUSY means that loop device was bound to a different process. We need to call
-    // CloseGood() here to ensure that when destroying LoopbackDeviceUniqueFd we
-    // don't call LOOP_CLR_FD ioctl on this loop device, essentially clearing the
-    // loop device while other process is using it.
-    loop_device->CloseGood();
-    return configure_status.error();
-  }
-
-  return loop_device;
+  return ConfigureLoopDevice(std::move(loop_device), target, image_offset,
+                             image_size);
 }
 
 Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
