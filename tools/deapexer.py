@@ -27,6 +27,7 @@ import argparse
 import apex_manifest
 import enum
 import os
+import re
 import shutil
 import sys
 import subprocess
@@ -56,7 +57,7 @@ def RetrieveFileSystemType(file):
 
 class ApexImageEntry(object):
   """Represents an entry in APEX payload"""
-  def __init__(self, name, base_dir, permissions, size, ino, extents,
+  def __init__(self, name, *, base_dir, permissions, size, ino, extents,
                is_directory, is_symlink, security_context):
     self._name = name
     self._base_dir = base_dir
@@ -67,6 +68,7 @@ class ApexImageEntry(object):
     self._ino = ino
     self._extents = extents
     self._security_context = security_context
+    self._entries = []
 
   @property
   def name(self):
@@ -110,6 +112,10 @@ class ApexImageEntry(object):
     return self._ino
 
   @property
+  def entries(self):
+    return self._entries
+
+  @property
   def extents(self):
     return self._extents
 
@@ -139,24 +145,6 @@ class ApexImageEntry(object):
     return ret + ' ' + self._size + ' ' + self._name
 
 
-class ApexImageDirectory(object):
-  """Represents a directory entry in APEX payload"""
-  def __init__(self, path, entries, apex):
-    self._path = path
-    self._entries = sorted(entries, key=lambda e: e.name)
-    self._apex = apex
-
-  def list(self, is_recursive=False):
-    for e in self._entries:
-      yield e
-      if e.is_directory and e.name != '.' and e.name != '..':
-        for ce in self.enter_subdir(e).list(is_recursive):
-          yield ce
-
-  def enter_subdir(self, entry):
-    return self._apex._list(self._path + entry.name + '/') # pylint: disable=protected-access
-
-
 class Apex(object):
   """Represents an APEX file"""
   def __init__(self, args):
@@ -167,7 +155,6 @@ class Apex(object):
     with zipfile.ZipFile(self._apex, 'r') as zip_ref:
       self._payload = zip_ref.extract('apex_payload.img', path=self._tempdir)
     self._payload_fs_type = RetrieveFileSystemType(self._payload)
-    self._cache = {}
 
   def __del__(self):
     shutil.rmtree(self._tempdir)
@@ -178,18 +165,19 @@ class Apex(object):
   def __exit__(self, ex_type, value, traceback):
     pass
 
-  def list(self, is_recursive=False):
+  def list(self):
     if self._payload_fs_type not in ['ext4']:
       sys.exit(f'{self._payload_fs_type} is not supported for `list`.')
 
-    root = self._list('./')
-    return root.list(is_recursive)
+    yield from self.entries()
 
-  def _list(self, path):
-    if path in self._cache:
-      return self._cache[path]
+  def read_dir(self, path) -> ApexImageEntry:
+    assert path.endswith('/')
+    assert self.payload_fs_type == 'ext4'
+
     res = subprocess.check_output([self._debugfs, '-R', f'ls -l -p {path}', self._payload],
                                   text=True, stderr=subprocess.DEVNULL)
+    dir_entry = None
     entries = []
     for line in res.split('\n'):
       if not line:
@@ -199,6 +187,10 @@ class Apex(object):
         continue
       name = parts[5]
       if not name:
+        continue
+      if name == '..':
+        continue
+      if name == 'lost+found' and path == './':
         continue
       ino = parts[1]
       bits = parts[2]
@@ -241,29 +233,40 @@ class Apex(object):
       ], text=True, stderr=subprocess.DEVNULL)
       security_context = stdout.rstrip('\n\x00')
 
-      entries.append(ApexImageEntry(name,
-                                    base_dir=path,
-                                    permissions=int(bits[3:], 8),
-                                    size=size,
-                                    is_directory=is_directory,
-                                    is_symlink=is_symlink,
-                                    ino=ino,
-                                    extents=extents,
-                                    security_context=security_context))
+      entry = ApexImageEntry(name,
+                             base_dir=path,
+                             permissions=int(bits[3:], 8),
+                             size=size,
+                             is_directory=is_directory,
+                             is_symlink=is_symlink,
+                             ino=ino,
+                             extents=extents,
+                             security_context=security_context)
+      if name == '.':
+        dir_entry = entry
+      elif is_directory:
+        sub_dir_entry = self.read_dir(path + name + '/')
+        # sub_dir_entry should be the same inode
+        assert entry.ino == sub_dir_entry.ino
+        entry.entries.extend(sub_dir_entry.entries)
+        entries.append(entry)
+      else:
+        entries.append(entry)
 
-    return ApexImageDirectory(path, entries, self)
+    assert dir_entry
+    dir_entry.entries.extend(sorted(entries, key=lambda e: e.name))
+    return dir_entry
 
   def extract(self, dest):
+    """Recursively dumps contents of the payload with retaining mode bits, but not owner/group"""
     if self._payload_fs_type == 'erofs':
-      subprocess.run([self._fsckerofs, f'--extract={dest}', '--overwrite', self._payload],
-                     stdout=subprocess.DEVNULL, check=True)
+      subprocess.run([self._fsckerofs, f'--extract={dest}', '--overwrite',
+                     '--no-preserve-owner', self._payload], stdout=subprocess.DEVNULL, check=True)
     elif self._payload_fs_type == 'ext4':
-      # Suppress stderr without failure
-      try:
-        subprocess.run([self._debugfs, '-R', f'rdump ./ {dest}', self._payload],
-                       capture_output=True, check=True)
-      except subprocess.CalledProcessError as e:
-        sys.exit(e.stderr)
+      # Extract entries one by one using `dump` because `rdump` doesn't support
+      # "no-perserve" mode
+      for entry in self.entries():
+        self.write_entry(entry, dest)
     else:
       # TODO(b/279688635) f2fs is not supported yet.
       sys.exit(f'{self._payload_fs_type} is not supported for `extract`.')
@@ -271,6 +274,43 @@ class Apex(object):
   @property
   def payload_fs_type(self) -> str:
     return self._payload_fs_type
+
+  def entries(self):
+    """Generator to visit all entries in the payload starting from root(./)"""
+
+    def TopDown(entry):
+      yield entry
+      for child in entry.entries:
+        yield from TopDown(child)
+
+    root = self.read_dir('./')
+    yield from TopDown(root)
+
+  def read_symlink(self, entry):
+    assert entry.is_symlink
+    assert self.payload_fs_type == 'ext4'
+
+    stdout = subprocess.check_output([self._debugfs, '-R', f'stat {entry.full_path}',
+                                      self._payload], text=True, stderr=subprocess.DEVNULL)
+    # Output of stat for a symlink should have the following line:
+    #   Fast link dest: \"%.*s\"
+    m = re.search(r'\bFast link dest: \"(.+)\"\n', stdout)
+    if not m:
+      sys.exit('failed to read symlink target')
+    return m.group(1)
+
+  def write_entry(self, entry, out_dir):
+    dest = os.path.normpath(os.path.join(out_dir, entry.full_path))
+    if entry.is_directory:
+      if not os.path.exists(dest):
+        os.makedirs(dest, mode=0o755)
+    elif entry.is_symlink:
+      os.symlink(self.read_symlink(entry), dest)
+    else:
+      subprocess.check_output([self._debugfs, '-R', f'dump {entry.full_path} {dest}',
+        self._payload], text=True, stderr=subprocess.DEVNULL)
+      # retain mode bits
+      os.chmod(dest, entry.permissions)
 
 
 def RunList(args):
@@ -284,7 +324,7 @@ def RunList(args):
       return
 
   with Apex(args) as apex:
-    for e in apex.list(is_recursive=True):
+    for e in apex.list():
       # dot(., ..) directories
       if not e.root and e.name in ('.', '..'):
         continue
