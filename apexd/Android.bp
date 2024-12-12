@@ -340,7 +340,7 @@ java_genrule {
     // dm-verity verification to fail
     name: "gen_corrupt_apex",
     out: ["apex.apexd_test_corrupt_apex.apex"],
-    srcs: [":apex.apexd_test"],
+    srcs: [":apex.apexd_test_for_corruption"],
     tools: [
         "soong_zip",
         "zipalign",
@@ -594,11 +594,6 @@ cc_test {
     ],
     data: [
         ":apex.apexd_test",
-        ":apex.apexd_test_erofs",
-        ":apex.apexd_test_f2fs",
-        ":apex.apexd_test_digest",
-        ":apex.apexd_test_erofs_digest",
-        ":apex.apexd_test_f2fs_digest",
         ":apex.apexd_test_classpath",
         ":apex.apexd_test_different_app",
         ":apex.apexd_test_no_inst_key",
