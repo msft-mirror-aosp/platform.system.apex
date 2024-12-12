@@ -73,6 +73,17 @@ BinderStatus CheckCallerSystemOrRoot(const std::string& name) {
   return BinderStatus::ok();
 }
 
+BinderStatus CheckCallerSystemKsOrRoot(const std::string& name) {
+  uid_t uid = IPCThreadState::self()->getCallingUid();
+  if (uid != AID_ROOT && uid != AID_SYSTEM && uid != AID_KEYSTORE) {
+    std::string msg =
+        "Only root, keystore, and system_server are allowed to call " + name;
+    return BinderStatus::fromExceptionCode(BinderStatus::EX_SECURITY,
+                                           String8(msg.c_str()));
+  }
+  return BinderStatus::ok();
+}
+
 class ApexService : public BnApexService {
  public:
   using BinderStatus = ::android::binder::Status;
@@ -484,7 +495,7 @@ BinderStatus ApexService::getActivePackages(
     std::vector<ApexInfo>* aidl_return) {
   LOG(INFO) << "getActivePackages received by ApexService";
 
-  auto check = CheckCallerSystemOrRoot("getActivePackages");
+  auto check = CheckCallerSystemKsOrRoot("getActivePackages");
   if (!check.isOk()) {
     return check;
   }
