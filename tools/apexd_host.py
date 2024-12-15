@@ -80,10 +80,11 @@ def ParseArgs():
 class ApexFile(object):
   """Represents an APEX file."""
 
-  def __init__(self, path_on_host, path_on_device):
+  def __init__(self, path_on_host, path_on_device, partition):
     self._path_on_host = path_on_host
     self._path_on_device = path_on_device
     self._manifest = apex_manifest.fromApex(path_on_host)
+    self._partition = partition
 
   @property
   def name(self):
@@ -97,12 +98,17 @@ class ApexFile(object):
   def path_on_device(self):
     return self._path_on_device
 
+  @property
+  def partition(self):
+    return self._partition
+
   # Helper to create apex-info element
   @property
   def attrs(self):
     return {
         'moduleName': self.name,
         'modulePath': self.path_on_device,
+        'partition': self.partition.upper(),
         'preinstalledModulePath': self.path_on_device,
         'versionCode': str(self._manifest.version),
         'versionName': self._manifest.versionName,
@@ -146,7 +152,7 @@ def ScanApexes(partition, real_path) -> list[ApexFile]:
       os.path.join(real_path, 'apex/*.apex')
   ) + glob.glob(os.path.join(real_path, 'apex/*.capex')):
     path_on_device = f'/{partition}/apex/' + os.path.basename(path_on_host)
-    apexes.append(ApexFile(path_on_host, path_on_device))
+    apexes.append(ApexFile(path_on_host, path_on_device, partition))
   # sort list for stability
   return sorted(apexes, key=lambda apex: apex.path_on_device)
 
