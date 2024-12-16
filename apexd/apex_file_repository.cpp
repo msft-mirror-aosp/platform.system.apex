@@ -250,14 +250,15 @@ Result<int> ApexFileRepository::AddBlockApex(
                      << apex_file.error();
     }
 
+    const std::string& name = apex_file->GetManifest().name();
+    LOG(INFO) << "Found host apex " << name << " at " << apex_path;
+
     // When metadata specifies the public key of the apex, it should match the
     // bundled key. Otherwise we accept it.
     if (apex_config.public_key() != "" &&
         apex_config.public_key() != apex_file->GetBundledPublicKey()) {
       return Error() << "public key doesn't match: " << apex_path;
     }
-
-    const std::string& name = apex_file->GetManifest().name();
 
     // When metadata specifies the manifest name and version of the apex, it
     // should match what we see in the manifest.
