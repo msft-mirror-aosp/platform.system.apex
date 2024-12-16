@@ -3209,7 +3209,7 @@ int OnStartInVmMode() {
   }
 
   if (auto status = AddBlockApex(instance); !status.ok()) {
-    LOG(ERROR) << status.error();
+    LOG(ERROR) << "Failed to scan host APEX files: " << status.error();
     return 1;
   }
 
