@@ -2818,7 +2818,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     ReleaseF2fsCompressedBlocks(apex.GetPath());
   }
 
-  event.Commit();
+  event.MarkSucceeded();
 
   return ret;
 }
@@ -3209,7 +3209,7 @@ int OnStartInVmMode() {
   }
 
   if (auto status = AddBlockApex(instance); !status.ok()) {
-    LOG(ERROR) << status.error();
+    LOG(ERROR) << "Failed to scan host APEX files: " << status.error();
     return 1;
   }
 
@@ -3648,7 +3648,7 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
   // filesystem.
   ReleaseF2fsCompressedBlocks(target_file);
 
-  event.Commit();
+  event.MarkSucceeded();
 
   return new_apex;
 }
