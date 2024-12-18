@@ -617,7 +617,7 @@ def CreateImageErofs(args, work_dir, manifests_dir, img_file):
   cmd.append(tmp_input_dir)
   RunCommand(cmd, args.verbose)
 
-  cmd = ['make_erofs']
+  cmd = ['mkfs.erofs']
   cmd.extend(['-z', 'lz4hc'])
   cmd.extend(['--fs-config-file', args.canned_fs_config])
   cmd.extend(['--file-contexts', args.file_contexts])

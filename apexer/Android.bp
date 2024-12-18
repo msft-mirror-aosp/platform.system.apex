@@ -27,7 +27,7 @@ apexer_tools = [
     "zipalign",
     "make_f2fs",
     "sload_f2fs",
-    "make_erofs",
+    "mkfs.erofs",
     // TODO(b/124476339) apex doesn't follow 'required' dependencies so we need to include this
     // manually for 'avbtool'.
     "fec",
@@ -177,7 +177,7 @@ genrule {
         "cp $(location avbtool) $$BIN && " +
         "cp $(location aapt2) $$BIN && " +
         "cp $(location e2fsdroid) $$BIN && " +
-        "cp $(location make_erofs) $$BIN && " +
+        "cp $(location mkfs.erofs) $$BIN && " +
         "cp $(location merge_zips) $$BIN && " +
         "cp $(location mke2fs) $$BIN && " +
         "cp $(location resize2fs) $$BIN && " +

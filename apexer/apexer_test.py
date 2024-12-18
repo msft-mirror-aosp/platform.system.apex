@@ -181,7 +181,7 @@ class ApexerRebuildTest(unittest.TestCase):
         files = {}
         for i in ["apexer", "deapexer", "avbtool", "mke2fs", "sefcontext_compile", "e2fsdroid",
                   "resize2fs", "soong_zip", "aapt2", "merge_zips", "zipalign", "debugfs_static",
-                  "signapk.jar", "android.jar", "make_erofs", "fsck.erofs", "conv_apex_manifest"]:
+                  "signapk.jar", "android.jar", "mkfs.erofs", "fsck.erofs", "conv_apex_manifest"]:
             file_path = os.path.join(dir_name, "bin", i)
             if os.path.exists(file_path):
                 os.chmod(file_path, stat.S_IRUSR | stat.S_IXUSR)
