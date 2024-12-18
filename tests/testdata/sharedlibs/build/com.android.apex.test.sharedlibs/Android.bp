@@ -43,9 +43,11 @@ apex {
             ],
         },
     },
+    // This test apex is used by shared_libs_repack, which works with only ext4.
+    payload_fs_type: "ext4",
 }
 
-genrule {
+java_genrule {
     name: "com.android.apex.test.sharedlibs_generated",
     out: ["com.android.apex.test.sharedlibs_generated.apex"],
     defaults: ["apexer_test_host_tools_list"],

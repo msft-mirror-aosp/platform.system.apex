@@ -23,17 +23,23 @@
 #include <android-base/strings.h>
 #include <microdroid/metadata.h>
 
+#include <cstdint>
+#include <filesystem>
 #include <unordered_map>
 
+#include "apex_blocklist.h"
 #include "apex_constants.h"
 #include "apex_file.h"
+#include "apexd_brand_new_verifier.h"
 #include "apexd_utils.h"
+#include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
 
 using android::base::EndsWith;
 using android::base::Error;
 using android::base::GetProperty;
 using android::base::Result;
+using ::apex::proto::ApexBlocklist;
 
 namespace android {
 namespace apex {
@@ -56,7 +62,8 @@ std::string GetApexSelectFilenameFromProp(
   return "";
 }
 
-Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
+Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir,
+                                                ApexPartition partition) {
   LOG(INFO) << "Scanning " << dir << " for pre-installed ApexFiles";
   if (access(dir.c_str(), F_OK) != 0 && errno == ENOENT) {
     LOG(WARNING) << dir << " does not exist. Skipping";
@@ -95,14 +102,11 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
                    << apex_file->GetPath();
         continue;
       }
-      // If BOARD_USES_VENDORIMAGE is false, then /vendor will be a symlink to
-      // /system/vendor. path is a realpath to the apex, so we must check
-      // against both.
       if (enforce_multi_install_partition_ &&
-          !android::base::StartsWith(path, "/vendor/apex/") &&
-          !android::base::StartsWith(path, "/system/vendor/apex/")) {
+          partition != ApexPartition::Vendor &&
+          partition != ApexPartition::Odm) {
         LOG(ERROR) << "Multi-install APEX " << path
-                   << " can only be preinstalled on /vendor/apex/.";
+                   << " can only be preinstalled on /{odm,vendor}/apex/.";
         continue;
       }
 
@@ -116,6 +120,7 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
         if (auto it = pre_installed_store_.find(name);
             it != pre_installed_store_.end()) {
           pre_installed_store_.erase(it);
+          partition_store_.erase(name);
         }
         continue;
       }
@@ -126,6 +131,7 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
                   << name;
         // Add the APEX file to the store if its filename matches the property.
         pre_installed_store_.emplace(name, std::move(*apex_file));
+        partition_store_.emplace(name, partition);
       } else {
         LOG(INFO) << "Skipping APEX at path " << path
                   << " because it does not match expected multi-install"
@@ -138,22 +144,9 @@ Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir) {
     auto it = pre_installed_store_.find(name);
     if (it == pre_installed_store_.end()) {
       pre_installed_store_.emplace(name, std::move(*apex_file));
+      partition_store_.emplace(name, partition);
     } else if (it->second.GetPath() != apex_file->GetPath()) {
-      auto level = base::FATAL;
-      if (ignore_duplicate_apex_definitions_) {
-        level = base::INFO;
-      }
-      // On some development (non-REL) builds the VNDK apex could be in /vendor.
-      // When testing CTS-on-GSI on these builds, there would be two VNDK apexes
-      // in the system, one in /system and one in /vendor.
-      static constexpr char kVndkApexModuleNamePrefix[] = "com.android.vndk.";
-      static constexpr char kPlatformVersionCodenameProperty[] =
-          "ro.build.version.codename";
-      if (android::base::StartsWith(name, kVndkApexModuleNamePrefix) &&
-          GetProperty(kPlatformVersionCodenameProperty, "REL") != "REL") {
-        level = android::base::INFO;
-      }
-      LOG(level) << "Found two apex packages " << it->second.GetPath()
+      LOG(FATAL) << "Found two apex packages " << it->second.GetPath()
                  << " and " << apex_file->GetPath()
                  << " with the same module name " << name;
     } else if (it->second.GetBundledPublicKey() !=
@@ -172,9 +165,10 @@ ApexFileRepository& ApexFileRepository::GetInstance() {
 }
 
 android::base::Result<void> ApexFileRepository::AddPreInstalledApex(
-    const std::vector<std::string>& prebuilt_dirs) {
-  for (const auto& dir : prebuilt_dirs) {
-    if (auto result = ScanBuiltInDir(dir); !result.ok()) {
+    const std::unordered_map<ApexPartition, std::string>&
+        partition_to_prebuilt_dirs) {
+  for (const auto& [partition, dir] : partition_to_prebuilt_dirs) {
+    if (auto result = ScanBuiltInDir(dir, partition); !result.ok()) {
       return result.error();
     }
   }
@@ -256,14 +250,15 @@ Result<int> ApexFileRepository::AddBlockApex(
                      << apex_file.error();
     }
 
+    const std::string& name = apex_file->GetManifest().name();
+    LOG(INFO) << "Found host apex " << name << " at " << apex_path;
+
     // When metadata specifies the public key of the apex, it should match the
     // bundled key. Otherwise we accept it.
     if (apex_config.public_key() != "" &&
         apex_config.public_key() != apex_file->GetBundledPublicKey()) {
       return Error() << "public key doesn't match: " << apex_path;
     }
-
-    const std::string& name = apex_file->GetManifest().name();
 
     // When metadata specifies the manifest name and version of the apex, it
     // should match what we see in the manifest.
@@ -308,6 +303,9 @@ Result<int> ApexFileRepository::AddBlockApex(
                      << it->second.GetPath();
     }
     store.emplace(name, std::move(*apex_file));
+    // NOTE: We consider block APEXes are SYSTEM. APEX Config should be extended
+    //       to support non-system block APEXes.
+    partition_store_.emplace(name, ApexPartition::System);
 
     ret++;
   }
@@ -339,7 +337,26 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
     }
 
     const std::string& name = apex_file->GetManifest().name();
-    if (!HasPreInstalledVersion(name)) {
+    auto preinstalled = pre_installed_store_.find(name);
+    if (preinstalled != pre_installed_store_.end()) {
+      if (preinstalled->second.GetBundledPublicKey() !=
+          apex_file->GetBundledPublicKey()) {
+        // Ignore data apex if public key doesn't match with pre-installed apex
+        LOG(ERROR) << "Skipping " << file
+                   << " : public key doesn't match pre-installed one";
+        continue;
+      }
+    } else if (ApexFileRepository::IsBrandNewApexEnabled()) {
+      auto verified_partition =
+          VerifyBrandNewPackageAgainstPreinstalled(*apex_file);
+      if (!verified_partition.ok()) {
+        LOG(ERROR) << "Skipping " << file << " : "
+                   << verified_partition.error();
+        continue;
+      }
+      // Stores partition for already-verified brand-new APEX.
+      partition_store_.emplace(name, *verified_partition);
+    } else {
       LOG(ERROR) << "Skipping " << file << " : no preinstalled apex";
       // Ignore data apex without corresponding pre-installed apex
       continue;
@@ -351,15 +368,6 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
       LOG(WARNING) << "APEX " << name << " is a multi-installed APEX."
                    << " Any updated version in /data will always overwrite"
                    << " the multi-installed preinstalled version, if possible.";
-    }
-
-    auto pre_installed_public_key = GetPublicKey(name);
-    if (!pre_installed_public_key.ok() ||
-        apex_file->GetBundledPublicKey() != *pre_installed_public_key) {
-      // Ignore data apex if public key doesn't match with pre-installed apex
-      LOG(ERROR) << "Skipping " << file
-                 << " : public key doesn't match pre-installed one";
-      continue;
     }
 
     if (EndsWith(apex_file->GetPath(), kDecompressedApexPackageSuffix)) {
@@ -385,6 +393,62 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
     }
   }
   return {};
+}
+
+Result<void> ApexFileRepository::AddBrandNewApexCredentialAndBlocklist(
+    const std::unordered_map<ApexPartition, std::string>&
+        partition_to_dir_map) {
+  for (const auto& [partition, dir] : partition_to_dir_map) {
+    LOG(INFO)
+        << "Scanning " << dir
+        << " for pre-installed public keys and blocklists of brand-new APEX";
+    if (access(dir.c_str(), F_OK) != 0 && errno == ENOENT) {
+      continue;
+    }
+
+    std::vector<std::string> all_credential_files =
+        OR_RETURN(FindFilesBySuffix(dir, {kBrandNewApexPublicKeySuffix}));
+    for (const std::string& credential_path : all_credential_files) {
+      std::string content;
+      CHECK(android::base::ReadFileToString(credential_path, &content));
+      const auto& [it, inserted] =
+          brand_new_apex_pubkeys_.emplace(content, partition);
+      CHECK(inserted || it->second == partition)
+          << "Duplicate public keys are found in different partitions.";
+    }
+
+    const std::string& blocklist_path =
+        std::filesystem::path(dir) / kBrandNewApexBlocklistFileName;
+    const auto blocklist_exists = OR_RETURN(PathExists(blocklist_path));
+    if (!blocklist_exists) {
+      continue;
+    }
+
+    std::unordered_map<std::string, int64_t> apex_name_to_version;
+    ApexBlocklist blocklist = OR_RETURN(ReadBlocklist(blocklist_path));
+    for (const auto& block_item : blocklist.blocked_apex()) {
+      const auto& [it, inserted] =
+          apex_name_to_version.emplace(block_item.name(), block_item.version());
+      CHECK(inserted) << "Duplicate APEX names are found in blocklist.";
+    }
+    brand_new_apex_blocked_version_.emplace(partition, apex_name_to_version);
+  }
+  return {};
+}
+
+Result<ApexPartition> ApexFileRepository::GetPartition(
+    const ApexFile& apex) const {
+  const std::string& name = apex.GetManifest().name();
+  auto it = partition_store_.find(name);
+  if (it != partition_store_.end()) {
+    return it->second;
+  }
+
+  // Supports staged but not-yet-activated brand-new APEX.
+  if (!ApexFileRepository::IsBrandNewApexEnabled()) {
+    return Error() << "No preinstalled data found for package " << name;
+  }
+  return VerifyBrandNewPackageAgainstPreinstalled(apex);
 }
 
 // TODO(b/179497746): remove this method when we add api for fetching ApexFile
@@ -489,6 +553,30 @@ std::vector<ApexFileRef> ApexFileRepository::GetDataApexFiles() const {
     result.emplace_back(std::cref(it.second));
   }
   return result;
+}
+
+std::optional<ApexPartition>
+ApexFileRepository::GetBrandNewApexPublicKeyPartition(
+    const std::string& public_key) const {
+  auto it = brand_new_apex_pubkeys_.find(public_key);
+  if (it == brand_new_apex_pubkeys_.end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+
+std::optional<int64_t> ApexFileRepository::GetBrandNewApexBlockedVersion(
+    ApexPartition partition, const std::string& apex_name) const {
+  auto it = brand_new_apex_blocked_version_.find(partition);
+  if (it == brand_new_apex_blocked_version_.end()) {
+    return std::nullopt;
+  }
+  const auto& apex_name_to_version = it->second;
+  auto itt = apex_name_to_version.find(apex_name);
+  if (itt == apex_name_to_version.end()) {
+    return std::nullopt;
+  }
+  return itt->second;
 }
 
 // Group pre-installed APEX and data APEX by name

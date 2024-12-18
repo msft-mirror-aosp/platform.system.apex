@@ -27,6 +27,7 @@ import argparse
 import apex_manifest
 import enum
 import os
+import re
 import shutil
 import sys
 import subprocess
@@ -46,17 +47,17 @@ FS_TYPES = [
 def RetrieveFileSystemType(file):
   """Returns filesystem type with magic"""
   with open(file, 'rb') as f:
-    for type, offset, magic in FS_TYPES:
+    for fs_type, offset, magic in FS_TYPES:
       buf = bytearray(len(magic))
       f.seek(offset, os.SEEK_SET)
       f.readinto(buf)
       if buf == magic:
-        return type
+        return fs_type
   raise ValueError('Failed to retrieve filesystem type')
 
 class ApexImageEntry(object):
-
-  def __init__(self, name, base_dir, permissions, size, ino, extents,
+  """Represents an entry in APEX payload"""
+  def __init__(self, name, *, base_dir, permissions, size, ino, extents,
                is_directory, is_symlink, security_context):
     self._name = name
     self._base_dir = base_dir
@@ -67,6 +68,7 @@ class ApexImageEntry(object):
     self._ino = ino
     self._extents = extents
     self._security_context = security_context
+    self._entries = []
 
   @property
   def name(self):
@@ -110,6 +112,10 @@ class ApexImageEntry(object):
     return self._ino
 
   @property
+  def entries(self):
+    return self._entries
+
+  @property
   def extents(self):
     return self._extents
 
@@ -126,39 +132,21 @@ class ApexImageEntry(object):
     else:
       ret += '-'
 
-    def mask_as_string(m):
+    def MaskAsString(m):
       ret = 'r' if m & 4 == 4 else '-'
       ret += 'w' if m & 2 == 2 else '-'
       ret += 'x' if m & 1 == 1 else '-'
       return ret
 
-    ret += mask_as_string(self._permissions >> 6)
-    ret += mask_as_string((self._permissions >> 3) & 7)
-    ret += mask_as_string(self._permissions & 7)
+    ret += MaskAsString(self._permissions >> 6)
+    ret += MaskAsString((self._permissions >> 3) & 7)
+    ret += MaskAsString(self._permissions & 7)
 
     return ret + ' ' + self._size + ' ' + self._name
 
 
-class ApexImageDirectory(object):
-
-  def __init__(self, path, entries, apex):
-    self._path = path
-    self._entries = sorted(entries, key=lambda e: e.name)
-    self._apex = apex
-
-  def list(self, is_recursive=False):
-    for e in self._entries:
-      yield e
-      if e.is_directory and e.name != '.' and e.name != '..':
-        for ce in self.enter_subdir(e).list(is_recursive):
-          yield ce
-
-  def enter_subdir(self, entry):
-    return self._apex._list(self._path + entry.name + '/')
-
-
 class Apex(object):
-
+  """Represents an APEX file"""
   def __init__(self, args):
     self._debugfs = args.debugfs_path
     self._fsckerofs = args.fsckerofs_path
@@ -167,7 +155,6 @@ class Apex(object):
     with zipfile.ZipFile(self._apex, 'r') as zip_ref:
       self._payload = zip_ref.extract('apex_payload.img', path=self._tempdir)
     self._payload_fs_type = RetrieveFileSystemType(self._payload)
-    self._cache = {}
 
   def __del__(self):
     shutil.rmtree(self._tempdir)
@@ -175,21 +162,22 @@ class Apex(object):
   def __enter__(self):
     return self
 
-  def __exit__(self, type, value, traceback):
+  def __exit__(self, ex_type, value, traceback):
     pass
 
-  def list(self, is_recursive=False):
+  def list(self):
     if self._payload_fs_type not in ['ext4']:
-      sys.exit(f"{self._payload_fs_type} is not supported for `list`.")
+      sys.exit(f'{self._payload_fs_type} is not supported for `list`.')
 
-    root = self._list('./')
-    return root.list(is_recursive)
+    yield from self.entries()
 
-  def _list(self, path):
-    if path in self._cache:
-      return self._cache[path]
-    res = subprocess.check_output([self._debugfs, '-R', 'ls -l -p %s' % path, self._payload],
+  def read_dir(self, path) -> ApexImageEntry:
+    assert path.endswith('/')
+    assert self.payload_fs_type == 'ext4'
+
+    res = subprocess.check_output([self._debugfs, '-R', f'ls -l -p {path}', self._payload],
                                   text=True, stderr=subprocess.DEVNULL)
+    dir_entry = None
     entries = []
     for line in res.split('\n'):
       if not line:
@@ -200,6 +188,10 @@ class Apex(object):
       name = parts[5]
       if not name:
         continue
+      if name == '..':
+        continue
+      if name == 'lost+found' and path == './':
+        continue
       ino = parts[1]
       bits = parts[2]
       size = parts[6]
@@ -208,7 +200,7 @@ class Apex(object):
       is_directory=bits[1]=='4'
 
       if not is_symlink and not is_directory:
-        stdout = subprocess.check_output([self._debugfs, '-R', 'dump_extents <%s>' % ino,
+        stdout = subprocess.check_output([self._debugfs, '-R', f'dump_extents <{ino}>',
                                           self._payload], text=True, stderr=subprocess.DEVNULL)
         # Output of dump_extents for an inode fragmented in 3 blocks (length and addresses represent
         # block-sized sections):
@@ -226,9 +218,9 @@ class Apex(object):
             length = min(int(tokens[-1]) * BLOCK_SIZE, left_length)
             left_length -= length
             extents.append((offset, length))
-          if (left_length != 0): # dump_extents sometimes fails to display "hole" blocks
+          if left_length != 0: # dump_extents sometimes fails to display "hole" blocks
             raise ValueError
-        except:
+        except: # pylint: disable=bare-except
           extents = [] # [] means that we failed to retrieve the file location successfully
 
       # get 'security.selinux' attribute
@@ -241,49 +233,101 @@ class Apex(object):
       ], text=True, stderr=subprocess.DEVNULL)
       security_context = stdout.rstrip('\n\x00')
 
-      entries.append(ApexImageEntry(name,
-                                    base_dir=path,
-                                    permissions=int(bits[3:], 8),
-                                    size=size,
-                                    is_directory=is_directory,
-                                    is_symlink=is_symlink,
-                                    ino=ino,
-                                    extents=extents,
-                                    security_context=security_context))
+      entry = ApexImageEntry(name,
+                             base_dir=path,
+                             permissions=int(bits[3:], 8),
+                             size=size,
+                             is_directory=is_directory,
+                             is_symlink=is_symlink,
+                             ino=ino,
+                             extents=extents,
+                             security_context=security_context)
+      if name == '.':
+        dir_entry = entry
+      elif is_directory:
+        sub_dir_entry = self.read_dir(path + name + '/')
+        # sub_dir_entry should be the same inode
+        assert entry.ino == sub_dir_entry.ino
+        entry.entries.extend(sub_dir_entry.entries)
+        entries.append(entry)
+      else:
+        entries.append(entry)
 
-    return ApexImageDirectory(path, entries, self)
+    assert dir_entry
+    dir_entry.entries.extend(sorted(entries, key=lambda e: e.name))
+    return dir_entry
 
   def extract(self, dest):
+    """Recursively dumps contents of the payload with retaining mode bits, but not owner/group"""
     if self._payload_fs_type == 'erofs':
-      subprocess.run([self._fsckerofs, '--extract=%s' % (dest), '--overwrite', self._payload],
-                     stdout=subprocess.DEVNULL, check=True)
+      subprocess.run([self._fsckerofs, f'--extract={dest}', '--overwrite',
+                     '--no-preserve-owner', self._payload], stdout=subprocess.DEVNULL, check=True)
     elif self._payload_fs_type == 'ext4':
-      # Suppress stderr without failure
-      try:
-        subprocess.run([self._debugfs, '-R', 'rdump ./ %s' % (dest), self._payload],
-                       capture_output=True, check=True)
-      except subprocess.CalledProcessError as e:
-        sys.exit(e.stderr)
+      # Extract entries one by one using `dump` because `rdump` doesn't support
+      # "no-perserve" mode
+      for entry in self.entries():
+        self.write_entry(entry, dest)
     else:
       # TODO(b/279688635) f2fs is not supported yet.
-      sys.exit(f"{self._payload_fs_type} is not supported for `extract`.")
+      sys.exit(f'{self._payload_fs_type} is not supported for `extract`.')
+
+  @property
+  def payload_fs_type(self) -> str:
+    return self._payload_fs_type
+
+  def entries(self):
+    """Generator to visit all entries in the payload starting from root(./)"""
+
+    def TopDown(entry):
+      yield entry
+      for child in entry.entries:
+        yield from TopDown(child)
+
+    root = self.read_dir('./')
+    yield from TopDown(root)
+
+  def read_symlink(self, entry):
+    assert entry.is_symlink
+    assert self.payload_fs_type == 'ext4'
+
+    stdout = subprocess.check_output([self._debugfs, '-R', f'stat {entry.full_path}',
+                                      self._payload], text=True, stderr=subprocess.DEVNULL)
+    # Output of stat for a symlink should have the following line:
+    #   Fast link dest: \"%.*s\"
+    m = re.search(r'\bFast link dest: \"(.+)\"\n', stdout)
+    if not m:
+      sys.exit('failed to read symlink target')
+    return m.group(1)
+
+  def write_entry(self, entry, out_dir):
+    dest = os.path.normpath(os.path.join(out_dir, entry.full_path))
+    if entry.is_directory:
+      if not os.path.exists(dest):
+        os.makedirs(dest, mode=0o755)
+    elif entry.is_symlink:
+      os.symlink(self.read_symlink(entry), dest)
+    else:
+      subprocess.check_output([self._debugfs, '-R', f'dump {entry.full_path} {dest}',
+        self._payload], text=True, stderr=subprocess.DEVNULL)
+      # retain mode bits
+      os.chmod(dest, entry.permissions)
 
 
 def RunList(args):
   if GetType(args.apex) == ApexType.COMPRESSED:
     with tempfile.TemporaryDirectory() as temp:
       decompressed_apex = os.path.join(temp, 'temp.apex')
-      decompress(args.apex, decompressed_apex)
+      Decompress(args.apex, decompressed_apex)
       args.apex = decompressed_apex
 
       RunList(args)
       return
 
   with Apex(args) as apex:
-    for e in apex.list(is_recursive=True):
+    for e in apex.list():
       # dot(., ..) directories
       if not e.root and e.name in ('.', '..'):
-          continue
+        continue
       res = ''
       if args.size:
         res += e.size + ' '
@@ -298,8 +342,8 @@ def RunList(args):
 def RunExtract(args):
   if GetType(args.apex) == ApexType.COMPRESSED:
     with tempfile.TemporaryDirectory() as temp:
-      decompressed_apex = os.path.join(temp, "temp.apex")
-      decompress(args.apex, decompressed_apex)
+      decompressed_apex = os.path.join(temp, 'temp.apex')
+      Decompress(args.apex, decompressed_apex)
       args.apex = decompressed_apex
 
       RunExtract(args)
@@ -309,8 +353,8 @@ def RunExtract(args):
     if not os.path.exists(args.dest):
       os.makedirs(args.dest, mode=0o755)
     apex.extract(args.dest)
-    if os.path.isdir(os.path.join(args.dest, "lost+found")):
-      shutil.rmtree(os.path.join(args.dest, "lost+found"))
+    if os.path.isdir(os.path.join(args.dest, 'lost+found')):
+      shutil.rmtree(os.path.join(args.dest, 'lost+found'))
 
 class ApexType(enum.Enum):
   INVALID = 0
@@ -339,6 +383,8 @@ def RunInfo(args):
       print(args.apex + ' is not a valid apex')
       sys.exit(1)
     print(res.name)
+  elif args.print_payload_type:
+    print(Apex(args).payload_fs_type)
   else:
     manifest = apex_manifest.fromApex(args.apex)
     print(apex_manifest.toJsonString(manifest))
@@ -361,9 +407,10 @@ def RunDecompress(args):
 
   compressed_apex_fp = args.input
   decompressed_apex_fp = args.output
-  return decompress(compressed_apex_fp, decompressed_apex_fp)
+  return Decompress(compressed_apex_fp, decompressed_apex_fp)
 
-def decompress(compressed_apex_fp, decompressed_apex_fp):
+
+def Decompress(compressed_apex_fp, decompressed_apex_fp):
   if os.path.exists(decompressed_apex_fp):
     print("Output path '" + decompressed_apex_fp + "' already exists")
     sys.exit(1)
@@ -387,19 +434,24 @@ def main(argv):
   debugfs_default = None
   fsckerofs_default = None
   if 'ANDROID_HOST_OUT' in os.environ:
-    debugfs_default = '%s/bin/debugfs_static' % os.environ['ANDROID_HOST_OUT']
-    fsckerofs_default = '%s/bin/fsck.erofs' % os.environ['ANDROID_HOST_OUT']
-  parser.add_argument('--debugfs_path', help='The path to debugfs binary', default=debugfs_default)
-  parser.add_argument('--fsckerofs_path', help='The path to fsck.erofs binary', default=fsckerofs_default)
+    debugfs_default = os.path.join(os.environ['ANDROID_HOST_OUT'], 'bin/debugfs_static')
+    fsckerofs_default = os.path.join(os.environ['ANDROID_HOST_OUT'], 'bin/fsck.erofs')
+  parser.add_argument(
+      '--debugfs_path', help='The path to debugfs binary', default=debugfs_default)
+  parser.add_argument(
+      '--fsckerofs_path', help='The path to fsck.erofs binary', default=fsckerofs_default)
   # TODO(b/279858383) remove the argument
   parser.add_argument('--blkid_path', help='NOT USED')
 
   subparsers = parser.add_subparsers(required=True, dest='cmd')
 
-  parser_list = subparsers.add_parser('list', help='prints content of an APEX to stdout')
+  parser_list = subparsers.add_parser(
+      'list', help='prints content of an APEX to stdout')
   parser_list.add_argument('apex', type=str, help='APEX file')
-  parser_list.add_argument('--size', help='also show the size of the files', action="store_true")
-  parser_list.add_argument('--extents', help='also show the location of the files', action="store_true")
+  parser_list.add_argument(
+      '--size', help='also show the size of the files', action='store_true')
+  parser_list.add_argument(
+      '--extents', help='also show the location of the files', action='store_true')
   parser_list.add_argument('-Z', '--contexts',
                            help='also show the security context of the files',
                            action='store_true')
@@ -415,6 +467,9 @@ def main(argv):
   parser_info.add_argument('apex', type=str, help='APEX file')
   parser_info.add_argument('--print-type',
                            help='Prints type of the apex (COMPRESSED or UNCOMPRESSED)',
+                           action='store_true')
+  parser_info.add_argument('--print-payload-type',
+                           help='Prints filesystem type of the apex payload',
                            action='store_true')
   parser_info.set_defaults(func=RunInfo)
 

@@ -22,7 +22,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
-from typing import List, BinaryIO
+from typing import List
 import unittest
 import zipfile
 
@@ -91,15 +91,15 @@ class ApexerWithDCLAPreprocessingTest(unittest.TestCase):
     self._to_cleanup.append(tmp_dir)
     return tmp_dir
 
-  def expand_apex(self, apex_file: str | BinaryIO) -> None:
+  def expand_apex(self, apex_file) -> None:
     """expand an apex file include apex_payload."""
     apex_dir = self.create_temp_dir()
     with zipfile.ZipFile(apex_file, 'r') as apex_zip:
       apex_zip.extractall(apex_dir)
-    payload_img = os.path.join(apex_dir, 'apex_payload.img')
     extract_dir = os.path.join(apex_dir, 'payload_extract')
-    os.mkdir(extract_dir)
-    run_command([self.debugfs_static, payload_img, '-R', f'rdump / {extract_dir}'])
+    run_command([self.deapexer, '--debugfs_path', self.debugfs_static,
+                 '--fsckerofs_path', self.fsck_erofs,
+                 'extract', apex_file, extract_dir])
 
     # remove /etc and /lost+found and /payload_extract/apex_manifest.pb
     lost_and_found = os.path.join(extract_dir, 'lost+found')
@@ -132,13 +132,15 @@ class ApexerWithDCLAPreprocessingTest(unittest.TestCase):
     self.apexer_tool_path = os.path.join(host_tools_dir, 'bin')
     self.apexer_wrapper = apexer_wrapper
     self.key_file = key_file
+    self.deapexer = os.path.join(host_tools_dir, 'bin/deapexer')
     self.debugfs_static = os.path.join(host_tools_dir, 'bin/debugfs_static')
+    self.fsck_erofs = os.path.join(host_tools_dir, 'bin/fsck.erofs')
     self.android_jar = os.path.join(host_tools_dir, 'bin/android.jar')
     self.apexer = os.path.join(host_tools_dir, 'bin/apexer')
     os.chmod(apexer_wrapper, stat.S_IRUSR | stat.S_IXUSR);
     for i in ['apexer', 'deapexer', 'avbtool', 'mke2fs', 'sefcontext_compile', 'e2fsdroid',
       'resize2fs', 'soong_zip', 'aapt2', 'merge_zips', 'zipalign', 'debugfs_static',
-      'signapk.jar', 'android.jar']:
+      'signapk.jar', 'android.jar', 'fsck.erofs']:
       file_path = os.path.join(host_tools_dir, 'bin', i)
       if os.path.exists(file_path):
         os.chmod(file_path, stat.S_IRUSR | stat.S_IXUSR);
@@ -146,8 +148,12 @@ class ApexerWithDCLAPreprocessingTest(unittest.TestCase):
 
   def test_DCLA_preprocessing(self):
     """test DCLA preprocessing done properly."""
-    with resources().joinpath(TEST_APEX + '.apex').open(mode='rb') as apex_file:
-      apex_dir = self.expand_apex(apex_file)
+    with resources().joinpath(TEST_APEX + '.apex').open(mode='rb') as apex_file_obj:
+      tmp_dir = self.create_temp_dir()
+      apex_file = os.path.join(tmp_dir, TEST_APEX + '.apex')
+      with open(apex_file, 'wb') as f:
+        shutil.copyfileobj(apex_file_obj, f)
+    apex_dir = self.expand_apex(apex_file)
 
     # create apex canned_fs_config file, TEST_APEX does not come with one
     canned_fs_config_file = os.path.join(apex_dir, 'canned_fs_config')

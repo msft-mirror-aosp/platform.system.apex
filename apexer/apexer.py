@@ -108,7 +108,6 @@ def ParseArgs(argv):
       '--payload_fs_type',
       metavar='FS_TYPE',
       required=False,
-      default='ext4',
       choices=['ext4', 'f2fs', 'erofs'],
       help='type of filesystem being used for payload image "ext4", "f2fs" or "erofs"')
   parser.add_argument(
@@ -379,6 +378,12 @@ def ValidateArgs(args):
       if build_info.logging_parent:
         args.logging_parent = build_info.logging_parent
 
+  if not args.payload_fs_type:
+    if build_info and build_info.payload_fs_type:
+      args.payload_fs_type = build_info.payload_fs_type
+    else:
+      args.payload_fs_type = 'ext4'
+
   return True
 
 
@@ -612,7 +617,7 @@ def CreateImageErofs(args, work_dir, manifests_dir, img_file):
   cmd.append(tmp_input_dir)
   RunCommand(cmd, args.verbose)
 
-  cmd = ['make_erofs']
+  cmd = ['mkfs.erofs']
   cmd.extend(['-z', 'lz4hc'])
   cmd.extend(['--fs-config-file', args.canned_fs_config])
   cmd.extend(['--file-contexts', args.file_contexts])

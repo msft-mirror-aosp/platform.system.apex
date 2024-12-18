@@ -27,7 +27,7 @@ apexer_tools = [
     "zipalign",
     "make_f2fs",
     "sload_f2fs",
-    "make_erofs",
+    "mkfs.erofs",
     // TODO(b/124476339) apex doesn't follow 'required' dependencies so we need to include this
     // manually for 'avbtool'.
     "fec",
@@ -104,16 +104,18 @@ python_test_host {
         "apexer_test.py",
     ],
     data: [
-        ":com.android.example.apex",
-        ":com.android.example-legacy.apex",
-        ":com.android.example-logging_parent.apex",
-        ":com.android.example-overridden_package_name.apex",
         ":apexer_test_host_tools",
         "testdata/com.android.example.apex.avbpubkey",
         "testdata/com.android.example.apex.pem",
         "testdata/com.android.example.apex.pk8",
         "testdata/com.android.example.apex.x509.pem",
         "testdata/manifest.json",
+    ],
+    device_common_data: [
+        ":com.android.example.apex",
+        ":com.android.example-legacy.apex",
+        ":com.android.example-logging_parent.apex",
+        ":com.android.example-overridden_package_name.apex",
     ],
     test_suites: ["general-tests"],
     libs: [
@@ -175,7 +177,7 @@ genrule {
         "cp $(location avbtool) $$BIN && " +
         "cp $(location aapt2) $$BIN && " +
         "cp $(location e2fsdroid) $$BIN && " +
-        "cp $(location make_erofs) $$BIN && " +
+        "cp $(location mkfs.erofs) $$BIN && " +
         "cp $(location merge_zips) $$BIN && " +
         "cp $(location mke2fs) $$BIN && " +
         "cp $(location resize2fs) $$BIN && " +
