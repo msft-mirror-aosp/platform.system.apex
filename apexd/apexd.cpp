@@ -680,6 +680,21 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
   return {};
 }
 
+Result<void> VerifyNoOverlapInSessions(std::span<const ApexFile> apex_files,
+                                       std::span<const ApexSession> sessions) {
+  for (const auto& session : sessions) {
+    for (const auto& apex : apex_files) {
+      if (std::ranges::contains(session.GetApexNames(),
+                                apex.GetManifest().name())) {
+        return Error() << "APEX " << apex.GetManifest().name()
+                       << " is already staged by session " << session.GetId()
+                       << ".";
+      }
+    }
+  }
+  return {};  // okay
+}
+
 struct VerificationResult {
   std::map<std::string, std::vector<std::string>> apex_hals;
 };
@@ -701,11 +716,16 @@ Result<VerificationResult> VerifyPackagesStagedInstall(
     }
   }
 
+  auto staged_sessions =
+      gSessionManager->GetSessionsInState(SessionState::STAGED);
+
+  // Check overlapping: reject if the same package is already staged.
+  OR_RETURN(VerifyNoOverlapInSessions(apex_files, staged_sessions));
+
   // Since there can be multiple staged sessions, let's verify incoming APEXes
   // with all staged apexes mounted.
   std::vector<ApexFile> all_apex_files;
-  for (const auto& session :
-       gSessionManager->GetSessionsInState(SessionState::STAGED)) {
+  for (const auto& session : staged_sessions) {
     auto session_id = session.GetId();
     auto child_session_ids = session.GetChildSessionIds();
     auto staged_apex_files = OpenSessionApexFiles(
@@ -3386,6 +3406,12 @@ android::apex::MountedApexDatabase& GetApexDatabaseForTesting() {
 Result<VerificationResult> VerifyPackageNonStagedInstall(
     const ApexFile& apex_file, bool force) {
   OR_RETURN(VerifyPackageBoot(apex_file));
+
+  auto staged_sessions =
+      gSessionManager->GetSessionsInState(SessionState::STAGED);
+
+  // Check overlapping: reject if the same package is already staged.
+  OR_RETURN(VerifyNoOverlapInSessions(Single(apex_file), staged_sessions));
 
   auto check_fn =
       [&apex_file,
