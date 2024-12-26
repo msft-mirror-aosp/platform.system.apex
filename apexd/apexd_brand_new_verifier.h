@@ -36,7 +36,7 @@ namespace android::apex {
 //
 // The function is called in
 // |SubmitStagedSession| (brand-new apex becomes 'staged')
-// |ScanStagedSessionsDirAndStage| ('staged' apex becomes 'active')
+// |ActivateStagedSessions| ('staged' apex becomes 'active')
 // |ApexFileRepository::AddDataApex| (add 'active' apex to repository)
 android::base::Result<ApexPartition> VerifyBrandNewPackageAgainstPreinstalled(
     const ApexFile& apex);
