@@ -1389,17 +1389,6 @@ std::vector<ApexFile> GetFactoryPackages() {
   return ret;
 }
 
-Result<ApexFile> GetActivePackage(const std::string& packageName) {
-  std::vector<ApexFile> packages = GetActivePackages();
-  for (ApexFile& apex : packages) {
-    if (apex.GetManifest().name() == packageName) {
-      return std::move(apex);
-    }
-  }
-
-  return ErrnoError() << "Cannot find matching package for: " << packageName;
-}
-
 /**
  * Abort individual staged session.
  *
