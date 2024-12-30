@@ -114,10 +114,6 @@ class ApexFileRepository final {
   android::base::Result<const std::string> GetPreinstalledPath(
       const std::string& name) const;
 
-  // Returns path to the data version of an apex with the given |name|.
-  android::base::Result<const std::string> GetDataPath(
-      const std::string& name) const;
-
   // Returns root digest of an apex with the given |path| for block apexes.
   std::optional<std::string> GetBlockApexRootDigest(
       const std::string& path) const;
