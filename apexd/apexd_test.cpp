@@ -118,6 +118,18 @@ static int64_t GetSizeByBlocks(const std::string& path) {
   return st_buf.st_blocks * st_buf.st_blksize;
 }
 
+static Result<ApexFile> GetActivePackage(const std::string& packageName) {
+  std::vector<ApexFile> packages = GetActivePackages();
+  for (ApexFile& apex : packages) {
+    if (apex.GetManifest().name() == packageName) {
+      return std::move(apex);
+    }
+  }
+
+  return base::ErrnoError()
+         << "Cannot find matching package for: " << packageName;
+}
+
 // A very basic mock of CheckpointInterface.
 class MockCheckpointInterface : public CheckpointInterface {
  public:
