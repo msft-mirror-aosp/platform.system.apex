@@ -5077,6 +5077,8 @@ class SubmitStagedSessionTest : public ApexdMountTest {
     AddPreInstalledApex("apex.apexd_test_different_app.apex");
     ApexFileRepository::GetInstance().AddPreInstalledApex(
         {{GetPartition(), GetBuiltInDir()}});
+
+    OnStart();
   }
 
   void TearDown() override {
@@ -5108,6 +5110,43 @@ TEST_F(SubmitStagedSessionTest, SuccessStoresBuildFingerprint) {
 
   auto session = GetSessionManager()->GetSession(session_id);
   ASSERT_NE(session->GetBuildFingerprint(), ""s);
+}
+
+TEST_F(SubmitStagedSessionTest,
+       RejectIfSamePackageIsAlreadyStaged_SameVersion) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  auto session_id2 = 43;
+  PrepareStagedSession("apex.apexd_test.apex", session_id2);
+  ASSERT_THAT(SubmitStagedSession(session_id2, {}, false, false, -1),
+              HasError(WithMessage(HasSubstr("already staged"))));
+}
+
+TEST_F(SubmitStagedSessionTest,
+       RejectIfSamePackageIsAlreadyStaged_DifferentVersion) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  auto session_id2 = 43;
+  PrepareStagedSession("apex.apexd_test_v2.apex", session_id2);
+  ASSERT_THAT(SubmitStagedSession(session_id2, {}, false, false, -1),
+              HasError(WithMessage(HasSubstr("already staged"))));
+}
+
+TEST_F(SubmitStagedSessionTest, RejectInstallPackageForStagedPackage) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  ASSERT_THAT(
+      InstallPackage(GetTestFile("apex.apexd_test.apex"), /* force= */ true),
+      HasError(WithMessage(HasSubstr("already staged"))));
 }
 
 TEST_F(SubmitStagedSessionTest, FailWithManifestMismatch) {
