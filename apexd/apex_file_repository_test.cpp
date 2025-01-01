@@ -116,12 +116,6 @@ TEST(ApexFileRepositoryTest, InitializeSuccess) {
     }
 
     {
-      auto ret = instance.GetDataPath(apex->GetManifest().name());
-      ASSERT_RESULT_OK(ret);
-      ASSERT_EQ(StringPrintf("%s/%s", data_dir.path, apex_name.c_str()), *ret);
-    }
-
-    {
       auto ret = instance.GetPartition(*apex);
       ASSERT_RESULT_OK(ret);
       ASSERT_EQ(partition, *ret);
@@ -1100,13 +1094,6 @@ TEST(ApexFileRepositoryTestBrandNewApex,
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   {
-    auto ret = instance.GetDataPath(apex->GetManifest().name());
-    ASSERT_RESULT_OK(ret);
-    ASSERT_EQ(StringPrintf("%s/com.android.apex.brand.new.apex", data_dir.path),
-              *ret);
-  }
-
-  {
     auto ret = instance.GetPartition(*apex);
     ASSERT_RESULT_OK(ret);
     ASSERT_EQ(partition, *ret);
@@ -1131,7 +1118,6 @@ TEST(ApexFileRepositoryTestBrandNewApex,
   ASSERT_RESULT_OK(apex);
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
-  ASSERT_THAT(instance.GetDataPath(apex->GetManifest().name()), Not(Ok()));
   ASSERT_FALSE(instance.HasDataVersion(apex->GetManifest().name()));
   instance.Reset();
 }
@@ -1145,7 +1131,6 @@ TEST(ApexFileRepositoryTestBrandNewApex, AddDataApexFailBrandNewApexDisabled) {
   ASSERT_RESULT_OK(apex);
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
-  ASSERT_THAT(instance.GetDataPath(apex->GetManifest().name()), Not(Ok()));
   ASSERT_FALSE(instance.HasDataVersion(apex->GetManifest().name()));
   instance.Reset();
 }
