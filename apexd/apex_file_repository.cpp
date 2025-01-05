@@ -470,24 +470,11 @@ Result<const std::string> ApexFileRepository::GetPublicKey(
   return it->second.GetBundledPublicKey();
 }
 
-// TODO(b/179497746): remove this method when we add api for fetching ApexFile
-//  by name
 Result<const std::string> ApexFileRepository::GetPreinstalledPath(
     const std::string& name) const {
   auto it = pre_installed_store_.find(name);
   if (it == pre_installed_store_.end()) {
     return Error() << "No preinstalled data found for package " << name;
-  }
-  return it->second.GetPath();
-}
-
-// TODO(b/179497746): remove this method when we add api for fetching ApexFile
-//  by name
-Result<const std::string> ApexFileRepository::GetDataPath(
-    const std::string& name) const {
-  auto it = data_store_.find(name);
-  if (it == data_store_.end()) {
-    return Error() << "No data apex found for package " << name;
   }
   return it->second.GetPath();
 }

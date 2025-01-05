@@ -88,6 +88,7 @@ using ::testing::EndsWith;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
 using ::testing::Not;
+using ::testing::Property;
 using ::testing::StartsWith;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
@@ -115,6 +116,18 @@ static int64_t GetSizeByBlocks(const std::string& path) {
     return 0;
   }
   return st_buf.st_blocks * st_buf.st_blksize;
+}
+
+static Result<ApexFile> GetActivePackage(const std::string& packageName) {
+  std::vector<ApexFile> packages = GetActivePackages();
+  for (ApexFile& apex : packages) {
+    if (apex.GetManifest().name() == packageName) {
+      return std::move(apex);
+    }
+  }
+
+  return base::ErrnoError()
+         << "Cannot find matching package for: " << packageName;
 }
 
 // A very basic mock of CheckpointInterface.
@@ -248,9 +261,12 @@ class ApexdUnitTest : public ::testing::Test {
     return PrepareCompressedApex(name, built_in_dir_);
   }
 
-  void PrepareStagedSession(const std::string& apex_name, int session_id) {
-    CreateDirIfNeeded(GetStagedDir(session_id), 0755);
-    fs::copy(GetTestFile(apex_name), GetStagedDir(session_id));
+  std::string PrepareStagedSession(const std::string& apex_name,
+                                   int session_id) {
+    auto session_dir = GetStagedDir(session_id);
+    CreateDirIfNeeded(session_dir, 0755);
+    fs::copy(GetTestFile(apex_name), session_dir);
+    return session_dir + "/" + apex_name;
   }
 
   Result<ApexSession> CreateStagedSession(const std::string& apex_name,
@@ -908,15 +924,14 @@ class ApexdMountTest : public ApexdUnitTest {
   }
 
  protected:
-  void SetUp() final {
+  void SetUp() override {
     ApexdUnitTest::SetUp();
     GetApexDatabaseForTesting().Reset();
     GetChangedActiveApexesForTesting().clear();
     ASSERT_THAT(SetUpApexTestEnvironment(), Ok());
   }
 
-  void TearDown() final {
-    ApexdUnitTest::TearDown();
+  void TearDown() override {
     SetBlockApexEnabled(false);
     auto activated = std::vector<std::string>{};
     GetApexDatabaseForTesting().ForallMountedApexes(
@@ -929,6 +944,7 @@ class ApexdMountTest : public ApexdUnitTest {
       }
     }
     InitMetrics({});  // reset
+    ApexdUnitTest::TearDown();
   }
 
   void SetBlockApexEnabled(bool enabled) {
@@ -5057,6 +5073,147 @@ TEST_F(ApexdMountTest, NonStagedUpdateFailVerifiedBrandNewApex) {
                                      "com.android.apex.brand.new"))));
 
   file_repository.Reset();
+}
+
+class SubmitStagedSessionTest : public ApexdMountTest {
+ protected:
+  void SetUp() override {
+    ApexdMountTest::SetUp();
+
+    MockCheckpointInterface checkpoint_interface;
+    checkpoint_interface.SetSupportsCheckpoint(true);
+    InitializeVold(&checkpoint_interface);
+
+    // Has two preinstalled APEXes (for testing multi-APEX session)
+    AddPreInstalledApex("apex.apexd_test.apex");
+    AddPreInstalledApex("apex.apexd_test_different_app.apex");
+    ApexFileRepository::GetInstance().AddPreInstalledApex(
+        {{GetPartition(), GetBuiltInDir()}});
+
+    OnStart();
+  }
+
+  void TearDown() override {
+    // Should not leak temporary verity devices regardless of success.
+    // Why EXPECT? Needs to call TearDown() for unmounting even when something
+    // goes wrong with the test.
+    std::vector<DeviceMapper::DmBlockDevice> devices;
+    EXPECT_TRUE(DeviceMapper::Instance().GetAvailableDevices(&devices));
+    for (const auto& device : devices) {
+      EXPECT_THAT(device.name(), Not(EndsWith(".tmp")));
+    }
+
+    ApexdMountTest::TearDown();
+  }
+};
+
+TEST_F(SubmitStagedSessionTest, SimpleSuccess) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+}
+
+TEST_F(SubmitStagedSessionTest, SuccessStoresBuildFingerprint) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+
+  auto session = GetSessionManager()->GetSession(session_id);
+  ASSERT_NE(session->GetBuildFingerprint(), ""s);
+}
+
+TEST_F(SubmitStagedSessionTest,
+       RejectIfSamePackageIsAlreadyStaged_SameVersion) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  auto session_id2 = 43;
+  PrepareStagedSession("apex.apexd_test.apex", session_id2);
+  ASSERT_THAT(SubmitStagedSession(session_id2, {}, false, false, -1),
+              HasError(WithMessage(HasSubstr("already staged"))));
+}
+
+TEST_F(SubmitStagedSessionTest,
+       RejectIfSamePackageIsAlreadyStaged_DifferentVersion) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  auto session_id2 = 43;
+  PrepareStagedSession("apex.apexd_test_v2.apex", session_id2);
+  ASSERT_THAT(SubmitStagedSession(session_id2, {}, false, false, -1),
+              HasError(WithMessage(HasSubstr("already staged"))));
+}
+
+TEST_F(SubmitStagedSessionTest, RejectInstallPackageForStagedPackage) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  ASSERT_THAT(
+      InstallPackage(GetTestFile("apex.apexd_test.apex"), /* force= */ true),
+      HasError(WithMessage(HasSubstr("already staged"))));
+}
+
+TEST_F(SubmitStagedSessionTest, FailWithManifestMismatch) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test_manifest_mismatch.apex", session_id);
+
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1),
+              HasError(WithMessage(HasSubstr("does not match manifest"))));
+}
+
+TEST_F(SubmitStagedSessionTest, FailedSessionNotPersisted) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test_manifest_mismatch.apex", session_id);
+
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Not(Ok()));
+
+  auto session = GetSessionManager()->GetSession(session_id);
+  ASSERT_THAT(session, Not(Ok()));
+}
+
+TEST_F(SubmitStagedSessionTest, CannotBeRollbackAndHaveRollbackEnabled) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, /*has_rollback=*/true,
+                                  /*is_rollback*/ true, -1),
+              HasError(WithMessage(
+                  HasSubstr("both a rollback and enabled for rollback"))));
+}
+
+TEST_F(SubmitStagedSessionTest, FailWithCorruptApex) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test_corrupt_apex.apex", session_id);
+
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1),
+              HasError(WithMessage(HasSubstr("corrupted?"))));
+}
+
+TEST_F(SubmitStagedSessionTest, SuccessWithMultiSession) {
+  auto parent_session_id = 42;
+  auto child_session1_id = 43;
+  auto child_session2_id = 44;
+  auto file1 = PrepareStagedSession("apex.apexd_test.apex", child_session1_id);
+  auto file2 = PrepareStagedSession("apex.apexd_test_different_app.apex",
+                                    child_session2_id);
+
+  auto ret = SubmitStagedSession(parent_session_id,
+                                 {child_session1_id, child_session2_id}, false,
+                                 false, -1);
+  ASSERT_THAT(ret, HasValue(ElementsAre(Property(&ApexFile::GetPath, file1),
+                                        Property(&ApexFile::GetPath, file2))));
+
+  auto session = GetSessionManager()->GetSession(parent_session_id);
+  ASSERT_THAT(session->GetChildSessionIds(),
+              ElementsAre(child_session1_id, child_session2_id));
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
