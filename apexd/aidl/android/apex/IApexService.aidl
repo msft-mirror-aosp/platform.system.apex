@@ -67,12 +67,6 @@ interface IApexService {
    void unstagePackages(in @utf8InCpp List<String> active_package_paths);
 
    /**
-    * Returns the active package corresponding to |package_name| and null
-    * if none exists.
-    */
-   ApexInfo getActivePackage(in @utf8InCpp String package_name);
-
-   /**
     * Not meant for use outside of testing. The call will not be
     * functional on user builds.
     */
@@ -83,12 +77,12 @@ interface IApexService {
     */
    void resumeRevertIfNeeded();
    /**
-    * Forces apexd to recollect pre-installed data from the given |paths|.
+    * Forces apexd to recollect pre-installed data from all the supported built-in dirs.
     *
     * Not meant for use outside of testing. This call will not be functional
     * on user builds. Only root is allowed to call this method.
     */
-   void recollectPreinstalledData(in @utf8InCpp List<String> paths);
+   void recollectPreinstalledData();
 
    /**
     * Informs apexd that the boot has completed.

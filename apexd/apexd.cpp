@@ -62,6 +62,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -184,11 +185,7 @@ bool IsBootstrapApex(const ApexFile& apex) {
     return ret;
   }();
 
-  if (IsVendorApex(apex) && apex.GetManifest().vendorbootstrap()) {
-    return true;
-  }
-
-  if (apex.GetManifest().bootstrap()) {
+  if (apex.GetManifest().vendorbootstrap() || apex.GetManifest().bootstrap()) {
     return true;
   }
 
@@ -634,10 +631,8 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
       GetProperty("ro.product.vndk.version", "");
 
   const auto& instance = ApexFileRepository::GetInstance();
-  const auto& preinstalled =
-      instance.GetPreInstalledApex(apex_file.GetManifest().name());
-  const auto& path = preinstalled.get().GetPath();
-  if (InVendorPartition(path) || InOdmPartition(path)) {
+  const auto& partition = OR_RETURN(instance.GetPartition(apex_file));
+  if (partition == ApexPartition::Vendor || partition == ApexPartition::Odm) {
     if (vndk_version != vendor_vndk_version) {
       return Error() << "vndkVersion(" << vndk_version
                      << ") doesn't match with device VNDK version("
@@ -645,8 +640,7 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
     }
     return {};
   }
-  if (StartsWith(path, "/product/apex/") ||
-      StartsWith(path, "/system/product/apex/")) {
+  if (partition == ApexPartition::Product) {
     if (vndk_version != product_vndk_version) {
       return Error() << "vndkVersion(" << vndk_version
                      << ") doesn't match with device VNDK version("
@@ -686,11 +680,30 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
   return {};
 }
 
+Result<void> VerifyNoOverlapInSessions(std::span<const ApexFile> apex_files,
+                                       std::span<const ApexSession> sessions) {
+  for (const auto& session : sessions) {
+    for (const auto& apex : apex_files) {
+      if (std::ranges::contains(session.GetApexNames(),
+                                apex.GetManifest().name())) {
+        return Error() << "APEX " << apex.GetManifest().name()
+                       << " is already staged by session " << session.GetId()
+                       << ".";
+      }
+    }
+  }
+  return {};  // okay
+}
+
+struct VerificationResult {
+  std::map<std::string, std::vector<std::string>> apex_hals;
+};
+
 // A version of apex verification that happens on SubmitStagedSession.
 // This function contains checks that might be expensive to perform, e.g. temp
 // mounting a package and reading entire dm-verity device, and shouldn't be run
 // during boot.
-Result<void> VerifyPackagesStagedInstall(
+Result<VerificationResult> VerifyPackagesStagedInstall(
     const std::vector<ApexFile>& apex_files) {
   for (const auto& apex_file : apex_files) {
     OR_RETURN(VerifyPackageBoot(apex_file));
@@ -703,11 +716,16 @@ Result<void> VerifyPackagesStagedInstall(
     }
   }
 
+  auto staged_sessions =
+      gSessionManager->GetSessionsInState(SessionState::STAGED);
+
+  // Check overlapping: reject if the same package is already staged.
+  OR_RETURN(VerifyNoOverlapInSessions(apex_files, staged_sessions));
+
   // Since there can be multiple staged sessions, let's verify incoming APEXes
   // with all staged apexes mounted.
   std::vector<ApexFile> all_apex_files;
-  for (const auto& session :
-       gSessionManager->GetSessionsInState(SessionState::STAGED)) {
+  for (const auto& session : staged_sessions) {
     auto session_id = session.GetId();
     auto child_session_ids = session.GetChildSessionIds();
     auto staged_apex_files = OpenSessionApexFiles(
@@ -726,10 +744,11 @@ Result<void> VerifyPackagesStagedInstall(
     all_apex_files.push_back(apex_file);
   }
 
-  auto check_fn =
-      [&](const std::vector<std::string>& mount_points) -> Result<void> {
-    OR_RETURN(CheckVintf(all_apex_files, mount_points));
-    return {};
+  auto check_fn = [&](const std::vector<std::string>& mount_points)
+      -> Result<VerificationResult> {
+    VerificationResult result;
+    result.apex_hals = OR_RETURN(CheckVintf(all_apex_files, mount_points));
+    return result;
   };
   return RunVerifyFnInsideTempMounts(all_apex_files, check_fn);
 }
@@ -1370,17 +1389,6 @@ std::vector<ApexFile> GetFactoryPackages() {
   return ret;
 }
 
-Result<ApexFile> GetActivePackage(const std::string& packageName) {
-  std::vector<ApexFile> packages = GetActivePackages();
-  for (ApexFile& apex : packages) {
-    if (apex.GetManifest().name() == packageName) {
-      return std::move(apex);
-    }
-  }
-
-  return ErrnoError() << "Cannot find matching package for: " << packageName;
-}
-
 /**
  * Abort individual staged session.
  *
@@ -1831,8 +1839,13 @@ void DeleteDePreRestoreSnapshots(const ApexSession& session) {
 
 void OnBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
 
-// Returns true if any session gets staged
-void ScanStagedSessionsDirAndStage() {
+// Scans all STAGED sessions and activate them so that APEXes in those sessions
+// become available for activation. Sessions are updated to be ACTIVATED state,
+// or ACTIVATION_FAILED if something goes wrong.
+// Note that this doesn't abort with failed sessions. Apexd just marks them as
+// failed and continues activation process. It's higher level component (e.g.
+// system_server) that needs to handle the failures.
+void ActivateStagedSessions() {
   LOG(INFO) << "Scanning " << GetSessionsDir()
             << " looking for sessions to be activated.";
 
@@ -2203,8 +2216,7 @@ int OnBootstrap() {
   auto time_started = boot_clock::now();
 
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  Result<void> status =
-      instance.AddPreInstalledApex(gConfig->apex_built_in_dirs);
+  Result<void> status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
   if (!status.ok()) {
     LOG(ERROR) << "Failed to collect APEX keys : " << status.error();
     return 1;
@@ -2270,13 +2282,6 @@ int OnBootstrap() {
   return 0;
 }
 
-Result<void> RemountApexFile(const std::string& path) {
-  if (auto ret = DeactivatePackage(path); !ret.ok()) {
-    return ret;
-  }
-  return ActivatePackage(path);
-}
-
 void InitializeVold(CheckpointInterface* checkpoint_service) {
   if (checkpoint_service != nullptr) {
     gVoldService = checkpoint_service;
@@ -2307,7 +2312,7 @@ void InitializeSessionManager(ApexSessionManager* session_manager) {
 void Initialize(CheckpointInterface* checkpoint_service) {
   InitializeVold(checkpoint_service);
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  Result<void> status = instance.AddPreInstalledApex(kApexPackageBuiltinDirs);
+  Result<void> status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
   if (!status.ok()) {
     LOG(ERROR) << "Failed to collect pre-installed APEX files : "
                << status.error();
@@ -2661,7 +2666,7 @@ void OnStart() {
 
   // If there is any new apex to be installed on /data/app-staging, hardlink
   // them to /data/apex/active first.
-  ScanStagedSessionsDirAndStage();
+  ActivateStagedSessions();
   if (auto status = ApexFileRepository::GetInstance().AddDataApex(
           gConfig->active_apex_data_dir);
       !status.ok()) {
@@ -2778,6 +2783,8 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     const int session_id, const std::vector<int>& child_session_ids,
     const bool has_rollback_enabled, const bool is_rollback,
     const int rollback_id) {
+  auto event = InstallRequestedEvent(InstallType::Staged, is_rollback);
+
   if (session_id == 0) {
     return Error() << "Session id was not provided.";
   }
@@ -2795,23 +2802,26 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   }
 
   auto ret = OR_RETURN(OpenSessionApexFiles(session_id, child_session_ids));
+  event.AddFiles(ret);
 
-  for (const auto& apex : ret) {
-    SendApexInstallationRequestedAtom(apex.GetPath(), is_rollback,
-                                      InstallType::Staged);
-  }
-  auto guard = android::base::make_scope_guard([&]() {
-    for (const auto& apex : ret) {
-      SendApexInstallationEndedAtom(apex.GetPath(), InstallResult::Failure);
-    }
-  });
+  auto result = OR_RETURN(VerifyPackagesStagedInstall(ret));
+  event.AddHals(result.apex_hals);
 
-  OR_RETURN(VerifyPackagesStagedInstall(ret));
-
-  std::vector<std::string> file_hashes;
-  for (const auto& apex_file : ret) {
-    file_hashes.push_back(OR_RETURN(CalculateSha256(apex_file.GetPath())));
-  }
+  // The incoming session is now verified by apexd. From now on, apexd keeps its
+  // own session data. The session should be marked as "ready" so that it
+  // becomes STAGED. On next reboot, STAGED sessions become ACTIVATED, which
+  // means the APEXes in those sessions are in "active" state and to be
+  // activated.
+  //
+  //    SubmitStagedSession     MarkStagedSessionReady
+  //           |                          |
+  //           V                          V
+  //         VERIFIED (created) ---------------> STAGED
+  //                                               |
+  //                                               | <-- ActivateStagedSessions
+  //                                               V
+  //                                             ACTIVATED
+  //
 
   auto session = gSessionManager->CreateSession(session_id);
   if (!session.ok()) {
@@ -2826,7 +2836,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   for (const auto& apex_file : ret) {
     session->AddApexName(apex_file.GetManifest().name());
   }
-  session->SetApexFileHashes(file_hashes);
+  session->SetApexFileHashes(event.GetFileHashes());
   Result<void> commit_status =
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {
@@ -2838,8 +2848,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     ReleaseF2fsCompressedBlocks(apex.GetPath());
   }
 
-  // Disabling scope guard to stop Failure atoms from being sent
-  guard.Disable();
+  event.MarkSucceeded();
 
   return ret;
 }
@@ -3067,6 +3076,21 @@ int64_t CalculateSizeForCompressedApex(
   return result;
 }
 
+std::string CastPartition(ApexPartition in) {
+  switch (in) {
+    case ApexPartition::System:
+      return "SYSTEM";
+    case ApexPartition::SystemExt:
+      return "SYSTEM_EXT";
+    case ApexPartition::Product:
+      return "PRODUCT";
+    case ApexPartition::Vendor:
+      return "VENDOR";
+    case ApexPartition::Odm:
+      return "ODM";
+  }
+}
+
 void CollectApexInfoList(std::ostream& os,
                          const std::vector<ApexFile>& active_apexs,
                          const std::vector<ApexFile>& inactive_apexs) {
@@ -3076,11 +3100,14 @@ void CollectApexInfoList(std::ostream& os,
                                           bool is_active) {
     auto& instance = ApexFileRepository::GetInstance();
 
-    auto preinstalled_path = instance.GetPreinstalledPath(apex);
+    auto preinstalled_path =
+        instance.GetPreinstalledPath(apex.GetManifest().name());
     std::optional<std::string> preinstalled_module_path;
     if (preinstalled_path.ok()) {
       preinstalled_module_path = *preinstalled_path;
     }
+
+    auto partition = CastPartition(OR_FATAL(instance.GetPartition(apex)));
 
     std::optional<int64_t> mtime =
         instance.GetBlockApexLastUpdateSeconds(apex.GetPath());
@@ -3096,7 +3123,7 @@ void CollectApexInfoList(std::ostream& os,
         apex.GetManifest().name(), apex.GetPath(), preinstalled_module_path,
         apex.GetManifest().version(), apex.GetManifest().versionname(),
         instance.IsPreInstalledApex(apex), is_active, mtime,
-        apex.GetManifest().providesharedapexlibs());
+        apex.GetManifest().providesharedapexlibs(), partition);
     apex_infos.emplace_back(std::move(apex_info));
   };
   for (const auto& apex : active_apexs) {
@@ -3205,14 +3232,14 @@ int OnStartInVmMode() {
   auto& instance = ApexFileRepository::GetInstance();
 
   // Scan pre-installed apexes
-  if (auto status = instance.AddPreInstalledApex(gConfig->apex_built_in_dirs);
+  if (auto status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
       !status.ok()) {
     LOG(ERROR) << "Failed to scan pre-installed APEX files: " << status.error();
     return 1;
   }
 
   if (auto status = AddBlockApex(instance); !status.ok()) {
-    LOG(ERROR) << status.error();
+    LOG(ERROR) << "Failed to scan host APEX files: " << status.error();
     return 1;
   }
 
@@ -3238,10 +3265,10 @@ int OnStartInVmMode() {
 
 int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
   auto& instance = ApexFileRepository::GetInstance();
-  if (auto status = instance.AddPreInstalledApex(gConfig->apex_built_in_dirs);
+  if (auto status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
       !status.ok()) {
     LOG(ERROR) << "Failed to scan pre-installed apexes from "
-               << Join(gConfig->apex_built_in_dirs, ',');
+               << std::format("{}", gConfig->builtin_dirs | std::views::values);
     return 1;
   }
   if (also_include_staged_apexes) {
@@ -3365,26 +3392,32 @@ android::apex::MountedApexDatabase& GetApexDatabaseForTesting() {
 
 // A version of apex verification that happens during non-staged APEX
 // installation.
-Result<void> VerifyPackageNonStagedInstall(const ApexFile& apex_file,
-                                           bool force) {
-  const auto& verify_package_boot_status = VerifyPackageBoot(apex_file);
-  if (!verify_package_boot_status.ok()) {
-    return verify_package_boot_status;
-  }
+Result<VerificationResult> VerifyPackageNonStagedInstall(
+    const ApexFile& apex_file, bool force) {
+  OR_RETURN(VerifyPackageBoot(apex_file));
 
-  auto check_fn = [&apex_file,
-                   &force](const std::string& mount_point) -> Result<void> {
+  auto staged_sessions =
+      gSessionManager->GetSessionsInState(SessionState::STAGED);
+
+  // Check overlapping: reject if the same package is already staged.
+  OR_RETURN(VerifyNoOverlapInSessions(Single(apex_file), staged_sessions));
+
+  auto check_fn =
+      [&apex_file,
+       &force](const std::string& mount_point) -> Result<VerificationResult> {
     if (force) {
-      return Result<void>{};
+      return {};
     }
+    VerificationResult result;
     if (access((mount_point + "/app").c_str(), F_OK) == 0) {
       return Error() << apex_file.GetPath() << " contains app inside";
     }
     if (access((mount_point + "/priv-app").c_str(), F_OK) == 0) {
       return Error() << apex_file.GetPath() << " contains priv-app inside";
     }
-    OR_RETURN(CheckVintf(Single(apex_file), Single(mount_point)));
-    return Result<void>{};
+    result.apex_hals =
+        OR_RETURN(CheckVintf(Single(apex_file), Single(mount_point)));
+    return result;
   };
   return RunVerifyFnInsideTempMount(apex_file, check_fn);
 }
@@ -3527,12 +3560,16 @@ Result<void> LoadApexFromInit(const std::string& apex_name) {
   return {};
 }
 
-Result<ApexFile> InstallPackageImpl(const std::string& package_path,
-                                    bool force) {
+Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
+  auto event = InstallRequestedEvent(InstallType::NonStaged,
+                                     /*is_rollback=*/false);
+
   auto temp_apex = ApexFile::Open(package_path);
   if (!temp_apex.ok()) {
     return temp_apex.error();
   }
+
+  event.AddFiles(Single(*temp_apex));
 
   const std::string& module_name = temp_apex->GetManifest().name();
   // Don't allow non-staged update if there are no active versions of this APEX.
@@ -3556,9 +3593,8 @@ Result<ApexFile> InstallPackageImpl(const std::string& package_path,
   // 1. Verify that APEX is correct. This is a heavy check that involves
   // mounting an APEX on a temporary mount point and reading the entire
   // dm-verity block device.
-  if (auto res = VerifyPackageNonStagedInstall(*temp_apex, force); !res.ok()) {
-    return res.error();
-  }
+  auto result = OR_RETURN(VerifyPackageNonStagedInstall(*temp_apex, force));
+  event.AddHals(result.apex_hals);
 
   // 2. Compute params for mounting new apex.
   auto new_id_minor = ComputePackageIdMinor(*temp_apex);
@@ -3648,18 +3684,9 @@ Result<ApexFile> InstallPackageImpl(const std::string& package_path,
   // filesystem.
   ReleaseF2fsCompressedBlocks(target_file);
 
-  return new_apex;
-}
+  event.MarkSucceeded();
 
-Result<ApexFile> InstallPackage(const std::string& package_path, bool force) {
-  LOG(INFO) << "Installing " << package_path;
-  SendApexInstallationRequestedAtom(package_path, /*is_rollback=*/false,
-                                    InstallType::NonStaged);
-  // TODO: Add error-enums
-  Result<ApexFile> ret = InstallPackageImpl(package_path, force);
-  SendApexInstallationEndedAtom(
-      package_path, ret.ok() ? InstallResult::Success : InstallResult::Failure);
-  return ret;
+  return new_apex;
 }
 
 bool IsActiveApexChanged(const ApexFile& apex) {

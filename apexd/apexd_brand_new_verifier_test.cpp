@@ -60,6 +60,7 @@ TEST(BrandNewApexVerifierTest, SucceedPublicKeyMatch) {
 
   auto ret = VerifyBrandNewPackageAgainstPreinstalled(*apex);
   ASSERT_RESULT_OK(ret);
+  ASSERT_EQ(*ret, partition);
 
   file_repository.Reset();
 }
@@ -80,6 +81,7 @@ TEST(BrandNewApexVerifierTest, SucceedVersionBiggerThanBlocked) {
 
   auto ret = VerifyBrandNewPackageAgainstPreinstalled(*apex);
   ASSERT_RESULT_OK(ret);
+  ASSERT_EQ(*ret, partition);
 
   file_repository.Reset();
 }
@@ -109,7 +111,8 @@ TEST(BrandNewApexVerifierTest, SucceedSkipPreinstalled) {
   auto& file_repository = ApexFileRepository::GetInstance();
   TemporaryDir built_in_dir;
   fs::copy(GetTestFile("apex.apexd_test.apex"), built_in_dir.path);
-  file_repository.AddPreInstalledApex({built_in_dir.path});
+  file_repository.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}});
 
   auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
   ASSERT_RESULT_OK(apex);
