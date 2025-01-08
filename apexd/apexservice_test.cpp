@@ -498,83 +498,6 @@ TEST_F(ApexServiceTest, DISABLED_EnforceSelinux) {
   EXPECT_TRUE(IsSelinuxEnforced() || kIsX86);
 }
 
-TEST_F(ApexServiceTest,
-       SubmitStagegSessionSuccessDoesNotLeakTempVerityDevices) {
-  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"),
-                                      "/data/app-staging/session_1543",
-                                      "staging_data_file");
-  if (!installer.Prepare()) {
-    return;
-  }
-
-  ApexInfoList list;
-  ApexSessionParams params;
-  params.sessionId = 1543;
-  ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)));
-
-  std::vector<DeviceMapper::DmBlockDevice> devices;
-  DeviceMapper& dm = DeviceMapper::Instance();
-  ASSERT_TRUE(dm.GetAvailableDevices(&devices));
-
-  for (const auto& device : devices) {
-    ASSERT_THAT(device.name(), Not(EndsWith(".tmp")));
-  }
-}
-
-TEST_F(ApexServiceTest, SubmitStagedSessionStoresBuildFingerprint) {
-  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"),
-                                      "/data/app-staging/session_1547",
-                                      "staging_data_file");
-  if (!installer.Prepare()) {
-    return;
-  }
-  ApexInfoList list;
-  ApexSessionParams params;
-  params.sessionId = 1547;
-  ASSERT_TRUE(IsOk(service_->submitStagedSession(params, &list)));
-
-  auto session = GetSession(1547);
-  ASSERT_FALSE(session->GetBuildFingerprint().empty());
-}
-
-TEST_F(ApexServiceTest, SubmitStagedSessionFailDoesNotLeakTempVerityDevices) {
-  PrepareTestApexForInstall installer(
-      GetTestFile("apex.apexd_test_manifest_mismatch.apex"),
-      "/data/app-staging/session_239", "staging_data_file");
-  if (!installer.Prepare()) {
-    return;
-  }
-
-  ApexInfoList list;
-  ApexSessionParams params;
-  params.sessionId = 239;
-  ASSERT_FALSE(IsOk(service_->submitStagedSession(params, &list)));
-
-  std::vector<DeviceMapper::DmBlockDevice> devices;
-  DeviceMapper& dm = DeviceMapper::Instance();
-  ASSERT_TRUE(dm.GetAvailableDevices(&devices));
-
-  for (const auto& device : devices) {
-    ASSERT_THAT(device.name(), Not(EndsWith(".tmp")));
-  }
-}
-
-TEST_F(ApexServiceTest, CannotBeRollbackAndHaveRollbackEnabled) {
-  PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"),
-                                      "/data/app-staging/session_1543",
-                                      "staging_data_file");
-  if (!installer.Prepare()) {
-    return;
-  }
-
-  ApexInfoList list;
-  ApexSessionParams params;
-  params.sessionId = 1543;
-  params.isRollback = true;
-  params.hasRollbackEnabled = true;
-  ASSERT_FALSE(IsOk(service_->submitStagedSession(params, &list)));
-}
-
 TEST_F(ApexServiceTest, SessionParamDefaults) {
   PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test.apex"),
                                       "/data/app-staging/session_1547",
@@ -878,28 +801,6 @@ TEST_F(ApexServiceTest, SubmitSingleSessionTestSuccess) {
   ASSERT_TRUE(IsOk(service_->getSessions(&sessions)))
       << GetDebugStr(&installer);
   ASSERT_THAT(sessions, UnorderedElementsAre(SessionInfoEq(expected)));
-}
-
-TEST_F(ApexServiceTest, SubmitSingleSessionTestFail) {
-  PrepareTestApexForInstall installer(
-      GetTestFile("apex.apexd_test_corrupt_apex.apex"),
-      "/data/app-staging/session_456", "staging_data_file");
-  if (!installer.Prepare()) {
-    FAIL() << GetDebugStr(&installer);
-  }
-
-  ApexInfoList list;
-  ApexSessionParams params;
-  params.sessionId = 456;
-  ASSERT_FALSE(IsOk(service_->submitStagedSession(params, &list)))
-      << GetDebugStr(&installer);
-
-  ApexSessionInfo session;
-  ASSERT_TRUE(IsOk(service_->getStagedSessionInfo(456, &session)))
-      << GetDebugStr(&installer);
-  ApexSessionInfo expected = CreateSessionInfo(-1);
-  expected.isUnknown = true;
-  EXPECT_THAT(session, SessionInfoEq(expected));
 }
 
 TEST_F(ApexServiceTest, SubmitMultiSessionTestSuccess) {

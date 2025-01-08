@@ -73,6 +73,17 @@ BinderStatus CheckCallerSystemOrRoot(const std::string& name) {
   return BinderStatus::ok();
 }
 
+BinderStatus CheckCallerSystemKsOrRoot(const std::string& name) {
+  uid_t uid = IPCThreadState::self()->getCallingUid();
+  if (uid != AID_ROOT && uid != AID_SYSTEM && uid != AID_KEYSTORE) {
+    std::string msg =
+        "Only root, keystore, and system_server are allowed to call " + name;
+    return BinderStatus::fromExceptionCode(BinderStatus::EX_SECURITY,
+                                           String8(msg.c_str()));
+  }
+  return BinderStatus::ok();
+}
+
 class ApexService : public BnApexService {
  public:
   using BinderStatus = ::android::binder::Status;
@@ -92,8 +103,6 @@ class ApexService : public BnApexService {
   BinderStatus getStagedApexInfos(const ApexSessionParams& params,
                                   std::vector<ApexInfo>* aidl_return) override;
   BinderStatus getActivePackages(std::vector<ApexInfo>* aidl_return) override;
-  BinderStatus getActivePackage(const std::string& package_name,
-                                ApexInfo* aidl_return) override;
   BinderStatus getAllPackages(std::vector<ApexInfo>* aidl_return) override;
   BinderStatus abortStagedSession(int session_id) override;
   BinderStatus revertActiveSessions() override;
@@ -484,7 +493,7 @@ BinderStatus ApexService::getActivePackages(
     std::vector<ApexInfo>* aidl_return) {
   LOG(INFO) << "getActivePackages received by ApexService";
 
-  auto check = CheckCallerSystemOrRoot("getActivePackages");
+  auto check = CheckCallerSystemKsOrRoot("getActivePackages");
   if (!check.isOk()) {
     return check;
   }
@@ -496,24 +505,6 @@ BinderStatus ApexService::getActivePackages(
     aidl_return->push_back(std::move(apex_info));
   }
 
-  return BinderStatus::ok();
-}
-
-BinderStatus ApexService::getActivePackage(const std::string& package_name,
-                                           ApexInfo* aidl_return) {
-  LOG(INFO) << "getActivePackage received by ApexService package_name : "
-            << package_name;
-
-  auto check = CheckCallerSystemOrRoot("getActivePackage");
-  if (!check.isOk()) {
-    return check;
-  }
-
-  Result<ApexFile> apex = ::android::apex::GetActivePackage(package_name);
-  if (apex.ok()) {
-    *aidl_return = GetApexInfo(*apex);
-    aidl_return->isActive = true;
-  }
   return BinderStatus::ok();
 }
 
@@ -841,9 +832,6 @@ status_t ApexService::shellCommand(int in, int out, int err,
     }
     log << "ApexService:" << std::endl
         << "  help - display this help" << std::endl
-        << "  getActivePackage [package_name] - return info for active package "
-           "with given name, if present"
-        << std::endl
         << "  getAllPackages - return the list of all packages" << std::endl
         << "  getActivePackages - return the list of active packages"
         << std::endl
@@ -896,28 +884,6 @@ status_t ApexService::shellCommand(int in, int out, int err,
     }
     std::string msg = StringLog() << "Failed to retrieve packages: "
                                   << status.toString8().c_str() << std::endl;
-    dprintf(err, "%s", msg.c_str());
-    return BAD_VALUE;
-  }
-
-  if (cmd == String16("getActivePackage")) {
-    if (args.size() != 2) {
-      print_help(err, "Unrecognized options");
-      return BAD_VALUE;
-    }
-
-    ApexInfo package;
-    BinderStatus status = getActivePackage(String8(args[1]).c_str(), &package);
-    if (status.isOk()) {
-      std::string msg = ToString(package);
-      dprintf(out, "%s", msg.c_str());
-      return OK;
-    }
-
-    std::string msg = StringLog()
-                      << "Failed to fetch active package: "
-                      << String8(args[1]).c_str()
-                      << ", error: " << status.toString8().c_str() << std::endl;
     dprintf(err, "%s", msg.c_str());
     return BAD_VALUE;
   }

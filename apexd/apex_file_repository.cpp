@@ -250,14 +250,15 @@ Result<int> ApexFileRepository::AddBlockApex(
                      << apex_file.error();
     }
 
+    const std::string& name = apex_file->GetManifest().name();
+    LOG(INFO) << "Found host apex " << name << " at " << apex_path;
+
     // When metadata specifies the public key of the apex, it should match the
     // bundled key. Otherwise we accept it.
     if (apex_config.public_key() != "" &&
         apex_config.public_key() != apex_file->GetBundledPublicKey()) {
       return Error() << "public key doesn't match: " << apex_path;
     }
-
-    const std::string& name = apex_file->GetManifest().name();
 
     // When metadata specifies the manifest name and version of the apex, it
     // should match what we see in the manifest.
@@ -469,24 +470,11 @@ Result<const std::string> ApexFileRepository::GetPublicKey(
   return it->second.GetBundledPublicKey();
 }
 
-// TODO(b/179497746): remove this method when we add api for fetching ApexFile
-//  by name
 Result<const std::string> ApexFileRepository::GetPreinstalledPath(
     const std::string& name) const {
   auto it = pre_installed_store_.find(name);
   if (it == pre_installed_store_.end()) {
     return Error() << "No preinstalled data found for package " << name;
-  }
-  return it->second.GetPath();
-}
-
-// TODO(b/179497746): remove this method when we add api for fetching ApexFile
-//  by name
-Result<const std::string> ApexFileRepository::GetDataPath(
-    const std::string& name) const {
-  auto it = data_store_.find(name);
-  if (it == data_store_.end()) {
-    return Error() << "No data apex found for package " << name;
   }
   return it->second.GetPath();
 }
