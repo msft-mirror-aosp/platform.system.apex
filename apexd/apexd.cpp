@@ -680,6 +680,21 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
   return {};
 }
 
+Result<void> VerifyNoOverlapInSessions(std::span<const ApexFile> apex_files,
+                                       std::span<const ApexSession> sessions) {
+  for (const auto& session : sessions) {
+    for (const auto& apex : apex_files) {
+      if (std::ranges::contains(session.GetApexNames(),
+                                apex.GetManifest().name())) {
+        return Error() << "APEX " << apex.GetManifest().name()
+                       << " is already staged by session " << session.GetId()
+                       << ".";
+      }
+    }
+  }
+  return {};  // okay
+}
+
 struct VerificationResult {
   std::map<std::string, std::vector<std::string>> apex_hals;
 };
@@ -701,11 +716,16 @@ Result<VerificationResult> VerifyPackagesStagedInstall(
     }
   }
 
+  auto staged_sessions =
+      gSessionManager->GetSessionsInState(SessionState::STAGED);
+
+  // Check overlapping: reject if the same package is already staged.
+  OR_RETURN(VerifyNoOverlapInSessions(apex_files, staged_sessions));
+
   // Since there can be multiple staged sessions, let's verify incoming APEXes
   // with all staged apexes mounted.
   std::vector<ApexFile> all_apex_files;
-  for (const auto& session :
-       gSessionManager->GetSessionsInState(SessionState::STAGED)) {
+  for (const auto& session : staged_sessions) {
     auto session_id = session.GetId();
     auto child_session_ids = session.GetChildSessionIds();
     auto staged_apex_files = OpenSessionApexFiles(
@@ -1369,17 +1389,6 @@ std::vector<ApexFile> GetFactoryPackages() {
   return ret;
 }
 
-Result<ApexFile> GetActivePackage(const std::string& packageName) {
-  std::vector<ApexFile> packages = GetActivePackages();
-  for (ApexFile& apex : packages) {
-    if (apex.GetManifest().name() == packageName) {
-      return std::move(apex);
-    }
-  }
-
-  return ErrnoError() << "Cannot find matching package for: " << packageName;
-}
-
 /**
  * Abort individual staged session.
  *
@@ -1830,8 +1839,13 @@ void DeleteDePreRestoreSnapshots(const ApexSession& session) {
 
 void OnBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
 
-// Returns true if any session gets staged
-void ScanStagedSessionsDirAndStage() {
+// Scans all STAGED sessions and activate them so that APEXes in those sessions
+// become available for activation. Sessions are updated to be ACTIVATED state,
+// or ACTIVATION_FAILED if something goes wrong.
+// Note that this doesn't abort with failed sessions. Apexd just marks them as
+// failed and continues activation process. It's higher level component (e.g.
+// system_server) that needs to handle the failures.
+void ActivateStagedSessions() {
   LOG(INFO) << "Scanning " << GetSessionsDir()
             << " looking for sessions to be activated.";
 
@@ -2652,7 +2666,7 @@ void OnStart() {
 
   // If there is any new apex to be installed on /data/app-staging, hardlink
   // them to /data/apex/active first.
-  ScanStagedSessionsDirAndStage();
+  ActivateStagedSessions();
   if (auto status = ApexFileRepository::GetInstance().AddDataApex(
           gConfig->active_apex_data_dir);
       !status.ok()) {
@@ -2792,6 +2806,22 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
 
   auto result = OR_RETURN(VerifyPackagesStagedInstall(ret));
   event.AddHals(result.apex_hals);
+
+  // The incoming session is now verified by apexd. From now on, apexd keeps its
+  // own session data. The session should be marked as "ready" so that it
+  // becomes STAGED. On next reboot, STAGED sessions become ACTIVATED, which
+  // means the APEXes in those sessions are in "active" state and to be
+  // activated.
+  //
+  //    SubmitStagedSession     MarkStagedSessionReady
+  //           |                          |
+  //           V                          V
+  //         VERIFIED (created) ---------------> STAGED
+  //                                               |
+  //                                               | <-- ActivateStagedSessions
+  //                                               V
+  //                                             ACTIVATED
+  //
 
   auto session = gSessionManager->CreateSession(session_id);
   if (!session.ok()) {
@@ -3365,6 +3395,12 @@ android::apex::MountedApexDatabase& GetApexDatabaseForTesting() {
 Result<VerificationResult> VerifyPackageNonStagedInstall(
     const ApexFile& apex_file, bool force) {
   OR_RETURN(VerifyPackageBoot(apex_file));
+
+  auto staged_sessions =
+      gSessionManager->GetSessionsInState(SessionState::STAGED);
+
+  // Check overlapping: reject if the same package is already staged.
+  OR_RETURN(VerifyNoOverlapInSessions(Single(apex_file), staged_sessions));
 
   auto check_fn =
       [&apex_file,
