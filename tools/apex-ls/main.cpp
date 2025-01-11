@@ -15,6 +15,7 @@
 //
 
 #include <android-base/file.h>
+#include <android-base/logging.h>
 #include <android-base/result.h>
 #include <android-base/unique_fd.h>
 #include <apex_file.h>
@@ -46,6 +47,14 @@ struct Args {
 Result<void> PrintList(Args args) {
   auto apex_file = OR_RETURN(ApexFile::Open(args.apex_file));
 
+  // If the apex is .capex, decompress it first.
+  TemporaryDir temp_dir;
+  if (apex_file.IsCompressed()) {
+    auto original_apex_path = std::string(temp_dir.path) + "/original.apex";
+    OR_RETURN(apex_file.Decompress(original_apex_path));
+    apex_file = OR_RETURN(ApexFile::Open(original_apex_path));
+  }
+
   if (!apex_file.GetFsType().has_value())
     return Error() << "Invalid apex: no fs type";
   if (!apex_file.GetImageSize().has_value())
@@ -62,9 +71,10 @@ Result<void> PrintList(Args args) {
     return Error() << "Invalid filesystem type: " << fs_type;
   }
 
+  // Extract apex_payload.img
   TemporaryFile temp_file;
   {
-    unique_fd src(open(args.apex_file.c_str(), O_RDONLY | O_CLOEXEC));
+    unique_fd src(open(apex_file.GetPath().c_str(), O_RDONLY | O_CLOEXEC));
     off_t offset = *apex_file.GetImageOffset();
     size_t size = *apex_file.GetImageSize();
     if (sendfile(temp_file.fd, src, &offset, size) < 0) {
@@ -107,6 +117,7 @@ Result<void> TryMain(std::vector<std::string> args) {
 }
 
 int main(int argc, char** argv) {
+  android::base::SetMinimumLogSeverity(android::base::ERROR);
   if (auto st = TryMain(std::vector<std::string>{argv, argv + argc});
       !st.ok()) {
     std::cerr << st.error() << "\n";
