@@ -19,6 +19,7 @@
 
 #include <dlfcn.h>
 
+#include <algorithm>
 #include <string>
 
 #include <android/dlext.h>
