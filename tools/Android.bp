@@ -110,9 +110,6 @@ cc_binary_host {
         "init_host_defaults",
         "libapex-deps",
     ],
-    shared_libs: [
-        "libprocessgroup",
-    ],
     static_libs: [
         "libapex",
         "libinit_host",
@@ -140,7 +137,6 @@ sh_test_host {
         "libcutils",
         "liblog",
         "libpcre2", // used by libselinux
-        "libprocessgroup",
         "libprotobuf-cpp-full", // used by libapex
         "libprotobuf-cpp-lite", // used by libinit_host
         "libselinux", // used by libapex
