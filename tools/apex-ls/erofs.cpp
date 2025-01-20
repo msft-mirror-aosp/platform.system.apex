@@ -62,9 +62,9 @@ Result<std::vector<std::string>> ReadDir(struct erofs_sb_info* sbi,
   }
   ReadDirContext ctx = {
       {
-          .flags = EROFS_READDIR_VALID_PNID,
           .dir = &dir,
           .cb = ReadDirIter,
+          .flags = EROFS_READDIR_VALID_PNID,
       },
   };
   err = erofs_iterate_dir(&ctx.ctx, false);
