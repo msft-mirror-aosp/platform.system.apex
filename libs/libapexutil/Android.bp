@@ -40,7 +40,10 @@ cc_library_static {
         "//apex_available:platform",
         "com.android.runtime",
     ],
-    visibility: ["//system/linkerconfig"],
+    visibility: [
+        "//system/linkerconfig",
+        "//packages/modules/Virtualization/guest/microdroid_launcher",
+    ],
 }
 
 cc_test {
