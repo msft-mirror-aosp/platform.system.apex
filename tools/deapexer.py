@@ -295,9 +295,16 @@ class Apex(object):
     # Output of stat for a symlink should have the following line:
     #   Fast link dest: \"%.*s\"
     m = re.search(r'\bFast link dest: \"(.+)\"\n', stdout)
-    if not m:
+    if m:
+      return m.group(1)
+
+    # if above match fails, it means it's a slow link. Use cat.
+    output = subprocess.check_output([self._debugfs, '-R', f'cat {entry.full_path}',
+                                      self._payload], text=True, stderr=subprocess.DEVNULL)
+
+    if not output:
       sys.exit('failed to read symlink target')
-    return m.group(1)
+    return output
 
   def write_entry(self, entry, out_dir):
     dest = os.path.normpath(os.path.join(out_dir, entry.full_path))
