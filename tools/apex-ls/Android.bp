@@ -20,6 +20,9 @@ cc_binary_host {
     name: "apex-ls",
     defaults: [
         "libapex-deps",
+        // we need this to get the feature flags
+        // used to build liberofs.
+        "erofs-utils_export_defaults",
     ],
     srcs: [
         "erofs.cpp",
