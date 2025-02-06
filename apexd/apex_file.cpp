@@ -430,7 +430,7 @@ Result<void> ApexFile::Decompress(const std::string& dest_path) const {
 
   // Open destination file descriptor
   unique_fd dest_fd(
-      open(dest_path.c_str(), O_WRONLY | O_CLOEXEC | O_CREAT | O_EXCL, 0644));
+      open(dest_path.c_str(), O_WRONLY | O_CLOEXEC | O_CREAT | O_EXCL | O_SYNC, 0644));
   if (dest_fd.get() == -1) {
     return ErrnoError() << "Failed to open decompression destination "
                         << dest_path.c_str();
