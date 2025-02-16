@@ -17,6 +17,7 @@
 #define LOG_TAG "VtsApexTest"
 
 #include <android-base/file.h>
+#include <android-base/properties.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 
@@ -24,6 +25,7 @@
 
 #include "apex_constants.h"
 
+using android::base::GetIntProperty;
 using android::base::unique_fd;
 
 namespace android::apex {
@@ -31,7 +33,7 @@ namespace android::apex {
 static void ForEachPreinstalledApex(auto fn) {
   namespace fs = std::filesystem;
   std::error_code ec;
-  for (const auto &dir : kApexPackageBuiltinDirs) {
+  for (const auto& [partition, dir] : kBuiltinApexPackageDirs) {
     if (!fs::exists(dir, ec)) {
       if (ec) {
         FAIL() << "Can't to access " << dir << ": " << ec.message();
@@ -45,7 +47,7 @@ static void ForEachPreinstalledApex(auto fn) {
       if (path.extension() != kApexPackageSuffix) {
         continue;
       }
-      fn(path);
+      fn(partition, path);
     }
     if (ec) {
       FAIL() << "Can't read " << dir << ": " << ec.message();
@@ -55,10 +57,36 @@ static void ForEachPreinstalledApex(auto fn) {
 
 // Preinstalled APEX files (.apex) should be okay when opening with O_DIRECT
 TEST(VtsApexTest, OpenPreinstalledApex) {
-  ForEachPreinstalledApex([](auto path) {
+  // The requirement was added in Android V (for system) and 202404 (for
+  // vendor).
+  bool skip_system = android_get_device_api_level() < 35;
+  bool skip_vendor = GetIntProperty("ro.board.api_level", 0) < 202404;
+
+  ForEachPreinstalledApex([=](auto partition, auto path) {
+    switch (partition) {
+      case ApexPartition::System:
+        [[fallthrough]];
+      case ApexPartition::SystemExt:
+        [[fallthrough]];
+      case ApexPartition::Product: {
+        if (skip_system) {
+          return;
+        }
+        break;
+      }
+      case ApexPartition::Vendor:
+        [[fallthrough]];
+      case ApexPartition::Odm: {
+        if (skip_vendor) {
+          return;
+        }
+        break;
+      }
+    }
+
     unique_fd fd(open(path.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECT));
-    ASSERT_NE(fd.get(), -1)
-        << "Can't open an APEX file " << path << ": " << strerror(errno);
+    ASSERT_NE(fd.get(), -1) << "Can't open an APEX file " << path
+                            << " with O_DIRECT: " << strerror(errno);
   });
 }
 
