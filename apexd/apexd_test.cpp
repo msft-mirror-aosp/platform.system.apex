@@ -4748,7 +4748,7 @@ TEST_F(ApexdMountTest, SubmitSingleStagedSessionKeepsPreviousSessions) {
   // First simulate existence of a bunch of sessions.
   auto session1 = GetSessionManager()->CreateSession(37);
   ASSERT_RESULT_OK(session1);
-  ASSERT_RESULT_OK(session1->UpdateStateAndCommit(SessionState::VERIFIED));
+  ASSERT_RESULT_OK(session1->UpdateStateAndCommit(SessionState::STAGED));
 
   auto session2 = GetSessionManager()->CreateSession(57);
   ASSERT_RESULT_OK(session2);
@@ -4769,7 +4769,7 @@ TEST_F(ApexdMountTest, SubmitSingleStagedSessionKeepsPreviousSessions) {
   ASSERT_EQ(4u, sessions.size());
 
   ASSERT_EQ(37, sessions[0].GetId());
-  ASSERT_EQ(SessionState::VERIFIED, sessions[0].GetState());
+  ASSERT_EQ(SessionState::STAGED, sessions[0].GetState());
 
   ASSERT_EQ(57, sessions[1].GetId());
   ASSERT_EQ(SessionState::STAGED, sessions[1].GetState());
@@ -5150,6 +5150,18 @@ TEST_F(SubmitStagedSessionTest,
               HasError(WithMessage(HasSubstr("already staged"))));
 }
 
+TEST_F(SubmitStagedSessionTest, RejectStagingIfAnotherSessionIsBeingStaged) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+
+  // MarkStagedSessionReady is not called yet.
+  auto session_id2 = 43;
+  PrepareStagedSession("apex.apexd_test_different_app.apex", session_id2);
+  ASSERT_THAT(SubmitStagedSession(session_id2, {}, false, false, -1),
+              HasError(WithMessage(HasSubstr("being staged"))));
+}
+
 TEST_F(SubmitStagedSessionTest, RejectInstallPackageForStagedPackage) {
   auto session_id = 42;
   PrepareStagedSession("apex.apexd_test.apex", session_id);
@@ -5159,6 +5171,33 @@ TEST_F(SubmitStagedSessionTest, RejectInstallPackageForStagedPackage) {
   ASSERT_THAT(
       InstallPackage(GetTestFile("apex.apexd_test.apex"), /* force= */ true),
       HasError(WithMessage(HasSubstr("already staged"))));
+}
+
+TEST_F(SubmitStagedSessionTest, RejectInstallIfAnotherSessionIsBeingStaged) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+
+  // MarkStagedSessionReady is not called yet.
+  ASSERT_THAT(InstallPackage(GetTestFile("apex.apexd_test_different_app.apex"),
+                             /* force= */ true),
+              HasError(WithMessage(HasSubstr("being staged"))));
+}
+
+TEST_F(SubmitStagedSessionTest, AbortedSessionDoesNotBlockNewStagingOrInstall) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(AbortStagedSession(session_id), Ok());
+
+  auto session_id2 = 43;
+  PrepareStagedSession("apex.apexd_test.apex", session_id2);
+  ASSERT_THAT(SubmitStagedSession(session_id2, {}, false, false, -1), Ok());
+  ASSERT_THAT(AbortStagedSession(session_id2), Ok());
+
+  ASSERT_THAT(InstallPackage(GetTestFile("apex.apexd_test.apex"),
+                             /* force= */ true),
+              Ok());
 }
 
 TEST_F(SubmitStagedSessionTest, FailWithManifestMismatch) {
