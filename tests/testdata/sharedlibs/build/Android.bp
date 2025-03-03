@@ -44,11 +44,6 @@ python_binary_host {
     srcs: [
         "shared_libs_repack.py",
     ],
-    version: {
-        py3: {
-            embedded_launcher: true,
-        },
-    },
     libs: [
         "apex_build_info_proto",
         "apex_manifest_proto",
