@@ -48,24 +48,6 @@ using ::testing::UnorderedElementsAre;
 
 // TODO(b/170329726): add unit tests for apexd_sessions.h
 
-TEST(ApexdSessionTest, GetSessionsDirSessionsStoredInMetadata) {
-  if (access("/metadata", F_OK) != 0) {
-    GTEST_SKIP() << "Device doesn't have /metadata partition";
-  }
-
-  std::string result = GetSessionsDir();
-  ASSERT_EQ(result, "/metadata/apex/sessions");
-}
-
-TEST(ApexdSessionTest, GetSessionsDirNoMetadataPartitionFallbackToData) {
-  if (access("/metadata", F_OK) == 0) {
-    GTEST_SKIP() << "Device has /metadata partition";
-  }
-
-  std::string result = GetSessionsDir();
-  ASSERT_EQ(result, "/data/apex/sessions");
-}
-
 TEST(ApexSessionManagerTest, CreateSession) {
   TemporaryDir td;
   auto manager = ApexSessionManager::Create(std::string(td.path));
@@ -176,104 +158,6 @@ TEST(ApexSessionManager, GetSessionsInState) {
 
   ASSERT_EQ(41, sessions[1].GetId());
   ASSERT_EQ(SessionState::SUCCESS, sessions[1].GetState());
-}
-
-TEST(ApexSessionManager, MigrateFromOldSessionsDir) {
-  TemporaryDir td;
-  auto old_manager = ApexSessionManager::Create(std::string(td.path));
-
-  auto session1 = old_manager->CreateSession(239);
-  ASSERT_RESULT_OK(session1);
-  ASSERT_RESULT_OK(session1->UpdateStateAndCommit(SessionState::STAGED));
-
-  auto session2 = old_manager->CreateSession(13);
-  ASSERT_RESULT_OK(session2);
-  ASSERT_RESULT_OK(session2->UpdateStateAndCommit(SessionState::SUCCESS));
-
-  auto session3 = old_manager->CreateSession(31);
-  ASSERT_RESULT_OK(session3);
-  ASSERT_RESULT_OK(session3->UpdateStateAndCommit(SessionState::ACTIVATED));
-
-  TemporaryDir td2;
-  auto new_manager = ApexSessionManager::Create(std::string(td2.path));
-
-  ASSERT_RESULT_OK(
-      new_manager->MigrateFromOldSessionsDir(std::string(td.path)));
-
-  auto sessions = new_manager->GetSessions();
-  std::sort(
-      sessions.begin(), sessions.end(),
-      [](const auto& s1, const auto& s2) { return s1.GetId() < s2.GetId(); });
-
-  ASSERT_EQ(3u, sessions.size());
-
-  ASSERT_EQ(13, sessions[0].GetId());
-  ASSERT_EQ(SessionState::SUCCESS, sessions[0].GetState());
-
-  ASSERT_EQ(31, sessions[1].GetId());
-  ASSERT_EQ(SessionState::ACTIVATED, sessions[1].GetState());
-
-  ASSERT_EQ(239, sessions[2].GetId());
-  ASSERT_EQ(SessionState::STAGED, sessions[2].GetState());
-
-  // Check that old manager directory doesn't have anything
-  auto old_sessions = old_manager->GetSessions();
-  ASSERT_TRUE(old_sessions.empty());
-}
-
-TEST(ApexSessionManager, MigrateFromOldSessionsDirSameDir) {
-  TemporaryDir td;
-  auto old_manager = ApexSessionManager::Create(std::string(td.path));
-
-  auto session1 = old_manager->CreateSession(239);
-  ASSERT_RESULT_OK(session1);
-  ASSERT_RESULT_OK(session1->UpdateStateAndCommit(SessionState::STAGED));
-
-  auto session2 = old_manager->CreateSession(13);
-  ASSERT_RESULT_OK(session2);
-  ASSERT_RESULT_OK(session2->UpdateStateAndCommit(SessionState::SUCCESS));
-
-  auto session3 = old_manager->CreateSession(31);
-  ASSERT_RESULT_OK(session3);
-  ASSERT_RESULT_OK(session3->UpdateStateAndCommit(SessionState::ACTIVATED));
-
-  auto new_manager = ApexSessionManager::Create(std::string(td.path));
-
-  ASSERT_RESULT_OK(
-      new_manager->MigrateFromOldSessionsDir(std::string(td.path)));
-
-  auto sessions = new_manager->GetSessions();
-  std::sort(
-      sessions.begin(), sessions.end(),
-      [](const auto& s1, const auto& s2) { return s1.GetId() < s2.GetId(); });
-
-  ASSERT_EQ(3u, sessions.size());
-
-  ASSERT_EQ(13, sessions[0].GetId());
-  ASSERT_EQ(SessionState::SUCCESS, sessions[0].GetState());
-
-  ASSERT_EQ(31, sessions[1].GetId());
-  ASSERT_EQ(SessionState::ACTIVATED, sessions[1].GetState());
-
-  ASSERT_EQ(239, sessions[2].GetId());
-  ASSERT_EQ(SessionState::STAGED, sessions[2].GetState());
-
-  // Directory is the same, so using old_manager should also work.
-  auto old_sessions = old_manager->GetSessions();
-  std::sort(
-      old_sessions.begin(), old_sessions.end(),
-      [](const auto& s1, const auto& s2) { return s1.GetId() < s2.GetId(); });
-
-  ASSERT_EQ(3u, old_sessions.size());
-
-  ASSERT_EQ(13, old_sessions[0].GetId());
-  ASSERT_EQ(SessionState::SUCCESS, old_sessions[0].GetState());
-
-  ASSERT_EQ(31, old_sessions[1].GetId());
-  ASSERT_EQ(SessionState::ACTIVATED, old_sessions[1].GetState());
-
-  ASSERT_EQ(239, old_sessions[2].GetId());
-  ASSERT_EQ(SessionState::STAGED, old_sessions[2].GetState());
 }
 
 TEST(ApexSessionManagerTest, GetStagedApexDirsSelf) {

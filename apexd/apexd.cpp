@@ -2112,13 +2112,13 @@ Result<void> UnstagePackages(const std::vector<std::string>& paths) {
 }
 
 /**
- * During apex installation, staged sessions located in /data/apex/sessions
+ * During apex installation, staged sessions located in /metadata/apex/sessions
  * mutate the active sessions in /data/apex/active. If some error occurs during
  * installation of apex, we need to revert /data/apex/active to its original
  * state and reboot.
  *
- * Also, we need to put staged sessions in /data/apex/sessions in REVERTED state
- * so that they do not get activated on next reboot.
+ * Also, we need to put staged sessions in /metadata/apex/sessions in
+ * REVERTED state so that they do not get activated on next reboot.
  */
 Result<void> RevertActiveSessions(const std::string& crashing_native_process,
                                   const std::string& error_message) {
