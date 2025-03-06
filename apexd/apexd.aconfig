@@ -8,3 +8,11 @@ flag {
   bug: "361500273"
   is_fixed_read_only: true
 }
+
+flag {
+  name: "mount_before_data"
+  namespace: "treble"
+  description: "This flag controls if allowing mounting APEXes before the data partition"
+  bug: "361701397"
+  is_fixed_read_only: true
+}

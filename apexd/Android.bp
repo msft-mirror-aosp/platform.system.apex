@@ -139,7 +139,7 @@ cc_binary {
     ],
     shared_libs: [
         "server_configurable_flags",
-        "brand_new_apex_flag_c_lib",
+        "apexd_flags_c_lib",
     ],
     static_libs: [
         "libapex",
@@ -743,13 +743,13 @@ genrule {
 }
 
 aconfig_declarations {
-    name: "enable_brand_new_apex",
+    name: "apexd_flags",
     package: "com.android.apex.flags",
     srcs: ["apexd.aconfig"],
     container: "system",
 }
 
 cc_aconfig_library {
-    name: "brand_new_apex_flag_c_lib",
-    aconfig_declarations: "enable_brand_new_apex",
+    name: "apexd_flags_c_lib",
+    aconfig_declarations: "apexd_flags",
 }
