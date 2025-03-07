@@ -47,6 +47,7 @@
 #include "apexd_utils.h"
 
 using android::base::Basename;
+using android::base::Dirname;
 using android::base::ErrnoError;
 using android::base::Error;
 using android::base::GetBoolProperty;
@@ -125,32 +126,40 @@ static Result<std::string> PartitionParent(const std::string& blockdev) {
   if (blockdev.find('/') != std::string::npos) {
     return Error() << "Invalid argument " << blockdev;
   }
-  std::error_code ec;
-  for (const auto& entry :
-       std::filesystem::directory_iterator("/sys/class/block", ec)) {
-    const std::string path = entry.path().string();
-    if (std::filesystem::exists(
-            StringPrintf("%s/%s", path.c_str(), blockdev.c_str()))) {
-      return Basename(path);
-    }
+
+  std::string link_path;
+  std::string path = "/sys/class/block/" + blockdev;
+  if (!android::base::Readlink(path, &link_path)) {
+    PLOG(ERROR) << "readlink('" << path << "') failed";
+    return blockdev;
   }
-  return blockdev;
+
+  if (Basename(link_path) != blockdev) {
+    LOG(ERROR) << "readlink('" << path << "') returned '" << link_path
+               << "' but it doesn't end with '" << blockdev << "'";
+    return blockdev;
+  }
+
+  // for parent devices like "sda", link_path looks like ".../block/sda"
+  // for child devices like "sda26", link_path looks like ".../block/sda/sda26"
+  std::string parent_path = Dirname(link_path);
+  std::string parent = Basename(parent_path);
+  if (parent != "block")
+    return parent;
+  else
+    return blockdev;
 }
 
 // Convert a major:minor pair into a block device name.
-static std::string BlockdevName(dev_t dev) {
-  std::error_code ec;
-  for (const auto& entry :
-       std::filesystem::directory_iterator("/dev/block", ec)) {
-    struct stat statbuf;
-    if (stat(entry.path().string().c_str(), &statbuf) < 0) {
-      continue;
-    }
-    if (dev == statbuf.st_rdev) {
-      return Basename(entry.path().string());
-    }
+static Result<std::string> BlockdevName(dev_t dev) {
+  std::string link_path;
+  std::string path = "/sys/dev/block/" + std::to_string(major(dev)) + ":" +
+                     std::to_string(minor(dev));
+  if (!android::base::Readlink(path, &link_path)) {
+    return ErrnoErrorf("readlink('{}') failed", path.c_str());
   }
-  return {};
+
+  return Basename(link_path);
 }
 
 // For file `file_path`, retrieve the block device backing the filesystem on
@@ -160,17 +169,32 @@ static std::string BlockdevName(dev_t dev) {
 // -> /dev/block/dm-1 (system_b; dm-linear)
 // -> /dev/sda26
 static Result<uint32_t> BlockDeviceQueueDepth(const std::string& file_path) {
+  static std::unordered_map<std::string, uint32_t> cache;
+  static std::mutex cache_mutex;
+
   struct stat statbuf;
   int res = stat(file_path.c_str(), &statbuf);
   if (res < 0) {
     return ErrnoErrorf("stat({})", file_path.c_str());
   }
-  std::string blockdev = "/dev/block/" + BlockdevName(statbuf.st_dev);
-  LOG(VERBOSE) << file_path << " -> " << blockdev;
-  if (blockdev.empty()) {
-    return Errorf("Failed to convert {}:{} (path {})", major(statbuf.st_dev),
-                  minor(statbuf.st_dev), file_path.c_str());
+  std::string blockdev;
+  if (auto blockdev_name = BlockdevName(statbuf.st_dev); blockdev_name.ok()) {
+    blockdev = "/dev/block/" + *blockdev_name;
+    LOG(VERBOSE) << file_path << " -> " << blockdev;
+  } else {
+    return Error() << "Failed to convert " << major(statbuf.st_dev) << ":"
+                   << minor(statbuf.st_dev)
+                   << "to block device name: " << blockdev_name.error();
   }
+
+  {
+    std::lock_guard<std::mutex> lock(cache_mutex);
+    auto it = cache.find(blockdev);
+    if (it != cache.end()) {
+      return it->second;
+    }
+  }
+
   auto& dm = DeviceMapper::Instance();
   for (;;) {
     std::optional<std::string> child = dm.GetParentBlockDeviceByPath(blockdev);
@@ -200,7 +224,13 @@ static Result<uint32_t> BlockDeviceQueueDepth(const std::string& file_path) {
   nr_tags = android::base::Trim(nr_tags);
   LOG(VERBOSE) << file_path << " is backed by /dev/" << blockdev
                << " and that block device supports queue depth " << nr_tags;
-  return strtol(nr_tags.c_str(), NULL, 0);
+  uint32_t result = strtol(nr_tags.c_str(), NULL, 0);
+
+  {
+    std::lock_guard<std::mutex> lock(cache_mutex);
+    cache[blockdev] = result;
+  }
+  return result;
 }
 
 // Set 'nr_requests' of `loop_device_path` equal to the queue depth of
