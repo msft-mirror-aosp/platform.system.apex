@@ -83,9 +83,6 @@ int HandleSubcommand(int argc, char** argv) {
       android::apex::InitializeVold(&*vold_service_st);
     }
 
-    // We are running regular apexd, which starts after /metadata/apex/sessions
-    // and /data/apex/sessions have been created by init. It is safe to create
-    // ApexSessionManager.
     auto session_manager = android::apex::ApexSessionManager::Create(
         android::apex::GetSessionsDir());
     android::apex::InitializeSessionManager(session_manager.get());
@@ -175,9 +172,6 @@ int main(int argc, char** argv) {
     return HandleSubcommand(argc, argv);
   }
 
-  // We are running regular apexd, which starts after /metadata/apex/sessions
-  // and /data/apex/sessions have been created by init. It is safe to create
-  // ApexSessionManager.
   auto session_manager = android::apex::ApexSessionManager::Create(
       android::apex::GetSessionsDir());
   android::apex::InitializeSessionManager(session_manager.get());
@@ -195,12 +189,6 @@ int main(int argc, char** argv) {
   android::apex::InitMetrics(std::make_unique<android::apex::StatsLog>());
 
   if (booting) {
-    auto res = session_manager->MigrateFromOldSessionsDir(
-        android::apex::kOldApexSessionsDir);
-    if (!res.ok()) {
-      LOG(ERROR) << "Failed to migrate sessions to /metadata partition : "
-                 << res.error();
-    }
     android::apex::OnStart();
   } else {
     // TODO(b/172911822): Trying to use data apex related ApexFileRepository

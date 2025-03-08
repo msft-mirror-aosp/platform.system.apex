@@ -182,7 +182,7 @@ python_binary_host {
     ],
     required: [
         "deapexer",
-        "debugfs_static",
+        "debugfs",
         "fsck.erofs",
     ],
 }
