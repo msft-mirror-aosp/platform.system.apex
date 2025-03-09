@@ -60,19 +60,7 @@ static Result<SessionState> ParseSessionState(const std::string& session_dir) {
 
 }  // namespace
 
-std::string GetSessionsDir() {
-  static std::string result;
-  static std::once_flag once_flag;
-  std::call_once(once_flag, [&]() {
-    auto status =
-        FindFirstExistingDirectory(kNewApexSessionsDir, kOldApexSessionsDir);
-    if (!status.ok()) {
-      LOG(FATAL) << status.error();
-    }
-    result = std::move(*status);
-  });
-  return result;
-}
+std::string GetSessionsDir() { return kApexSessionsDir; }
 
 ApexSession::ApexSession(SessionState state, std::string session_dir)
     : state_(std::move(state)), session_dir_(std::move(session_dir)) {}
@@ -222,15 +210,6 @@ std::vector<std::string> ApexSession::GetStagedApexDirs(
 ApexSessionManager::ApexSessionManager(std::string sessions_base_dir)
     : sessions_base_dir_(std::move(sessions_base_dir)) {}
 
-ApexSessionManager::ApexSessionManager(ApexSessionManager&& other) noexcept
-    : sessions_base_dir_(std::move(other.sessions_base_dir_)) {}
-
-ApexSessionManager& ApexSessionManager::operator=(
-    ApexSessionManager&& other) noexcept {
-  sessions_base_dir_ = std::move(other.sessions_base_dir_);
-  return *this;
-}
-
 std::unique_ptr<ApexSessionManager> ApexSessionManager::Create(
     std::string sessions_base_dir) {
   return std::unique_ptr<ApexSessionManager>(
@@ -293,18 +272,6 @@ std::vector<ApexSession> ApexSessionManager::GetSessionsInState(
                  sessions.end());
 
   return sessions;
-}
-
-Result<void> ApexSessionManager::MigrateFromOldSessionsDir(
-    const std::string& old_sessions_base_dir) {
-  if (old_sessions_base_dir == sessions_base_dir_) {
-    LOG(INFO)
-        << old_sessions_base_dir
-        << " is the same as the current session directory. Nothing to migrate";
-    return {};
-  }
-
-  return MoveDir(old_sessions_base_dir, sessions_base_dir_);
 }
 
 bool ApexSessionManager::HasActiveSession() {
