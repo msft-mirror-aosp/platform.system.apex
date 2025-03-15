@@ -82,6 +82,7 @@
 #include "apexd_brand_new_verifier.h"
 #include "apexd_checkpoint.h"
 #include "apexd_dm.h"
+#include "apexd_image_manager.h"
 #include "apexd_lifecycle.h"
 #include "apexd_loop.h"
 #include "apexd_metrics.h"
@@ -511,6 +512,8 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     return ErrnoError() << "Mounting failed for package " << full_path;
   }
 }
+
+bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
 
 }  // namespace
 
@@ -1426,8 +1429,19 @@ Result<void> AbortStagedSession(int session_id) REQUIRES(!gInstallLock) {
 
   switch (session->GetState()) {
     case SessionState::VERIFIED:
-      [[clang::fallthrough]];
+      [[fallthrough]];
     case SessionState::STAGED:
+      if (IsMountBeforeDataEnabled()) {
+        for (const auto& image : session->GetApexImages()) {
+          auto result = GetImageManager()->DeleteImage(image);
+          if (!result.ok()) {
+            // There's not much we can do with error. Let's log it. On boot
+            // completion, dangling images (not referenced by any) will be
+            // deleted anyway.
+            LOG(ERROR) << result.error();
+          }
+        }
+      }
       return session->DeleteSession();
     default:
       return Error() << "Session " << *session << " can't be aborted";
@@ -2832,6 +2846,11 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   auto result = OR_RETURN(VerifyPackagesStagedInstall(ret));
   event.AddHals(result.apex_hals);
 
+  std::vector<std::string> apex_images;
+  if (IsMountBeforeDataEnabled()) {
+    apex_images = OR_RETURN(GetImageManager()->PinApexFiles(ret));
+  }
+
   // The incoming session is now verified by apexd. From now on, apexd keeps its
   // own session data. The session should be marked as "ready" so that it
   // becomes STAGED. On next reboot, STAGED sessions become ACTIVATED, which
@@ -2862,6 +2881,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     session->AddApexName(apex_file.GetManifest().name());
   }
   session->SetApexFileHashes(event.GetFileHashes());
+  session->SetApexImages(apex_images);
   Result<void> commit_status =
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {

@@ -14,16 +14,8 @@
  * limitations under the License.
  */
 
-#include <filesystem>
-#include <fstream>
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-#include <linux/loop.h>
-#include <sched.h>
-#include <sys/mount.h>
-
 #include <android-base/errors.h>
+#include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/macros.h>
 #include <android-base/result.h>
@@ -34,15 +26,22 @@
 #include <android/apex/ApexSessionInfo.h>
 #include <binder/IServiceManager.h>
 #include <fstab/fstab.h>
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include <libdm/dm.h>
+#include <linux/loop.h>
+#include <sched.h>
 #include <selinux/android.h>
+#include <sys/mount.h>
+
+#include <filesystem>
+#include <fstream>
 
 #include "apex_file.h"
 #include "apexd_loop.h"
 #include "apexd_utils.h"
-#include "session_state.pb.h"
-
 #include "com_android_apex.h"
+#include "session_state.pb.h"
 
 namespace android {
 namespace apex {
@@ -444,6 +443,12 @@ inline android::base::Result<struct loop_info64> GetLoopDeviceStatus(
     return ErrnoErrorf("Failed to get loop device status '{}'", loop_device);
   }
   return loop_info;
+}
+
+inline std::string GetTestDataDir() { return base::GetExecutableDirectory(); }
+
+inline std::string GetTestFile(const std::string& name) {
+  return GetTestDataDir() + "/" + name;
 }
 
 }  // namespace apex

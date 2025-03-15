@@ -35,15 +35,9 @@ namespace android::apex {
 
 namespace fs = std::filesystem;
 
-using android::base::GetExecutableDirectory;
 using android::base::testing::Ok;
 using android::base::testing::WithMessage;
 using ::testing::Not;
-
-static std::string GetTestDataDir() { return GetExecutableDirectory(); }
-static std::string GetTestFile(const std::string& name) {
-  return GetTestDataDir() + "/" + name;
-}
 
 TEST(BrandNewApexVerifierTest, SucceedPublicKeyMatch) {
   ApexFileRepository::EnableBrandNewApex();

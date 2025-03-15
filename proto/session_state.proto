@@ -64,4 +64,7 @@ message SessionState {
 
   // The list of sha256 hashes of apexes within this session.
   repeated string apex_file_hashes = 11;
+
+  // The name list of apex images within this session.
+  repeated string apex_images = 12;
 }

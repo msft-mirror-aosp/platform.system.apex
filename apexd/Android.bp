@@ -80,6 +80,7 @@ cc_defaults {
     name: "libapexd-deps",
     defaults: ["libapex-deps"],
     shared_libs: [
+        "libfs_mgr",
         "liblog",
         "liblogwrap",
         "libvintf",
@@ -174,6 +175,7 @@ cc_binary {
         "libprotobuf-cpp-full-ndk",
     ],
     exclude_shared_libs: [
+        "libfs_mgr",
         "libprotobuf-cpp-full",
         "libvintf",
     ],
@@ -201,6 +203,7 @@ cc_library_static {
         "apexd_brand_new_verifier.cpp",
         "apexd.cpp",
         "apexd_dm.cpp",
+        "apexd_image_manager.cpp",
         "apexd_lifecycle.cpp",
         "apexd_loop.cpp",
         "apexd_metrics.cpp",
@@ -560,6 +563,7 @@ cc_test {
         "apex_file_repository_test.cpp",
         "apex_manifest_test.cpp",
         "apexd_brand_new_verifier_test.cpp",
+        "apexd_image_manager_test.cpp",
         "apexd_test.cpp",
         "apexd_session_test.cpp",
         "apexd_utils_test.cpp",

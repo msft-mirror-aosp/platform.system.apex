@@ -45,6 +45,7 @@
 #include "apex_file_repository.h"
 #include "apex_manifest.pb.h"
 #include "apexd_checkpoint.h"
+#include "apexd_image_manager.h"
 #include "apexd_loop.h"
 #include "apexd_metrics.h"
 #include "apexd_session.h"
@@ -85,20 +86,17 @@ using ::testing::ByRef;
 using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::EndsWith;
+using ::testing::Eq;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
 using ::testing::Not;
+using ::testing::Pointwise;
 using ::testing::Property;
 using ::testing::StartsWith;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
 using ::testing::internal::CaptureStderr;
 using ::testing::internal::GetCapturedStderr;
-
-static std::string GetTestDataDir() { return GetExecutableDirectory(); }
-static std::string GetTestFile(const std::string& name) {
-  return GetTestDataDir() + "/" + name;
-}
 
 static int64_t GetMTime(const std::string& path) {
   struct stat st_buf;
@@ -179,14 +177,22 @@ class ApexdUnitTest : public ::testing::Test {
         StringPrintf("%s/metadata-staged-session-dir", td_.path);
     session_manager_ = ApexSessionManager::Create(sessions_metadata_dir_);
 
-    config_ = {kTestApexdStatusSysprop,
-               {{partition_, built_in_dir_}},
-               data_dir_.c_str(),
-               decompression_dir_.c_str(),
-               ota_reserved_dir_.c_str(),
-               staged_session_dir_.c_str(),
-               kTestVmPayloadMetadataPartitionProp,
-               kTestActiveApexSelinuxCtx};
+    metadata_images_dir_ = StringPrintf("%s/metadata-images", td_.path);
+    data_images_dir_ = StringPrintf("%s/data-images", td_.path);
+    image_manager_ =
+        ApexImageManager::Create(metadata_images_dir_, data_images_dir_);
+
+    config_ = ApexdConfig{
+        kTestApexdStatusSysprop,
+        {{partition_, built_in_dir_}},
+        data_dir_.c_str(),
+        decompression_dir_.c_str(),
+        ota_reserved_dir_.c_str(),
+        staged_session_dir_.c_str(),
+        kTestVmPayloadMetadataPartitionProp,
+        kTestActiveApexSelinuxCtx,
+        false, /*mount_before_data*/
+    };
   }
 
   const std::string& GetBuiltInDir() { return built_in_dir_; }
@@ -290,6 +296,8 @@ class ApexdUnitTest : public ::testing::Test {
     ASSERT_EQ(mkdir(ota_reserved_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(staged_session_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(sessions_metadata_dir_.c_str(), 0755), 0);
+    ASSERT_EQ(mkdir(metadata_images_dir_.c_str(), 0755), 0);
+    ASSERT_EQ(mkdir(data_images_dir_.c_str(), 0755), 0);
 
     // We don't really need for all the test cases, but until we refactor apexd
     // to use dependency injection instead of this SetConfig approach, it is not
@@ -297,6 +305,8 @@ class ApexdUnitTest : public ::testing::Test {
     // initialize it for all of them.
     InitializeSessionManager(GetSessionManager());
     DeleteDirContent(GetSessionsDir());
+
+    InitializeImageManager(image_manager_.get());
   }
 
   void TearDown() override { DeleteDirContent(GetSessionsDir()); }
@@ -314,6 +324,10 @@ class ApexdUnitTest : public ::testing::Test {
   std::string staged_session_dir_;
   std::string sessions_metadata_dir_;
   std::unique_ptr<ApexSessionManager> session_manager_;
+
+  std::string metadata_images_dir_;
+  std::string data_images_dir_;
+  std::unique_ptr<ApexImageManager> image_manager_;
 
   ApexdConfig config_;
 };
@@ -5253,6 +5267,34 @@ TEST_F(SubmitStagedSessionTest, SuccessWithMultiSession) {
   auto session = GetSessionManager()->GetSession(parent_session_id);
   ASSERT_THAT(session->GetChildSessionIds(),
               ElementsAre(child_session1_id, child_session2_id));
+}
+
+// Temporary test cases until the feature is fully enabled/implemented
+class MountBeforeDataTest : public SubmitStagedSessionTest {
+ protected:
+  void SetUp() override {
+    config_.mount_before_data = true;
+    SubmitStagedSessionTest::SetUp();
+  }
+};
+
+TEST_F(MountBeforeDataTest, StagingCreatesBackingImages) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+
+  auto session = GetSessionManager()->GetSession(session_id);
+  ASSERT_THAT(session->GetApexImages(),
+              Pointwise(Eq(), image_manager_->GetAllImages()));
+}
+
+TEST_F(MountBeforeDataTest, AbortSessionRemovesBackingImages) {
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(AbortStagedSession(session_id), Ok());
+
+  ASSERT_THAT(image_manager_->GetAllImages(), IsEmpty());
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
