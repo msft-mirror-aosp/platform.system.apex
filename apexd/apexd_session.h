@@ -53,6 +53,7 @@ class ApexSession {
   const google::protobuf::RepeatedPtrField<std::string> GetApexNames() const;
   const google::protobuf::RepeatedPtrField<std::string> GetApexFileHashes()
       const;
+  const google::protobuf::RepeatedPtrField<std::string> GetApexImages() const;
   const std::string& GetSessionDir() const;
 
   void SetChildSessionIds(const std::vector<int>& child_session_ids);
@@ -64,6 +65,7 @@ class ApexSession {
   void SetErrorMessage(const std::string& error_message);
   void AddApexName(const std::string& apex_name);
   void SetApexFileHashes(const std::vector<std::string>& hashes);
+  void SetApexImages(const std::vector<std::string>& images);
 
   android::base::Result<void> UpdateStateAndCommit(
       const ::apex::proto::SessionState::State& state);

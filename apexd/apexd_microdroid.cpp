@@ -37,6 +37,7 @@ static const android::apex::ApexdConfig kMicrodroidConfig = {
     nullptr, /* staged_session_dir */
     android::apex::kVmPayloadMetadataPartitionProp,
     nullptr, /* active_apex_selinux_ctx */
+    false,   /* mount_before_data */
 };
 
 int main(int /*argc*/, char** argv) {

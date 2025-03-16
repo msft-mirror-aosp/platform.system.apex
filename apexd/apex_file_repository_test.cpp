@@ -48,18 +48,12 @@ using namespace std::literals;
 namespace fs = std::filesystem;
 
 using android::apex::testing::ApexFileEq;
-using android::base::GetExecutableDirectory;
 using android::base::StringPrintf;
 using android::base::testing::Ok;
 using ::testing::ByRef;
 using ::testing::ContainerEq;
 using ::testing::Not;
 using ::testing::UnorderedElementsAre;
-
-static std::string GetTestDataDir() { return GetExecutableDirectory(); }
-static std::string GetTestFile(const std::string& name) {
-  return GetTestDataDir() + "/" + name;
-}
 
 namespace {
 // Copies the compressed apex to |built_in_dir| and decompresses it to

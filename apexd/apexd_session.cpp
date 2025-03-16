@@ -122,6 +122,11 @@ ApexSession::GetApexFileHashes() const {
   return state_.apex_file_hashes();
 }
 
+const google::protobuf::RepeatedPtrField<std::string>
+ApexSession::GetApexImages() const {
+  return state_.apex_images();
+}
+
 const std::string& ApexSession::GetSessionDir() const { return session_dir_; }
 
 void ApexSession::SetBuildFingerprint(const std::string& fingerprint) {
@@ -155,6 +160,10 @@ void ApexSession::AddApexName(const std::string& apex_name) {
 
 void ApexSession::SetApexFileHashes(const std::vector<std::string>& hashes) {
   *(state_.mutable_apex_file_hashes()) = {hashes.begin(), hashes.end()};
+}
+
+void ApexSession::SetApexImages(const std::vector<std::string>& images) {
+  *(state_.mutable_apex_images()) = {images.begin(), images.end()};
 }
 
 Result<void> ApexSession::UpdateStateAndCommit(

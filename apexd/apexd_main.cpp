@@ -27,6 +27,7 @@
 #include "apex_file_repository.h"
 #include "apexd.h"
 #include "apexd_checkpoint_vold.h"
+#include "apexd_image_manager.h"
 #include "apexd_lifecycle.h"
 #include "apexd_metrics_stats.h"
 #include "apexservice.h"
@@ -167,6 +168,10 @@ int main(int argc, char** argv) {
   android::apex::ApexdLifecycle& lifecycle =
       android::apex::ApexdLifecycle::GetInstance();
   bool booting = lifecycle.IsBooting();
+
+  auto image_manager = android::apex::ApexImageManager::Create(
+      android::apex::kMetadataImagesDir, android::apex::kDataImagesDir);
+  android::apex::InitializeImageManager(image_manager.get());
 
   if (has_subcommand) {
     return HandleSubcommand(argc, argv);
