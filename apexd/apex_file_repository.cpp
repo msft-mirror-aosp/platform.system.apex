@@ -16,6 +16,7 @@
 
 #include "apex_file_repository.h"
 
+#include <ApexProperties.sysprop.h>
 #include <android-base/file.h>
 #include <android-base/properties.h>
 #include <android-base/result.h>
@@ -25,6 +26,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <future>
+#include <queue>
 #include <unordered_map>
 
 #include "apex_blocklist.h"
@@ -62,101 +65,167 @@ std::string GetApexSelectFilenameFromProp(
   return "";
 }
 
-Result<void> ApexFileRepository::ScanBuiltInDir(const std::string& dir,
-                                                ApexPartition partition) {
-  LOG(INFO) << "Scanning " << dir << " for pre-installed ApexFiles";
-  if (access(dir.c_str(), F_OK) != 0 && errno == ENOENT) {
-    LOG(WARNING) << dir << " does not exist. Skipping";
-    return {};
-  }
+void ApexFileRepository::StorePreInstalledApex(ApexFile&& apex_file,
+                                               ApexPartition partition) {
+  const std::string& name = apex_file.GetManifest().name();
 
-  Result<std::vector<std::string>> all_apex_files = FindFilesBySuffix(
-      dir, {kApexPackageSuffix, kCompressedApexPackageSuffix});
-  if (!all_apex_files.ok()) {
-    return all_apex_files.error();
-  }
-
-  // TODO(b/179248390): scan parallelly if possible
-  for (const auto& file : *all_apex_files) {
-    LOG(INFO) << "Found pre-installed APEX " << file;
-    Result<ApexFile> apex_file = ApexFile::Open(file);
-    if (!apex_file.ok()) {
-      return Error() << "Failed to open " << file << " : " << apex_file.error();
+  // Check if this APEX name is treated as a multi-install APEX.
+  //
+  // Note: apexd is a oneshot service which runs at boot, but can be
+  // restarted when needed (such as staging an APEX update). If a
+  // multi-install select property changes between boot and when apexd
+  // restarts, the LOG messages below will report the version that will be
+  // activated on next reboot, which may differ from the currently-active
+  // version.
+  std::string select_filename =
+      GetApexSelectFilenameFromProp(multi_install_select_prop_prefixes_, name);
+  if (!select_filename.empty()) {
+    std::string path;
+    if (!android::base::Realpath(apex_file.GetPath(), &path)) {
+      LOG(ERROR) << "Unable to resolve realpath of APEX with path "
+                 << apex_file.GetPath();
+      return;
+    }
+    if (enforce_multi_install_partition_ &&
+        partition != ApexPartition::Vendor && partition != ApexPartition::Odm) {
+      LOG(ERROR) << "Multi-install APEX " << path
+                 << " can only be preinstalled on /{odm,vendor}/apex/.";
+      return;
     }
 
-    const std::string& name = apex_file->GetManifest().name();
-
-    // Check if this APEX name is treated as a multi-install APEX.
-    //
-    // Note: apexd is a oneshot service which runs at boot, but can be restarted
-    // when needed (such as staging an APEX update). If a multi-install select
-    // property changes between boot and when apexd restarts, the LOG messages
-    // below will report the version that will be activated on next reboot,
-    // which may differ from the currently-active version.
-    std::string select_filename = GetApexSelectFilenameFromProp(
-        multi_install_select_prop_prefixes_, name);
-    if (!select_filename.empty()) {
-      std::string path;
-      if (!android::base::Realpath(apex_file->GetPath(), &path)) {
-        LOG(ERROR) << "Unable to resolve realpath of APEX with path "
-                   << apex_file->GetPath();
-        continue;
+    auto& keys = multi_install_public_keys_[name];
+    keys.insert(apex_file.GetBundledPublicKey());
+    if (keys.size() > 1) {
+      LOG(ERROR) << "Multi-install APEXes for " << name
+                 << " have different public keys.";
+      // If any versions of a multi-installed APEX differ in public key,
+      // then no version should be installed.
+      if (auto it = pre_installed_store_.find(name);
+          it != pre_installed_store_.end()) {
+        pre_installed_store_.erase(it);
+        partition_store_.erase(name);
       }
-      if (enforce_multi_install_partition_ &&
-          partition != ApexPartition::Vendor &&
-          partition != ApexPartition::Odm) {
-        LOG(ERROR) << "Multi-install APEX " << path
-                   << " can only be preinstalled on /{odm,vendor}/apex/.";
-        continue;
-      }
+      return;
+    }
 
-      auto& keys = multi_install_public_keys_[name];
-      keys.insert(apex_file->GetBundledPublicKey());
-      if (keys.size() > 1) {
-        LOG(ERROR) << "Multi-install APEXes for " << name
-                   << " have different public keys.";
-        // If any versions of a multi-installed APEX differ in public key,
-        // then no version should be installed.
-        if (auto it = pre_installed_store_.find(name);
-            it != pre_installed_store_.end()) {
-          pre_installed_store_.erase(it);
-          partition_store_.erase(name);
-        }
-        continue;
-      }
+    if (ConsumeApexPackageSuffix(android::base::Basename(path)) ==
+        select_filename) {
+      LOG(INFO) << "Found APEX at path " << path << " for multi-install APEX "
+                << name;
+      // A copy is needed because apex_file is moved here
+      const std::string apex_name = name;
+      // Add the APEX file to the store if its filename matches the
+      // property.
+      pre_installed_store_.emplace(apex_name, std::move(apex_file));
+      partition_store_.emplace(apex_name, partition);
+    } else {
+      LOG(INFO) << "Skipping APEX at path " << path
+                << " because it does not match expected multi-install"
+                << " APEX property for " << name;
+    }
 
-      if (ConsumeApexPackageSuffix(android::base::Basename(path)) ==
-          select_filename) {
-        LOG(INFO) << "Found APEX at path " << path << " for multi-install APEX "
-                  << name;
-        // Add the APEX file to the store if its filename matches the property.
-        pre_installed_store_.emplace(name, std::move(*apex_file));
-        partition_store_.emplace(name, partition);
-      } else {
-        LOG(INFO) << "Skipping APEX at path " << path
-                  << " because it does not match expected multi-install"
-                  << " APEX property for " << name;
-      }
+    return;
+  }
 
+  auto it = pre_installed_store_.find(name);
+  if (it == pre_installed_store_.end()) {
+    // A copy is needed because apex_file is moved here
+    const std::string apex_name = name;
+    pre_installed_store_.emplace(apex_name, std::move(apex_file));
+    partition_store_.emplace(apex_name, partition);
+  } else if (it->second.GetPath() != apex_file.GetPath()) {
+    LOG(FATAL) << "Found two apex packages " << it->second.GetPath() << " and "
+               << apex_file.GetPath() << " with the same module name " << name;
+  } else if (it->second.GetBundledPublicKey() !=
+             apex_file.GetBundledPublicKey()) {
+    LOG(FATAL) << "Public key of apex package " << it->second.GetPath() << " ("
+               << name << ") has unexpectedly changed";
+  }
+}
+
+Result<std::vector<ApexPath>> ApexFileRepository::CollectPreInstalledApex(
+    const std::unordered_map<ApexPartition, std::string>&
+        partition_to_prebuilt_dirs) {
+  std::vector<ApexPath> all_apex_paths;
+  for (const auto& [partition, dir] : partition_to_prebuilt_dirs) {
+    LOG(INFO) << "Scanning " << dir << " for pre-installed ApexFiles";
+    if (access(dir.c_str(), F_OK) != 0 && errno == ENOENT) {
+      LOG(WARNING) << dir << " does not exist. Skipping";
       continue;
     }
 
-    auto it = pre_installed_store_.find(name);
-    if (it == pre_installed_store_.end()) {
-      pre_installed_store_.emplace(name, std::move(*apex_file));
-      partition_store_.emplace(name, partition);
-    } else if (it->second.GetPath() != apex_file->GetPath()) {
-      LOG(FATAL) << "Found two apex packages " << it->second.GetPath()
-                 << " and " << apex_file->GetPath()
-                 << " with the same module name " << name;
-    } else if (it->second.GetBundledPublicKey() !=
-               apex_file->GetBundledPublicKey()) {
-      LOG(FATAL) << "Public key of apex package " << it->second.GetPath()
-                 << " (" << name << ") has unexpectedly changed";
+    std::vector<std::string> apex_paths = OR_RETURN(FindFilesBySuffix(
+        dir, {kApexPackageSuffix, kCompressedApexPackageSuffix}));
+    for (auto&& path : apex_paths) {
+      LOG(INFO) << "Found pre-installed APEX " << path;
+      all_apex_paths.emplace_back(std::move(path), partition);
     }
   }
-  multi_install_public_keys_.clear();
-  return {};
+  return all_apex_paths;
+}
+
+Result<std::vector<ApexFileAndPartition>> ApexFileRepository::OpenApexFiles(
+    const std::vector<ApexPath>& apex_paths) {
+  std::atomic_size_t shared_index{0};
+  size_t apex_count = apex_paths.size();
+
+  size_t worker_num =
+      android::sysprop::ApexProperties::apex_file_open_threads().value_or(0);
+  if (worker_num == 0) {
+    worker_num = apex_count;
+  } else {
+    worker_num = std::min(apex_count, worker_num);
+  }
+
+  struct IndexedApexFile {
+    ApexFileAndPartition apex_file;
+    size_t index;
+  };
+  std::vector<std::future<Result<std::vector<IndexedApexFile>>>> futures;
+  futures.reserve(worker_num);
+
+  for (size_t i = 0; i < worker_num; i++) {
+    futures.push_back(std::async(
+        std::launch::async,
+        [&shared_index, apex_paths,
+         apex_count]() -> Result<std::vector<IndexedApexFile>> {
+          std::vector<IndexedApexFile> ret;
+          size_t current_index;
+          while ((current_index = shared_index.fetch_add(
+                      1, std::memory_order_relaxed)) < apex_count) {
+            const ApexPath& apex_path = apex_paths[current_index];
+            Result<ApexFile> apex_file = ApexFile::Open(apex_path.path);
+            if (apex_file.ok()) {
+              ret.emplace_back(ApexFileAndPartition(std::move(*apex_file),
+                                                    apex_path.partition),
+                               current_index);
+            } else {
+              return Error() << "Failed to open apex file " << apex_path.path
+                             << " : " << apex_file.error();
+            }
+          }
+          return {ret};
+        }));
+  }
+
+  std::vector<std::optional<ApexFileAndPartition>> optional_apex_files;
+  optional_apex_files.resize(apex_count);
+  for (auto& future : futures) {
+    auto res = OR_RETURN(future.get());
+    for (auto&& indexed_apex_file : res) {
+      optional_apex_files[indexed_apex_file.index] =
+          std::move(indexed_apex_file.apex_file);
+    }
+  }
+
+  std::vector<ApexFileAndPartition> apex_files;
+  apex_files.reserve(apex_count);
+  for (auto&& optional_apex_file : optional_apex_files) {
+    if (optional_apex_file.has_value()) {
+      apex_files.push_back(optional_apex_file.value());
+    }
+  }
+  return apex_files;
 }
 
 ApexFileRepository& ApexFileRepository::GetInstance() {
@@ -167,11 +236,34 @@ ApexFileRepository& ApexFileRepository::GetInstance() {
 android::base::Result<void> ApexFileRepository::AddPreInstalledApex(
     const std::unordered_map<ApexPartition, std::string>&
         partition_to_prebuilt_dirs) {
-  for (const auto& [partition, dir] : partition_to_prebuilt_dirs) {
-    if (auto result = ScanBuiltInDir(dir, partition); !result.ok()) {
-      return result.error();
+  auto all_apex_paths =
+      OR_RETURN(CollectPreInstalledApex(partition_to_prebuilt_dirs));
+
+  for (const auto& apex_path : all_apex_paths) {
+    Result<ApexFile> apex_file = ApexFile::Open(apex_path.path);
+    if (!apex_file.ok()) {
+      return Error() << "Failed to open " << apex_path.path << " : "
+                     << apex_file.error();
     }
+
+    StorePreInstalledApex(std::move(*apex_file), apex_path.partition);
   }
+  multi_install_public_keys_.clear();
+  return {};
+}
+
+android::base::Result<void> ApexFileRepository::AddPreInstalledApexParallel(
+    const std::unordered_map<ApexPartition, std::string>&
+        partition_to_prebuilt_dirs) {
+  auto all_apex_paths =
+      OR_RETURN(CollectPreInstalledApex(partition_to_prebuilt_dirs));
+
+  auto apex_file_and_partition = OR_RETURN(OpenApexFiles(all_apex_paths));
+
+  for (auto&& [apex_file, partition] : apex_file_and_partition) {
+    StorePreInstalledApex(std::move(apex_file), partition);
+  }
+  multi_install_public_keys_.clear();
   return {};
 }
 
@@ -569,26 +661,13 @@ std::optional<int64_t> ApexFileRepository::GetBrandNewApexBlockedVersion(
 // Group pre-installed APEX and data APEX by name
 std::unordered_map<std::string, std::vector<ApexFileRef>>
 ApexFileRepository::AllApexFilesByName() const {
-  // Collect all apex files
-  std::vector<ApexFileRef> all_apex_files;
-  auto pre_installed_apexs = GetPreInstalledApexFiles();
-  auto data_apexs = GetDataApexFiles();
-  std::move(pre_installed_apexs.begin(), pre_installed_apexs.end(),
-            std::back_inserter(all_apex_files));
-  std::move(data_apexs.begin(), data_apexs.end(),
-            std::back_inserter(all_apex_files));
-
   // Group them by name
   std::unordered_map<std::string, std::vector<ApexFileRef>> result;
-  for (const auto& apex_file_ref : all_apex_files) {
-    const ApexFile& apex_file = apex_file_ref.get();
-    const std::string& package_name = apex_file.GetManifest().name();
-    if (result.find(package_name) == result.end()) {
-      result[package_name] = std::vector<ApexFileRef>{};
+  for (const auto* store : {&pre_installed_store_, &data_store_}) {
+    for (const auto& [name, apex] : *store) {
+      result[name].emplace_back(std::cref(apex));
     }
-    result[package_name].emplace_back(apex_file_ref);
   }
-
   return result;
 }
 

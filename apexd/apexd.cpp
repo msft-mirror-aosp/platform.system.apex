@@ -119,8 +119,11 @@ namespace android {
 namespace apex {
 
 using MountedApexData = MountedApexDatabase::MountedApexData;
-Result<std::vector<ApexFile>> OpenSessionApexFiles(
+Result<std::vector<ApexFile>> OpenApexFilesInSessionDirs(
     int session_id, const std::vector<int>& child_session_ids);
+
+Result<std::vector<std::string>> StagePackagesImpl(
+    const std::vector<std::string>& tmp_paths);
 
 namespace {
 
@@ -276,8 +279,8 @@ std::unique_ptr<DmTable> CreateVerityTable(const ApexVerityData& verity_data,
  * kActiveApexPackagesDataDir
  */
 Result<void> RemovePreviouslyActiveApexFiles(
-    const std::unordered_set<std::string>& affected_packages,
-    const std::unordered_set<std::string>& files_to_keep) {
+    const std::vector<std::string>& affected_packages,
+    const std::vector<std::string>& files_to_keep) {
   auto all_active_apex_files =
       FindFilesBySuffix(gConfig->active_apex_data_dir, {kApexPackageSuffix});
 
@@ -286,20 +289,19 @@ Result<void> RemovePreviouslyActiveApexFiles(
   }
 
   for (const std::string& path : *all_active_apex_files) {
+    if (std::ranges::contains(files_to_keep, path)) {
+      // This is a path that was staged and should be kept.
+      continue;
+    }
+
     Result<ApexFile> apex_file = ApexFile::Open(path);
     if (!apex_file.ok()) {
       return apex_file.error();
     }
-
     const std::string& package_name = apex_file->GetManifest().name();
-    if (affected_packages.find(package_name) == affected_packages.end()) {
+    if (!std::ranges::contains(affected_packages, package_name)) {
       // This apex belongs to a package that wasn't part of this stage sessions,
       // hence it should be kept.
-      continue;
-    }
-
-    if (files_to_keep.find(apex_file->GetPath()) != files_to_keep.end()) {
-      // This is a path that was staged and should be kept.
       continue;
     }
 
@@ -754,7 +756,7 @@ Result<VerificationResult> VerifyPackagesStagedInstall(
     }
     auto session_id = session.GetId();
     auto child_session_ids = session.GetChildSessionIds();
-    auto staged_apex_files = OpenSessionApexFiles(
+    auto staged_apex_files = OpenApexFilesInSessionDirs(
         session_id, {child_session_ids.begin(), child_session_ids.end()});
     if (staged_apex_files.ok()) {
       std::ranges::move(*staged_apex_files, std::back_inserter(all_apex_files));
@@ -1242,7 +1244,7 @@ Result<void> DeactivatePackage(const std::string& full_path) {
                         /* deferred= */ false, /* detach_mount_point= */ false);
 }
 
-Result<std::vector<ApexFile>> OpenSessionApexFiles(
+Result<std::vector<std::string>> ScanApexFilesInSessionDirs(
     int session_id, const std::vector<int>& child_session_ids) {
   std::vector<int> ids_to_scan;
   if (!child_session_ids.empty()) {
@@ -1268,7 +1270,20 @@ Result<std::vector<ApexFile>> OpenSessionApexFiles(
     std::string& apex_file_path = (*scan)[0];
     apex_file_paths.push_back(std::move(apex_file_path));
   }
+  return apex_file_paths;
+}
 
+Result<std::vector<std::string>> ScanSessionApexFiles(
+    const ApexSession& session) {
+  auto child_session_ids =
+      std::vector{std::from_range, session.GetChildSessionIds()};
+  return ScanApexFilesInSessionDirs(session.GetId(), child_session_ids);
+}
+
+Result<std::vector<ApexFile>> OpenApexFilesInSessionDirs(
+    int session_id, const std::vector<int>& child_session_ids) {
+  auto apex_file_paths =
+      OR_RETURN(ScanApexFilesInSessionDirs(session_id, child_session_ids));
   return OpenApexFiles(apex_file_paths);
 }
 
@@ -1280,7 +1295,7 @@ Result<std::vector<ApexFile>> GetStagedApexFiles(
     return Error() << "Session " << session_id << " is not in state STAGED";
   }
 
-  return OpenSessionApexFiles(session_id, child_session_ids);
+  return OpenApexFilesInSessionDirs(session_id, child_session_ids);
 }
 
 Result<ClassPath> MountAndDeriveClassPath(
@@ -1324,21 +1339,7 @@ std::vector<ApexFile> CalculateInactivePackages(
 }
 
 Result<void> EmitApexInfoList(bool is_bootstrap) {
-  // Apexd runs both in "bootstrap" and "default" mount namespace.
-  // To expose /apex/apex-info-list.xml separately in each mount namespaces,
-  // we write /apex/.<namespace>-apex-info-list .xml file first and then
-  // bind mount it to the canonical file (/apex/apex-info-list.xml).
-  const std::string file_name =
-      fmt::format("{}/.{}-{}", kApexRoot,
-                  is_bootstrap ? "bootstrap" : "default", kApexInfoList);
-
-  unique_fd fd(TEMP_FAILURE_RETRY(
-      open(file_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)));
-  if (fd.get() == -1) {
-    return ErrnoErrorf("Can't open {}", file_name);
-  }
-
-  const std::vector<ApexFile> active(GetActivePackages());
+  std::vector<ApexFile> active{GetActivePackages()};
 
   std::vector<ApexFile> inactive;
   // we skip for non-activated built-in apexes in bootstrap mode
@@ -1350,23 +1351,17 @@ Result<void> EmitApexInfoList(bool is_bootstrap) {
   std::stringstream xml;
   CollectApexInfoList(xml, active, inactive);
 
+  unique_fd fd(TEMP_FAILURE_RETRY(
+      open(kApexInfoList, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)));
+  if (fd.get() == -1) {
+    return ErrnoErrorf("Can't open {}", kApexInfoList);
+  }
   if (!android::base::WriteStringToFd(xml.str(), fd)) {
-    return ErrnoErrorf("Can't write to {}", file_name);
+    return ErrnoErrorf("Can't write to {}", kApexInfoList);
   }
 
   fd.reset();
-
-  const std::string mount_point =
-      fmt::format("{}/{}", kApexRoot, kApexInfoList);
-  if (access(mount_point.c_str(), F_OK) != 0) {
-    close(open(mount_point.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
-               0644));
-  }
-  if (mount(file_name.c_str(), mount_point.c_str(), nullptr, MS_BIND,
-            nullptr) == -1) {
-    return ErrnoErrorf("Can't bind mount {} to {}", file_name, mount_point);
-  }
-  return RestoreconPath(file_name);
+  return RestoreconPath(kApexInfoList);
 }
 
 namespace {
@@ -1933,64 +1928,18 @@ void ActivateStagedSessions() {
       continue;
     }
 
-    std::vector<std::string> dirs_to_scan =
-        session.GetStagedApexDirs(gConfig->staged_session_dir);
-
-    std::vector<std::string> apexes;
-    bool scan_successful = true;
-    for (const auto& dir_to_scan : dirs_to_scan) {
-      Result<std::vector<std::string>> scan =
-          FindFilesBySuffix(dir_to_scan, {kApexPackageSuffix});
-      if (!scan.ok()) {
-        LOG(WARNING) << scan.error();
-        session.SetErrorMessage(scan.error().message());
-        scan_successful = false;
-        break;
-      }
-
-      if (scan->size() > 1) {
-        std::string error_message = StringPrintf(
-            "More than one APEX package found in the same session directory %s "
-            ", skipping activation",
-            dir_to_scan.c_str());
-        LOG(WARNING) << error_message;
-        session.SetErrorMessage(error_message);
-        scan_successful = false;
-        break;
-      }
-
-      if (scan->empty()) {
-        std::string error_message = StringPrintf(
-            "No APEX packages found while scanning %s session id: %d.",
-            dir_to_scan.c_str(), session_id);
-        LOG(WARNING) << error_message;
-        session.SetErrorMessage(error_message);
-        scan_successful = false;
-        break;
-      }
-      apexes.push_back(std::move((*scan)[0]));
-    }
-
-    if (!scan_successful) {
+    auto apexes = ScanSessionApexFiles(session);
+    if (!apexes.ok()) {
+      LOG(WARNING) << apexes.error();
+      session.SetErrorMessage(apexes.error().message());
       continue;
     }
 
-    std::vector<std::string> staged_apex_names;
-    for (const auto& apex : apexes) {
-      // TODO(b/158470836): Avoid opening ApexFile repeatedly.
-      Result<ApexFile> apex_file = ApexFile::Open(apex);
-      if (!apex_file.ok()) {
-        LOG(ERROR) << "Cannot open apex file during staging: " << apex;
-        continue;
-      }
-      staged_apex_names.push_back(apex_file->GetManifest().name());
-    }
-
-    const Result<void> result = StagePackages(apexes);
-    if (!result.ok()) {
-      std::string error_message = StringPrintf(
-          "Activation failed for packages %s : %s", Join(apexes, ',').c_str(),
-          result.error().message().c_str());
+    auto packages = StagePackagesImpl(*apexes);
+    if (!packages.ok()) {
+      std::string error_message =
+          std::format("Activation failed for packages {} : {}", *apexes,
+                      packages.error().message());
       LOG(ERROR) << error_message;
       session.SetErrorMessage(error_message);
       continue;
@@ -1999,9 +1948,7 @@ void ActivateStagedSessions() {
     // Session was OK, release scopeguard.
     scope_guard.Disable();
 
-    for (const std::string& apex : staged_apex_names) {
-      gChangedActiveApexes.insert(apex);
-    }
+    gChangedActiveApexes.insert_range(*packages);
 
     auto st = session.UpdateStateAndCommit(SessionState::ACTIVATED);
     if (!st.ok()) {
@@ -2020,9 +1967,10 @@ std::string StageDestPath(const ApexFile& apex_file) {
 
 }  // namespace
 
-Result<void> StagePackagesImpl(const std::vector<std::string>& tmp_paths) {
+Result<std::vector<std::string>> StagePackagesImpl(
+    const std::vector<std::string>& tmp_paths) {
   if (tmp_paths.empty()) {
-    return Errorf("Empty set of inputs");
+    return Error() << "Empty set of inputs";
   }
   LOG(DEBUG) << "StagePackagesImpl() for " << Join(tmp_paths, ',');
 
@@ -2055,7 +2003,7 @@ Result<void> StagePackagesImpl(const std::vector<std::string>& tmp_paths) {
   // 2) Now stage all of them.
 
   // Ensure the APEX gets removed on failure.
-  std::unordered_set<std::string> staged_files;
+  std::vector<std::string> staged_files;
   auto deleter = [&staged_files]() {
     for (const std::string& staged_path : staged_files) {
       if (TEMP_FAILURE_RETRY(unlink(staged_path.c_str())) != 0) {
@@ -2065,7 +2013,7 @@ Result<void> StagePackagesImpl(const std::vector<std::string>& tmp_paths) {
   };
   auto scope_guard = android::base::make_scope_guard(deleter);
 
-  std::unordered_set<std::string> staged_packages;
+  std::vector<std::string> staged_packages;
   for (const ApexFile& apex_file : *apex_files) {
     // move apex to /data/apex/active.
     std::string dest_path = StageDestPath(apex_file);
@@ -2080,8 +2028,8 @@ Result<void> StagePackagesImpl(const std::vector<std::string>& tmp_paths) {
       return ErrnoError() << "Unable to link " << apex_file.GetPath() << " to "
                           << dest_path;
     }
-    staged_files.insert(dest_path);
-    staged_packages.insert(apex_file.GetManifest().name());
+    staged_files.push_back(dest_path);
+    staged_packages.push_back(apex_file.GetManifest().name());
 
     LOG(DEBUG) << "Success linking " << apex_file.GetPath() << " to "
                << dest_path;
@@ -2089,15 +2037,14 @@ Result<void> StagePackagesImpl(const std::vector<std::string>& tmp_paths) {
 
   scope_guard.Disable();  // Accept the state.
 
-  return RemovePreviouslyActiveApexFiles(staged_packages, staged_files);
+  OR_RETURN(RemovePreviouslyActiveApexFiles(staged_packages, staged_files));
+
+  return staged_packages;
 }
 
 Result<void> StagePackages(const std::vector<std::string>& tmp_paths) {
-  Result<void> ret = StagePackagesImpl(tmp_paths);
-  if (!ret.ok()) {
-    ;  // TODO(b/366068337, Queue atoms)
-  }
-  return ret;
+  OR_RETURN(StagePackagesImpl(tmp_paths));
+  return {};
 }
 
 Result<void> UnstagePackages(const std::vector<std::string>& paths) {
@@ -2249,41 +2196,9 @@ Result<void> CreateSharedLibsApexDir() {
   return {};
 }
 
-int OnBootstrap() {
-  ATRACE_NAME("OnBootstrap");
-  auto time_started = boot_clock::now();
-
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  Result<void> status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
-  if (!status.ok()) {
-    LOG(ERROR) << "Failed to collect APEX keys : " << status.error();
-    return 1;
-  }
-
-  const auto& pre_installed_apexes = instance.GetPreInstalledApexFiles();
-  int loop_device_cnt = pre_installed_apexes.size();
-  // Find all bootstrap apexes
-  std::vector<ApexFileRef> bootstrap_apexes;
-  for (const auto& apex : pre_installed_apexes) {
-    if (IsBootstrapApex(apex.get())) {
-      LOG(INFO) << "Found bootstrap APEX " << apex.get().GetPath();
-      bootstrap_apexes.push_back(apex);
-      loop_device_cnt++;
-    }
-    if (apex.get().GetManifest().providesharedapexlibs()) {
-      LOG(INFO) << "Found sharedlibs APEX " << apex.get().GetPath();
-      // Sharedlis APEX might be mounted 2 times:
-      //   * Pre-installed sharedlibs APEX will be mounted in OnStart
-      //   * Updated sharedlibs APEX (if it exists) will be mounted in OnStart
-      //
-      // We already counted a loop device for one of these 2 mounts, need to add
-      // 1 more.
-      loop_device_cnt++;
-    }
-  }
-  LOG(INFO) << "Need to pre-allocate " << loop_device_cnt
-            << " loop devices for " << pre_installed_apexes.size()
-            << " APEX packages";
+void PrepareResources(size_t loop_device_cnt,
+                      const std::vector<std::string>& apex_names) {
+  LOG(INFO) << "Need to pre-allocate " << loop_device_cnt << " loop devices";
   if (auto res = loop::PreAllocateLoopDevices(loop_device_cnt); !res.ok()) {
     LOG(ERROR) << "Failed to pre-allocate loop devices : " << res.error();
   }
@@ -2297,18 +2212,60 @@ int OnBootstrap() {
   // optimistically creating a verity device for all of them. Once boot
   // finishes, apexd will clean up unused devices.
   // TODO(b/192241176): move to apexd_verity.{h,cpp}
-  for (const auto& apex : pre_installed_apexes) {
-    const std::string& name = apex.get().GetManifest().name();
+  for (const auto& name : apex_names) {
     if (!dm.CreatePlaceholderDevice(name)) {
       LOG(ERROR) << "Failed to create empty device " << name;
     }
   }
+}
 
-  // Now activate bootstrap apexes.
+int OnBootstrap() {
+  ATRACE_NAME("OnBootstrap");
+  auto time_started = boot_clock::now();
+
+  ApexFileRepository& instance = ApexFileRepository::GetInstance();
+  Result<void> status =
+      instance.AddPreInstalledApexParallel(gConfig->builtin_dirs);
+  if (!status.ok()) {
+    LOG(ERROR) << "Failed to collect APEX keys : " << status.error();
+    return 1;
+  }
+
+  std::vector<ApexFileRef> activation_list;
+
+  if (IsMountBeforeDataEnabled()) {
+    activation_list = SelectApexForActivation();
+  } else {
+    const auto& pre_installed_apexes = instance.GetPreInstalledApexFiles();
+    size_t loop_device_cnt = pre_installed_apexes.size();
+    std::vector<std::string> apex_names;
+    apex_names.reserve(loop_device_cnt);
+    // Find all bootstrap apexes
+    for (const auto& apex : pre_installed_apexes) {
+      apex_names.push_back(apex.get().GetManifest().name());
+      if (IsBootstrapApex(apex.get())) {
+        LOG(INFO) << "Found bootstrap APEX " << apex.get().GetPath();
+        activation_list.push_back(apex);
+        loop_device_cnt++;
+      }
+      if (apex.get().GetManifest().providesharedapexlibs()) {
+        LOG(INFO) << "Found sharedlibs APEX " << apex.get().GetPath();
+        // Sharedlis APEX might be mounted 2 times:
+        //   * Pre-installed sharedlibs APEX will be mounted in OnStart
+        //   * Updated sharedlibs APEX (if it exists) will be mounted in OnStart
+        //
+        // We already counted a loop device for one of these 2 mounts, need to
+        // add 1 more.
+        loop_device_cnt++;
+      }
+    }
+    PrepareResources(loop_device_cnt, apex_names);
+  }
+
   auto ret =
-      ActivateApexPackages(bootstrap_apexes, ActivationMode::kBootstrapMode);
+      ActivateApexPackages(activation_list, ActivationMode::kBootstrapMode);
   if (!ret.ok()) {
-    LOG(ERROR) << "Failed to activate bootstrap apex files : " << ret.error();
+    LOG(ERROR) << "Failed to activate apexes: " << ret.error();
     return 1;
   }
 
@@ -2392,14 +2349,14 @@ void InitializeDataApex() {
  * Typically, only one APEX is activated for each package, but APEX that provide
  * shared libs are exceptions. We have to activate both APEX for them.
  *
- * @param all_apex all the APEX grouped by their package name
  * @return list of ApexFile that needs to be activated
  */
-std::vector<ApexFileRef> SelectApexForActivation(
-    const std::unordered_map<std::string, std::vector<ApexFileRef>>& all_apex,
-    const ApexFileRepository& instance) {
+std::vector<ApexFileRef> SelectApexForActivation() {
   LOG(INFO) << "Selecting APEX for activation";
   std::vector<ApexFileRef> activation_list;
+  const auto& instance = ApexFileRepository::GetInstance();
+  const auto& all_apex = instance.AllApexFilesByName();
+  activation_list.reserve(all_apex.size());
   // For every package X, select which APEX to activate
   for (auto& apex_it : all_apex) {
     const std::string& package_name = apex_it.first;
@@ -2717,11 +2674,7 @@ void OnStart() {
   }
 
   // Group every ApexFile on device by name
-  const auto& instance = ApexFileRepository::GetInstance();
-  const auto& all_apex = instance.AllApexFilesByName();
-  // There can be multiple APEX packages with package name X. Determine which
-  // one to activate.
-  auto activation_list = SelectApexForActivation(all_apex, instance);
+  auto activation_list = SelectApexForActivation();
 
   // Process compressed APEX, if any
   std::vector<ApexFileRef> compressed_apex;
@@ -2840,7 +2793,8 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     }
   }
 
-  auto ret = OR_RETURN(OpenSessionApexFiles(session_id, child_session_ids));
+  auto ret =
+      OR_RETURN(OpenApexFilesInSessionDirs(session_id, child_session_ids));
   event.AddFiles(ret);
 
   auto result = OR_RETURN(VerifyPackagesStagedInstall(ret));
@@ -3290,13 +3244,7 @@ int OnStartInVmMode() {
     return 1;
   }
 
-  if (auto status = ActivateApexPackages(instance.GetPreInstalledApexFiles(),
-                                         ActivationMode::kVmMode);
-      !status.ok()) {
-    LOG(ERROR) << "Failed to activate apex packages : " << status.error();
-    return 1;
-  }
-  if (auto status = ActivateApexPackages(instance.GetDataApexFiles(),
+  if (auto status = ActivateApexPackages(SelectApexForActivation(),
                                          ActivationMode::kVmMode);
       !status.ok()) {
     LOG(ERROR) << "Failed to activate apex packages : " << status.error();
@@ -3353,8 +3301,7 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
     return 1;
   }
 
-  auto activation_list =
-      SelectApexForActivation(instance.AllApexFilesByName(), instance);
+  auto activation_list = SelectApexForActivation();
 
   // TODO(b/179497746): This is the third time we are duplicating this code
   // block. This will be easier to dedup once we start opening ApexFiles via
@@ -3393,41 +3340,8 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
     }
   }
 
-  // There are a bunch of places that are producing apex-info.xml file.
-  // We should consolidate the logic in one function and make all other places
-  // use it.
-  auto active_apexes = GetActivePackages();
-  std::vector<ApexFile> inactive_apexes = GetFactoryPackages();
-  auto new_end = std::remove_if(
-      inactive_apexes.begin(), inactive_apexes.end(),
-      [&active_apexes](const ApexFile& apex) {
-        return std::any_of(active_apexes.begin(), active_apexes.end(),
-                           [&apex](const ApexFile& active_apex) {
-                             return apex.GetPath() == active_apex.GetPath();
-                           });
-      });
-  inactive_apexes.erase(new_end, inactive_apexes.end());
-  std::stringstream xml;
-  CollectApexInfoList(xml, active_apexes, inactive_apexes);
-  std::string file_name = StringPrintf("%s/%s", kApexRoot, kApexInfoList);
-  unique_fd fd(TEMP_FAILURE_RETRY(
-      open(file_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)));
-  if (fd.get() == -1) {
-    PLOG(ERROR) << "Can't open " << file_name;
-    return 1;
-  }
-
-  if (!android::base::WriteStringToFd(xml.str(), fd)) {
-    PLOG(ERROR) << "Can't write to " << file_name;
-    return 1;
-  }
-
-  fd.reset();
-
-  if (auto status = RestoreconPath(file_name); !status.ok()) {
-    LOG(ERROR) << "Failed to restorecon " << file_name << " : "
-               << status.error();
-    return 1;
+  if (auto status = EmitApexInfoList(/*is_bootstrap*/ false); !status.ok()) {
+    LOG(ERROR) << status.error();
   }
 
   return 0;
@@ -3561,26 +3475,6 @@ Result<size_t> ComputePackageIdMinor(const ApexFile& apex) {
   }
 
   return next_minor;
-}
-
-Result<void> UpdateApexInfoList() {
-  std::vector<ApexFile> active(GetActivePackages());
-  std::vector<ApexFile> inactive = CalculateInactivePackages(active);
-
-  std::stringstream xml;
-  CollectApexInfoList(xml, active, inactive);
-
-  std::string name = StringPrintf("%s/.default-%s", kApexRoot, kApexInfoList);
-  unique_fd fd(TEMP_FAILURE_RETRY(
-      open(name.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)));
-  if (fd.get() == -1) {
-    return ErrnoError() << "Can't open " << name;
-  }
-  if (!WriteStringToFd(xml.str(), fd)) {
-    return ErrnoError() << "Failed to write to " << name;
-  }
-
-  return {};
 }
 
 // TODO(b/238820991) Handle failures
@@ -3725,7 +3619,7 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     }
   }
 
-  if (auto res = UpdateApexInfoList(); !res.ok()) {
+  if (auto res = EmitApexInfoList(/*is_bootstrap*/ false); !res.ok()) {
     LOG(ERROR) << res.error();
   }
 

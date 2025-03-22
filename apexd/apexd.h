@@ -155,9 +155,7 @@ void OnStart();
 // For every package X, there can be at most two APEX, pre-installed vs
 // installed on data. We decide which ones should be activated and return them
 // as a list
-std::vector<ApexFileRef> SelectApexForActivation(
-    const std::unordered_map<std::string, std::vector<ApexFileRef>>& all_apex,
-    const ApexFileRepository& instance);
+std::vector<ApexFileRef> SelectApexForActivation();
 std::vector<ApexFile> ProcessCompressedApex(
     const std::vector<ApexFileRef>& compressed_apex, bool is_ota_chroot);
 // Validate |apex| is same as |capex|

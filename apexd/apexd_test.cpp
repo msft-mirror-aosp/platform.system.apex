@@ -350,14 +350,7 @@ TEST_F(ApexdUnitTest, SelectApexForActivationSuccess) {
       AddDataApex("com.android.apex.test.sharedlibs_generated.v1.libvX.apex"));
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
-  const auto all_apex = instance.AllApexFilesByName();
-  // Pass a blank instance so that no apex file is considered
-  // pre-installed
-  const ApexFileRepository instance_blank;
-  auto result = SelectApexForActivation(all_apex, instance_blank);
-  ASSERT_EQ(result.size(), 6u);
-  // When passed proper instance they should get selected
-  result = SelectApexForActivation(all_apex, instance);
+  auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 3u);
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*apexd_test_file)),
                                            ApexFileEq(ByRef(*shim_v1)),
@@ -379,8 +372,7 @@ TEST_F(ApexdUnitTest, HigherVersionOfApexIsSelected) {
       ApexFile::Open(AddDataApex("com.android.apex.cts.shim.v2.apex"));
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
-  auto all_apex = instance.AllApexFilesByName();
-  auto result = SelectApexForActivation(all_apex, instance);
+  auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 2u);
 
   ASSERT_THAT(result,
@@ -402,8 +394,7 @@ TEST_F(ApexdUnitTest, DataApexGetsPriorityForSameVersions) {
   // Initialize ApexFile repo
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
-  auto all_apex = instance.AllApexFilesByName();
-  auto result = SelectApexForActivation(all_apex, instance);
+  auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 2u);
 
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*apexd_test_file)),
@@ -425,8 +416,7 @@ TEST_F(ApexdUnitTest, SharedLibsCanHaveBothVersionSelected) {
   // Initialize data APEX information
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
-  auto all_apex = instance.AllApexFilesByName();
-  auto result = SelectApexForActivation(all_apex, instance);
+  auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 2u);
 
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*shared_lib_v1)),
@@ -448,8 +438,7 @@ TEST_F(ApexdUnitTest, SharedLibsDataVersionDeletedIfLower) {
   // Initialize data APEX information
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
-  auto all_apex = instance.AllApexFilesByName();
-  auto result = SelectApexForActivation(all_apex, instance);
+  auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 1u);
 
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*shared_lib_v2))));
@@ -4012,9 +4001,7 @@ TEST_F(ApexdMountTest, OnStartInVmModeActivatesPreInstalled) {
               UnorderedElementsAre("/apex/com.android.apex.test_package",
                                    "/apex/com.android.apex.test_package@1",
                                    "/apex/com.android.apex.test_package_2",
-                                   "/apex/com.android.apex.test_package_2@1",
-                                   // Emits apex-info-list as well
-                                   "/apex/apex-info-list.xml"));
+                                   "/apex/com.android.apex.test_package_2@1"));
 
   ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "ready");
 }
@@ -4044,9 +4031,7 @@ TEST_F(ApexdMountTest, OnStartInVmModeActivatesBlockDevicesAsWell) {
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.test_package",
-                                   "/apex/com.android.apex.test_package@1",
-                                   // Emits apex-info-list as well
-                                   "/apex/apex-info-list.xml"));
+                                   "/apex/com.android.apex.test_package@1"));
 
   ASSERT_EQ(access("/apex/apex-info-list.xml", F_OK), 0);
   auto info_list =
@@ -4096,9 +4081,7 @@ TEST_F(ApexdMountTest, OnStartInVmSupportsMultipleSharedLibsApexes) {
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.test.sharedlibs@1",
-                                   "/apex/com.android.apex.test.sharedlibs@2",
-                                   // Emits apex-info-list as well
-                                   "/apex/apex-info-list.xml"));
+                                   "/apex/com.android.apex.test.sharedlibs@2"));
 }
 
 TEST_F(ApexdMountTest, OnStartInVmShouldRejectInDuplicateFactoryApexes) {
@@ -4210,8 +4193,7 @@ TEST_F(ApexActivationFailureTests, ApexFileMissingInStagingDirectory) {
 
   apex_session = GetSessionManager()->GetSession(123);
   ASSERT_RESULT_OK(apex_session);
-  ASSERT_THAT(apex_session->GetErrorMessage(),
-              HasSubstr("No APEX packages found"));
+  ASSERT_THAT(apex_session->GetErrorMessage(), HasSubstr("Found: 0"));
 }
 
 TEST_F(ApexActivationFailureTests, MultipleApexFileInStagingDirectory) {
@@ -4228,8 +4210,7 @@ TEST_F(ApexActivationFailureTests, MultipleApexFileInStagingDirectory) {
 
   apex_session = GetSessionManager()->GetSession(123);
   ASSERT_RESULT_OK(apex_session);
-  ASSERT_THAT(apex_session->GetErrorMessage(),
-              HasSubstr("More than one APEX package found"));
+  ASSERT_THAT(apex_session->GetErrorMessage(), HasSubstr("Found: 2"));
 }
 
 TEST_F(ApexActivationFailureTests, CorruptedSuperblockApexCannotBeStaged) {
@@ -5270,15 +5251,21 @@ TEST_F(SubmitStagedSessionTest, SuccessWithMultiSession) {
 }
 
 // Temporary test cases until the feature is fully enabled/implemented
-class MountBeforeDataTest : public SubmitStagedSessionTest {
+class MountBeforeDataTest : public ApexdMountTest {
  protected:
   void SetUp() override {
     config_.mount_before_data = true;
-    SubmitStagedSessionTest::SetUp();
+    ApexdMountTest::SetUp();
+
+    // preinstalled APEXes
+    AddPreInstalledApex("apex.apexd_test.apex");
+    AddPreInstalledApex("apex.apexd_test_different_app.apex");
   }
 };
 
 TEST_F(MountBeforeDataTest, StagingCreatesBackingImages) {
+  ASSERT_EQ(0, OnBootstrap());
+
   auto session_id = 42;
   PrepareStagedSession("apex.apexd_test.apex", session_id);
   ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
@@ -5289,12 +5276,24 @@ TEST_F(MountBeforeDataTest, StagingCreatesBackingImages) {
 }
 
 TEST_F(MountBeforeDataTest, AbortSessionRemovesBackingImages) {
+  ASSERT_EQ(0, OnBootstrap());
+
   auto session_id = 42;
   PrepareStagedSession("apex.apexd_test.apex", session_id);
   ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
   ASSERT_THAT(AbortStagedSession(session_id), Ok());
 
   ASSERT_THAT(image_manager_->GetAllImages(), IsEmpty());
+}
+
+TEST_F(MountBeforeDataTest, OnBootstrapActivatesAllApexes) {
+  ASSERT_EQ(0, OnBootstrap());
+
+  ASSERT_THAT(GetApexMounts(),
+              UnorderedElementsAre("/apex/com.android.apex.test_package_2"s,
+                                   "/apex/com.android.apex.test_package_2@1"s,
+                                   "/apex/com.android.apex.test_package"s,
+                                   "/apex/com.android.apex.test_package@1"s));
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {

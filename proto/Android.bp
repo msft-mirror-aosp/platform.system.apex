@@ -61,6 +61,16 @@ python_library_host {
 }
 
 python_library_host {
+    name: "apex_blocklist_proto",
+    srcs: [
+        "apex_blocklist.proto",
+    ],
+    proto: {
+        canonical_path_from_root: false,
+    },
+}
+
+python_library_host {
     name: "apex_build_info_proto",
     srcs: [
         "apex_build_info.proto",
