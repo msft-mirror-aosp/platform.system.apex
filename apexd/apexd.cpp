@@ -1163,16 +1163,11 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file,
   // We roll this into a single check.
   bool version_found_mounted = false;
   {
-    uint64_t new_version = manifest.version();
+    int64_t new_version = manifest.version();
     bool version_found_active = false;
     gMountedApexes.ForallMountedApexes(
         manifest.name(), [&](const MountedApexData& data, bool latest) {
-          Result<ApexFile> other_apex = ApexFile::Open(data.full_path);
-          if (!other_apex.ok()) {
-            return;
-          }
-          if (static_cast<uint64_t>(other_apex->GetManifest().version()) ==
-              new_version) {
+          if (data.version == new_version) {
             version_found_mounted = true;
             version_found_active = latest;
           }
