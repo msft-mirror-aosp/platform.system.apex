@@ -358,6 +358,30 @@ Result<void> VerifyMountedImage(const ApexFile& apex,
   return {};
 }
 
+Result<loop::LoopbackDeviceUniqueFd> CreateLoopForApex(const ApexFile& apex) {
+  if (!apex.GetImageOffset() || !apex.GetImageSize()) {
+    return Error() << "Cannot create mount point without image offset and size";
+  }
+  const std::string& full_path = apex.GetPath();
+  loop::LoopbackDeviceUniqueFd loopback_device;
+  for (size_t attempts = 1;; ++attempts) {
+    Result<loop::LoopbackDeviceUniqueFd> ret =
+        loop::CreateAndConfigureLoopDevice(full_path,
+                                           apex.GetImageOffset().value(),
+                                           apex.GetImageSize().value());
+    if (ret.ok()) {
+      loopback_device = std::move(*ret);
+      break;
+    }
+    if (attempts >= kLoopDeviceSetupAttempts) {
+      return Error() << "Could not create loop device for " << full_path << ": "
+                     << ret.error();
+    }
+  }
+  LOG(VERBOSE) << "Loopback device created: " << loopback_device.name;
+  return std::move(loopback_device);
+}
+
 Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                          const std::string& mount_point,
                                          const std::string& device_name,
@@ -368,6 +392,17 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     return Error() << "Cannot directly mount compressed APEX "
                    << apex.GetPath();
   }
+
+  // Steps to mount an APEX file:
+  //
+  // 1. create a mount point (directory)
+  // 2. create a block device for the payload part of the APEX
+  // 3. wrap it with a dm-verity device if the APEX is not on top of verity
+  //    device
+  // 4. mount the payload filesystm
+  // 5. verify the mount
+
+  // Step 1. Create a directory for the mount point
 
   LOG(VERBOSE) << "Creating mount point: " << mount_point;
   auto time_started = boot_clock::now();
@@ -398,25 +433,12 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
 
   const std::string& full_path = apex.GetPath();
 
-  if (!apex.GetImageOffset() || !apex.GetImageSize()) {
-    return Error() << "Cannot create mount point without image offset and size";
-  }
-  loop::LoopbackDeviceUniqueFd loopback_device;
-  for (size_t attempts = 1;; ++attempts) {
-    Result<loop::LoopbackDeviceUniqueFd> ret =
-        loop::CreateAndConfigureLoopDevice(full_path,
-                                           apex.GetImageOffset().value(),
-                                           apex.GetImageSize().value());
-    if (ret.ok()) {
-      loopback_device = std::move(*ret);
-      break;
-    }
-    if (attempts >= kLoopDeviceSetupAttempts) {
-      return Error() << "Could not create loop device for " << full_path << ": "
-                     << ret.error();
-    }
-  }
-  LOG(VERBOSE) << "Loopback device created: " << loopback_device.name;
+  // Step 2. Create a block device for the payload
+
+  loop::LoopbackDeviceUniqueFd loop = OR_RETURN(CreateLoopForApex(apex));
+  std::string block_device = loop.name;
+
+  // Step 3. Wrap the block device with dm-verity (optional)
 
   auto verity_data = apex.VerifyApexVerity(apex.GetBundledPublicKey());
   if (!verity_data.ok()) {
@@ -436,11 +458,6 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     }
   }
 
-  std::string block_device = loopback_device.name;
-  MountedApexData apex_data(apex.GetManifest().version(), loopback_device.name,
-                            apex.GetPath(), mount_point,
-                            /* device_name = */ "");
-
   // for APEXes in immutable partitions, we don't need to mount them on
   // dm-verity because they are already in the dm-verity protected partition;
   // system. However, note that we don't skip verification to ensure that APEXes
@@ -454,7 +471,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   DmDevice verity_dev;
   if (mount_on_verity) {
     auto verity_table =
-        CreateVerityTable(*verity_data, loopback_device.name,
+        CreateVerityTable(*verity_data, block_device,
                           /* restart_on_corruption = */ !verify_image);
     Result<DmDevice> verity_dev_res =
         CreateDmDevice(device_name, *verity_table, reuse_device);
@@ -463,23 +480,19 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                      << ": " << verity_dev_res.error();
     }
     verity_dev = std::move(*verity_dev_res);
-    apex_data.device_name = device_name;
-    block_device = verity_dev.GetDevPath();
+    OR_RETURN(loop::ConfigureReadAhead(verity_dev.GetDevPath()));
 
-    Result<void> read_ahead_status =
-        loop::ConfigureReadAhead(verity_dev.GetDevPath());
-    if (!read_ahead_status.ok()) {
-      return read_ahead_status.error();
+    // TODO(b/158467418): consider moving this inside
+    // RunVerifyFnInsideTempMount.
+    if (verify_image) {
+      OR_RETURN(ReadVerityDevice(verity_dev.GetDevPath(),
+                                 (*verity_data).desc->image_size));
     }
+
+    block_device = verity_dev.GetDevPath();
   }
-  // TODO(b/158467418): consider moving this inside RunVerifyFnInsideTempMount.
-  if (mount_on_verity && verify_image) {
-    Result<void> verity_status =
-        ReadVerityDevice(block_device, (*verity_data).desc->image_size);
-    if (!verity_status.ok()) {
-      return verity_status.error();
-    }
-  }
+
+  // Step 4. Mount the payload filesystem at the mount point
 
   uint32_t mount_flags = MS_NOATIME | MS_NODEV | MS_DIRSYNC | MS_RDONLY;
   if (apex.GetManifest().nocode()) {
@@ -490,29 +503,35 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     return Error() << "Cannot mount package without FsType";
   }
   if (mount(block_device.c_str(), mount_point.c_str(),
-            apex.GetFsType().value().c_str(), mount_flags, nullptr) == 0) {
-    auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            boot_clock::now() - time_started)
-                            .count();
-    LOG(INFO) << "Successfully mounted package " << full_path << " on "
-              << mount_point << " duration=" << time_elapsed;
-    auto status = VerifyMountedImage(apex, mount_point);
-    if (!status.ok()) {
-      if (umount2(mount_point.c_str(), UMOUNT_NOFOLLOW) != 0) {
-        PLOG(ERROR) << "Failed to umount " << mount_point;
-      }
-      return Error() << "Failed to verify " << full_path << ": "
-                     << status.error();
-    }
-    // Time to accept the temporaries as good.
-    verity_dev.Release();
-    loopback_device.CloseGood();
-
-    scope_guard.Disable();  // Accept the mount.
-    return apex_data;
-  } else {
+            apex.GetFsType().value().c_str(), mount_flags, nullptr) != 0) {
     return ErrnoError() << "Mounting failed for package " << full_path;
   }
+
+  // Step 5. After mounting, verify the mounted image
+
+  auto status = VerifyMountedImage(apex, mount_point);
+  if (!status.ok()) {
+    if (umount2(mount_point.c_str(), UMOUNT_NOFOLLOW) != 0) {
+      PLOG(ERROR) << "Failed to umount " << mount_point;
+    }
+    return Error() << "Failed to verify " << full_path << ": "
+                   << status.error();
+  }
+
+  auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          boot_clock::now() - time_started)
+                          .count();
+  LOG(INFO) << "Successfully mounted package " << full_path << " on "
+            << mount_point << " duration=" << time_elapsed;
+
+  MountedApexData apex_data(apex.GetManifest().version(), loop.name,
+                            apex.GetPath(), mount_point, verity_dev.GetName());
+
+  // Time to accept the temporaries as good.
+  verity_dev.Release();
+  loop.CloseGood();
+  scope_guard.Disable();
+  return apex_data;
 }
 
 bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
