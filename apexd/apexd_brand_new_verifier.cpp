@@ -51,7 +51,8 @@ Result<ApexPartition> VerifyBrandNewPackageAgainstPreinstalled(
   return partition.value();
 }
 
-Result<void> VerifyBrandNewPackageAgainstActive(const ApexFile& apex) {
+Result<void> VerifyBrandNewPackageAgainstActive(const ApexFile& apex,
+                                                const MountedApexDatabase& db) {
   CHECK(ApexFileRepository::IsBrandNewApexEnabled())
       << "Brand-new APEX must be enabled in order to do verification.";
 
@@ -61,10 +62,12 @@ Result<void> VerifyBrandNewPackageAgainstActive(const ApexFile& apex) {
   if (file_repository.HasPreInstalledVersion(name)) {
     return {};
   }
-
-  if (file_repository.HasDataVersion(name)) {
-    auto existing_package = file_repository.GetDataApex(name).get();
-    if (apex.GetBundledPublicKey() != existing_package.GetBundledPublicKey()) {
+  // This is a brand-new apex being staged. It should have the same public key
+  // as any currently active version.
+  auto active = db.GetLatestMountedApex(name);
+  if (active) {
+    auto active_apex_file = OR_RETURN(ApexFile::Open(active->full_path));
+    if (apex.GetBundledPublicKey() != active_apex_file.GetBundledPublicKey()) {
       return Error()
              << "Brand-new APEX public key doesn't match existing active APEX: "
              << name;

@@ -732,12 +732,14 @@ Result<VerificationResult> VerifyPackagesStagedInstall(
     const std::vector<ApexFile>& apex_files) {
   for (const auto& apex_file : apex_files) {
     OR_RETURN(VerifyPackageBoot(apex_file));
+  }
 
-    // Extra verification for brand-new APEX. The case that brand-new APEX is
-    // not enabled when there is install request for brand-new APEX is already
-    // covered in |VerifyPackageBoot|.
-    if (ApexFileRepository::IsBrandNewApexEnabled()) {
-      OR_RETURN(VerifyBrandNewPackageAgainstActive(apex_file));
+  // Extra verification for brand-new APEX. The case that brand-new APEX is
+  // not enabled when there is install request for brand-new APEX is already
+  // covered in |VerifyPackageBoot|.
+  if (ApexFileRepository::IsBrandNewApexEnabled()) {
+    for (const auto& apex_file : apex_files) {
+      OR_RETURN(VerifyBrandNewPackageAgainstActive(apex_file, gMountedApexes));
     }
   }
 
