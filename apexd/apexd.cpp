@@ -382,6 +382,28 @@ Result<loop::LoopbackDeviceUniqueFd> CreateLoopForApex(const ApexFile& apex) {
   return std::move(loopback_device);
 }
 
+bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
+
+Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex,
+                                          const std::string& device_name) {
+  if (!apex.GetImageOffset() || !apex.GetImageSize()) {
+    return Error() << "Cannot create mount point without image offset and size";
+  }
+  // TODO(b/405904883) measure the IO performance and reduce # of layers if
+  // necessary
+  DmTable table;
+  constexpr auto kBytesInSector = 512;
+  table.Emplace<dm::DmTargetLinear>(0, *apex.GetImageSize() / kBytesInSector,
+                                    apex.GetPath(),
+                                    *apex.GetImageOffset() / kBytesInSector);
+  table.set_readonly(true);
+  auto dev =
+      OR_RETURN(CreateDmDevice(device_name, table, /* reuse device */ false));
+
+  OR_RETURN(loop::ConfigureReadAhead(dev.GetDevPath()));
+  return std::move(dev);
+}
+
 Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                          const std::string& mount_point,
                                          const std::string& device_name,
@@ -435,8 +457,18 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
 
   // Step 2. Create a block device for the payload
 
-  loop::LoopbackDeviceUniqueFd loop = OR_RETURN(CreateLoopForApex(apex));
-  std::string block_device = loop.name;
+  std::string block_device;
+  loop::LoopbackDeviceUniqueFd loop;
+  DmDevice linear_dev;
+
+  if (IsMountBeforeDataEnabled() && GetImageManager()->IsPinnedApex(apex)) {
+    linear_dev =
+        OR_RETURN(CreateDmLinearForPayload(apex, device_name + ".payload"));
+    block_device = linear_dev.GetDevPath();
+  } else {
+    loop = OR_RETURN(CreateLoopForApex(apex));
+    block_device = loop.name;
+  }
 
   // Step 3. Wrap the block device with dm-verity (optional)
 
@@ -525,16 +557,16 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
             << mount_point << " duration=" << time_elapsed;
 
   MountedApexData apex_data(apex.GetManifest().version(), loop.name,
-                            apex.GetPath(), mount_point, verity_dev.GetName());
+                            apex.GetPath(), mount_point, verity_dev.GetName(),
+                            linear_dev.GetName());
 
   // Time to accept the temporaries as good.
+  linear_dev.Release();
   verity_dev.Release();
   loop.CloseGood();
   scope_guard.Disable();
   return apex_data;
 }
-
-bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
 
 }  // namespace
 
@@ -553,12 +585,12 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
     }
   }
 
-  // Try to free up the device-mapper device.
-  if (!data.device_name.empty()) {
-    const auto& result = DeleteDmDevice(data.device_name, deferred);
-    if (!result.ok()) {
-      return result;
-    }
+  // Try to free up the device-mapper devices.
+  if (!data.verity_name.empty()) {
+    OR_RETURN(DeleteDmDevice(data.verity_name, deferred));
+  }
+  if (!data.linear_name.empty()) {
+    OR_RETURN(DeleteDmDevice(data.linear_name, deferred));
   }
 
   // Try to free up the loop device.

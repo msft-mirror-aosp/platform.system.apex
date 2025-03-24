@@ -87,9 +87,11 @@ using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::EndsWith;
 using ::testing::Eq;
+using ::testing::Field;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
 using ::testing::Not;
+using ::testing::Optional;
 using ::testing::Pointwise;
 using ::testing::Property;
 using ::testing::StartsWith;
@@ -640,7 +642,7 @@ TEST_F(ApexdUnitTest,
   {
     MountedApexDatabase db;
     db.AddMountedApex("com.android.apex.test_package", 1, "", preinstalled_path,
-                      "mount_point", "device_name");
+                      "mount_point", "device_name", "");
     bool result = ShouldAllocateSpaceForDecompression(
         "com.android.apex.test_package", 1, instance, db);
     ASSERT_TRUE(result);
@@ -653,7 +655,7 @@ TEST_F(ApexdUnitTest,
   {
     MountedApexDatabase db;
     db.AddMountedApex("com.android.apex.test_package", 2, "", data_path,
-                      "mount_point", "device_name");
+                      "mount_point", "device_name", "");
     bool result = ShouldAllocateSpaceForDecompression(
         "com.android.apex.test_package", 3, instance, db);
     ASSERT_TRUE(result);
@@ -663,7 +665,7 @@ TEST_F(ApexdUnitTest,
   {
     MountedApexDatabase db;
     db.AddMountedApex("com.android.apex.test_package", 2, "", data_path,
-                      "mount_point", "device_name");
+                      "mount_point", "device_name", "");
     bool result = ShouldAllocateSpaceForDecompression(
         "com.android.apex.test_package", 2, instance, db);
     ASSERT_FALSE(result);
@@ -680,7 +682,7 @@ TEST_F(ApexdUnitTest, ShouldAllocateSpaceForDecompression_VersionCompare) {
   // Fake mount
   MountedApexDatabase db;
   db.AddMountedApex("com.android.apex.compressed", 1, "", decompressed_path,
-                    "mount_point", "device_name");
+                    "mount_point", "device_name", "");
 
   {
     // New Compressed apex has higher version than decompressed data apex:
@@ -715,7 +717,7 @@ TEST_F(ApexdUnitTest, ShouldAllocateSpaceForDecompression_VersionCompare) {
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
   db.Reset();
   db.AddMountedApex("com.android.apex.compressed", 2, "", data_path,
-                    "mount_point", "device_name");
+                    "mount_point", "device_name", "");
   {
     // New Compressed apex has higher version as data apex: selected
     bool result = ShouldAllocateSpaceForDecompression(
@@ -1251,7 +1253,7 @@ TEST_F(ApexdMountTest, InstallPackagePreInstallVersionActive) {
       "test.apex.rebootless", [&](const MountedApexData& data, bool latest) {
         ASSERT_TRUE(latest);
         ASSERT_EQ(data.full_path, ret->GetPath());
-        ASSERT_EQ(data.device_name, "test.apex.rebootless@2_1");
+        ASSERT_EQ(data.verity_name, "test.apex.rebootless@2_1");
       });
 }
 
@@ -1292,7 +1294,7 @@ TEST_F(ApexdMountTest, InstallPackagePreInstallVersionActiveSamegrade) {
       "test.apex.rebootless", [&](const MountedApexData& data, bool latest) {
         ASSERT_TRUE(latest);
         ASSERT_EQ(data.full_path, ret->GetPath());
-        ASSERT_EQ(data.device_name, "test.apex.rebootless@1_1");
+        ASSERT_EQ(data.verity_name, "test.apex.rebootless@1_1");
       });
 }
 
@@ -1379,7 +1381,7 @@ TEST_F(ApexdMountTest, InstallPackageDataVersionActive) {
       "test.apex.rebootless", [&](const MountedApexData& data, bool latest) {
         ASSERT_TRUE(latest);
         ASSERT_EQ(data.full_path, ret->GetPath());
-        ASSERT_EQ(data.device_name, "test.apex.rebootless@2_1");
+        ASSERT_EQ(data.verity_name, "test.apex.rebootless@2_1");
       });
 }
 
@@ -1432,7 +1434,7 @@ TEST_F(ApexdMountTest, InstallPackageResolvesPathCollision) {
       "test.apex.rebootless", [&](const MountedApexData& data, bool latest) {
         ASSERT_TRUE(latest);
         ASSERT_EQ(data.full_path, ret->GetPath());
-        ASSERT_EQ(data.device_name, "test.apex.rebootless@1_2");
+        ASSERT_EQ(data.verity_name, "test.apex.rebootless@1_2");
       });
 }
 
@@ -1480,7 +1482,7 @@ TEST_F(ApexdMountTest, InstallPackageDataVersionActiveSamegrade) {
       "test.apex.rebootless", [&](const MountedApexData& data, bool latest) {
         ASSERT_TRUE(latest);
         ASSERT_EQ(data.full_path, ret->GetPath());
-        ASSERT_EQ(data.device_name, "test.apex.rebootless@2_1");
+        ASSERT_EQ(data.verity_name, "test.apex.rebootless@2_1");
       });
 }
 
@@ -1570,7 +1572,7 @@ TEST_F(ApexdMountTest, InstallPackageUnmountFailedUpdatedApexActive) {
       "test.apex.rebootless", [&](const MountedApexData& data, bool latest) {
         ASSERT_TRUE(latest);
         ASSERT_EQ(data.full_path, file_path);
-        ASSERT_EQ(data.device_name, "test.apex.rebootless@1");
+        ASSERT_EQ(data.verity_name, "test.apex.rebootless@1");
       });
 }
 
@@ -2355,7 +2357,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapOnlyCompressedApexes) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed@1.chroot");
                          });
 }
@@ -2434,7 +2436,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapUpgradeCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed@2.chroot");
                          });
 }
@@ -2483,7 +2485,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSamegradeCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed@1.chroot");
                          });
 }
@@ -2532,7 +2534,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSamegradeCapexDifferentDigest) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_ota_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed@1.chroot");
                          });
 
@@ -2597,7 +2599,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSamegradeCapexDifferentKey) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed@1.chroot");
                          });
 }
@@ -2723,7 +2725,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHigherThanCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, data_apex_path);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed@2.chroot");
                          });
 }
@@ -2767,7 +2769,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataLowerThanCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed@2.chroot");
                          });
 }
@@ -2817,7 +2819,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataSameAsCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, data_apex_path);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed@1.chroot");
                          });
 }
@@ -2861,7 +2863,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHasDifferentKeyThanCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed@1.chroot");
                          });
 }
@@ -2985,14 +2987,14 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDmDevicesHaveCorrectName) {
   db.ForallMountedApexes("com.android.apex.test_package_2",
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
-                           ASSERT_THAT(data.device_name, IsEmpty());
+                           ASSERT_THAT(data.verity_name, IsEmpty());
                            ASSERT_THAT(data.loop_name, StartsWith("/dev"));
                          });
   // com.android.apex.test_package should be mounted on top of dm-verity device.
   db.ForallMountedApexes("com.android.apex.test_package",
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.test_package@2.chroot");
                            ASSERT_THAT(data.loop_name, StartsWith("/dev"));
                          });
@@ -3286,7 +3288,7 @@ TEST_F(ApexdMountTest, OnStartOnlyPreInstalledCapexes) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed");
                          });
 }
@@ -3313,7 +3315,7 @@ TEST_F(ApexdMountTest, OnStartDataHasHigherVersionThanCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, apex_path_2);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed");
                          });
 }
@@ -3342,7 +3344,7 @@ TEST_F(ApexdMountTest, OnStartDataHasSameVersionAsCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, apex_path_2);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed");
                          });
 }
@@ -3375,7 +3377,7 @@ TEST_F(ApexdMountTest, OnStartSystemHasHigherVersionCapexThanData) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed");
                          });
 }
@@ -3407,7 +3409,7 @@ TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed");
                          });
 }
@@ -3440,7 +3442,7 @@ TEST_F(ApexdMountTest, OnStartFallbackToAlreadyDecompressedCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed");
                          });
 }
@@ -3476,7 +3478,7 @@ TEST_F(ApexdMountTest, OnStartFallbackToCapexSameVersion) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed");
                          });
 }
@@ -3506,7 +3508,7 @@ TEST_F(ApexdMountTest, OnStartCapexToApex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, apex_path);
-                           ASSERT_THAT(data.device_name, IsEmpty());
+                           ASSERT_THAT(data.verity_name, IsEmpty());
                          });
 }
 
@@ -3535,7 +3537,7 @@ TEST_F(ApexdMountTest, OnStartOrphanedDecompressedApexInActiveDirectory) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, apex_path);
-                           ASSERT_THAT(data.device_name, IsEmpty());
+                           ASSERT_THAT(data.verity_name, IsEmpty());
                          });
 }
 
@@ -3570,7 +3572,7 @@ TEST_F(ApexdMountTest, OnStartDecompressedApexVersionDifferentThanCapex) {
                          [&](const MountedApexData& data, bool latest) {
                            ASSERT_TRUE(latest);
                            ASSERT_EQ(data.full_path, decompressed_active_apex);
-                           ASSERT_EQ(data.device_name,
+                           ASSERT_EQ(data.verity_name,
                                      "com.android.apex.compressed");
                          });
 }
@@ -5142,6 +5144,34 @@ class MountBeforeDataTest : public ApexdMountTest {
     AddPreInstalledApex("apex.apexd_test_different_app.apex");
   }
 };
+
+TEST_F(MountBeforeDataTest, ActivatePinnedApex) {
+  ASSERT_EQ(0, OnBootstrap());
+
+  auto orig = ApexFile::Open(GetTestFile("apex.apexd_test_v2.apex"));
+  ASSERT_THAT(orig, Ok());
+  auto name = orig->GetManifest().name();
+
+  auto pinned = image_manager_->PinApexFiles(Single(*orig));
+  ASSERT_THAT(pinned, Ok());
+
+  auto image = pinned->at(0);
+  auto block_dev_path = image_manager_->MapImage(image);
+  ASSERT_THAT(block_dev_path, Ok());
+  auto unmap =
+      base::make_scope_guard([&]() { image_manager_->UnmapImage(image); });
+
+  ASSERT_THAT(ActivatePackage(*block_dev_path), Ok());
+  auto deactivate = base::make_scope_guard(
+      [&]() { ASSERT_THAT(DeactivatePackage(*block_dev_path), Ok()); });
+
+  // Checks if PopulateFromMounts() works okay with dm-linear device
+  MountedApexDatabase db;
+  db.PopulateFromMounts({});
+  auto linear_name = GetPackageId(orig->GetManifest()) + ".payload";
+  ASSERT_THAT(db.GetLatestMountedApex(name),
+              Optional(Field(&MountedApexData::linear_name, linear_name)));
+}
 
 TEST_F(MountBeforeDataTest, StagingCreatesBackingImages) {
   ASSERT_EQ(0, OnBootstrap());

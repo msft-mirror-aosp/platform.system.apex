@@ -18,6 +18,7 @@
 
 #include <android-base/result.h>
 #include <android-base/unique_fd.h>
+#include <libdm/dm.h>
 #include <sys/sendfile.h>
 
 #include <algorithm>
@@ -31,6 +32,7 @@ using android::base::ErrnoError;
 using android::base::Error;
 using android::base::Result;
 using android::base::unique_fd;
+using android::dm::DeviceMapper;
 using namespace std::chrono_literals;
 
 namespace android::apex {
@@ -155,6 +157,37 @@ Result<void> ApexImageManager::DeleteImage(const std::string& image) {
 
 std::vector<std::string> ApexImageManager::GetAllImages() {
   return fsmgr_->GetAllBackingImages();
+}
+
+bool ApexImageManager::IsPinnedApex(const ApexFile& apex) const {
+  DeviceMapper& dm = DeviceMapper::Instance();
+  if (!dm.IsDmBlockDevice(apex.GetPath())) {
+    return false;
+  }
+  auto name = dm.GetDmDeviceNameByPath(apex.GetPath());
+  if (!name) {
+    return false;
+  }
+  // TODO(405903373): Cache lp_metadata for faster lookup
+  return fsmgr_->BackingImageExists(name.value());
+}
+
+Result<std::string> ApexImageManager::MapImage(const std::string& image) {
+  std::string path;
+  if (fsmgr_->GetMappedImageDevice(image, &path)) {
+    return path;
+  }
+  if (!fsmgr_->MapImageDevice(image, 10s, &path)) {
+    return Error() << "Failed to create dm-linear device for " << image;
+  }
+  return path;
+}
+
+Result<void> ApexImageManager::UnmapImage(const std::string& image) {
+  if (!fsmgr_->UnmapImageDevice(image)) {
+    return Error() << "Failed to unmap dm-linear device for " << image;
+  }
+  return {};
 }
 
 ApexImageManager* GetImageManager() { return gImageManager; }

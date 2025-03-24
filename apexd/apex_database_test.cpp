@@ -70,15 +70,13 @@ bool ContainsPackage(const MountedApexDatabase& db, const std::string& package,
 
 TEST(ApexDatabaseTest, AddRemovedMountedApex) {
   constexpr const char* kPackage = "package";
-  constexpr const char* kLoopName = "loop";
   constexpr const char* kPath = "path";
-  constexpr const char* kMountPoint = "mount";
-  constexpr const char* kDeviceName = "dev";
 
   MountedApexDatabase db;
   ASSERT_EQ(CountPackages(db), 0u);
 
-  MountedApexData data(0, kLoopName, kPath, kMountPoint, kDeviceName);
+  MountedApexData data;
+  data.full_path = kPath;
   db.AddMountedApex(kPackage, data);
   ASSERT_TRUE(Contains(db, kPackage, data));
   ASSERT_TRUE(ContainsPackage(db, kPackage, data));
@@ -102,7 +100,7 @@ TEST(ApexDatabaseTest, MountMultiple) {
   MountedApexData data[arraysize(kPackage)];
   for (size_t i = 0; i < arraysize(kPackage); ++i) {
     data[i] = MountedApexData(0, kLoopName[i], kPath[i], kMountPoint[i],
-                              kDeviceName[i]);
+                              kDeviceName[i], "");
     db.AddMountedApex(kPackage[i], data[i]);
   }
 
@@ -131,28 +129,34 @@ TEST(ApexDatabaseTest, DoIfLatest) {
   MountedApexDatabase db;
 
   // With apex: [{version=0,path=path}]
-  db.AddMountedApex("package", 0, "loop", "path", "mount", "dev");
+  MountedApexData apex;
+  apex.version = 0;
+  apex.full_path = "path";
+  db.AddMountedApex("package", apex);
+  // Check if path is the latest
   ASSERT_THAT(db.DoIfLatest("package", "path", returnError),
               HasError(WithMessage("expected")));
 
   // With apexes: [{version=0,path=path}, {version=5,path=path5}]
-  db.AddMountedApex("package", 5, "loop5", "path5", "mount5", "dev5");
+  MountedApexData apex5;
+  apex5.version = 5;
+  apex5.full_path = "path5";
+  db.AddMountedApex("package", apex5);
+  // Check if path is NOT the latest
   ASSERT_THAT(db.DoIfLatest("package", "path", returnError), Ok());
+  // Check if path5 is the latest
   ASSERT_THAT(db.DoIfLatest("package", "path5", returnError),
               HasError(WithMessage("expected")));
 }
 
 TEST(ApexDatabaseTest, GetLatestMountedApex) {
   constexpr const char* kPackage = "package";
-  constexpr const char* kLoopName = "loop";
-  constexpr const char* kPath = "path";
-  constexpr const char* kMountPoint = "mount";
-  constexpr const char* kDeviceName = "dev";
 
   MountedApexDatabase db;
   ASSERT_EQ(CountPackages(db), 0u);
 
-  MountedApexData data(0, kLoopName, kPath, kMountPoint, kDeviceName);
+  MountedApexData data;
+  data.version = 42;
   db.AddMountedApex(kPackage, data);
 
   auto ret = db.GetLatestMountedApex(kPackage);

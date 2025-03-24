@@ -50,9 +50,10 @@ class BrandNewApexVerifierTest : public ::testing::Test {
     auto data_apex_path = std::string(data_dir.path) + "/" + test_file;
     auto apex_file = ApexFile::Open(data_apex_path);
     ASSERT_THAT(apex_file, Ok());
-    db.AddMountedApex(apex_file->GetManifest().name(),
-                      apex_file->GetManifest().version(), "loop",
-                      data_apex_path, "mount", "device");
+    MountedApexDatabase::MountedApexData data;
+    data.version = apex_file->GetManifest().version();
+    data.full_path = data_apex_path;
+    db.AddMountedApex(apex_file->GetManifest().name(), data);
   }
 
   TemporaryDir trusted_key_dir;
