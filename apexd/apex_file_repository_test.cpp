@@ -50,10 +50,26 @@ namespace fs = std::filesystem;
 using android::apex::testing::ApexFileEq;
 using android::base::StringPrintf;
 using android::base::testing::Ok;
+using ::testing::_;
 using ::testing::ByRef;
 using ::testing::ContainerEq;
+using ::testing::Contains;
+using ::testing::IsEmpty;
 using ::testing::Not;
+using ::testing::Pair;
 using ::testing::UnorderedElementsAre;
+
+class ApexFileRepositoryAccessor {
+ public:
+  static std::vector<ApexFileRef> GetDataApexFiles(
+      const ApexFileRepository& repository) {
+    std::vector<ApexFileRef> result;
+    for (const auto& it : repository.data_store_) {
+      result.emplace_back(std::cref(it.second));
+    }
+    return result;
+  }
+};
 
 namespace {
 // Copies the compressed apex to |built_in_dir| and decompresses it to
@@ -83,13 +99,9 @@ TEST(ApexFileRepositoryTest, InitializeSuccess) {
            built_in_dir.path);
   ApexPartition partition = ApexPartition::System;
 
-  fs::copy(GetTestFile("apex.apexd_test.apex"), data_dir.path);
-  fs::copy(GetTestFile("apex.apexd_test_different_app.apex"), data_dir.path);
-
   ApexFileRepository instance;
   ASSERT_RESULT_OK(
       instance.AddPreInstalledApex({{partition, built_in_dir.path}}));
-  ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   // Now test that apexes were scanned correctly;
   auto test_fn = [&](const std::string& apex_name) {
@@ -116,16 +128,7 @@ TEST(ApexFileRepositoryTest, InitializeSuccess) {
     }
 
     ASSERT_TRUE(instance.HasPreInstalledVersion(apex->GetManifest().name()));
-    ASSERT_TRUE(instance.HasDataVersion(apex->GetManifest().name()));
   };
-
-  test_fn("apex.apexd_test.apex");
-  test_fn("apex.apexd_test_different_app.apex");
-
-  // Check that second call will succeed as well.
-  ASSERT_RESULT_OK(
-      instance.AddPreInstalledApex({{partition, built_in_dir.path}}));
-  ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   test_fn("apex.apexd_test.apex");
   test_fn("apex.apexd_test_different_app.apex");
@@ -452,7 +455,7 @@ TEST(ApexFileRepositoryTest, AddAndGetDataApex) {
 
   // ApexFileRepository should only deal with APEX in /data/apex/active.
   // Decompressed APEX should not be included
-  auto data_apexs = instance.GetDataApexFiles();
+  auto data_apexs = ApexFileRepositoryAccessor::GetDataApexFiles(instance);
   auto normal_apex =
       ApexFile::Open(StringPrintf("%s/apex.apexd_test_v2.apex", data_dir.path));
   ASSERT_THAT(data_apexs,
@@ -467,7 +470,7 @@ TEST(ApexFileRepositoryTest, AddDataApexIgnoreCompressedApex) {
   ApexFileRepository instance;
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
-  auto data_apexs = instance.GetDataApexFiles();
+  auto data_apexs = ApexFileRepositoryAccessor::GetDataApexFiles(instance);
   ASSERT_EQ(data_apexs.size(), 0u);
 }
 
@@ -479,7 +482,7 @@ TEST(ApexFileRepositoryTest, AddDataApexIgnoreIfNotPreInstalled) {
   ApexFileRepository instance;
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
-  auto data_apexs = instance.GetDataApexFiles();
+  auto data_apexs = ApexFileRepositoryAccessor::GetDataApexFiles(instance);
   ASSERT_EQ(data_apexs.size(), 0u);
 }
 
@@ -495,7 +498,7 @@ TEST(ApexFileRepositoryTest, AddDataApexPrioritizeHigherVersionApex) {
       {{ApexPartition::System, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
-  auto data_apexs = instance.GetDataApexFiles();
+  auto data_apexs = ApexFileRepositoryAccessor::GetDataApexFiles(instance);
   auto normal_apex =
       ApexFile::Open(StringPrintf("%s/apex.apexd_test_v2.apex", data_dir.path));
   ASSERT_THAT(data_apexs,
@@ -513,7 +516,7 @@ TEST(ApexFileRepositoryTest, AddDataApexDoesNotScanDecompressedApex) {
       {{ApexPartition::System, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
-  auto data_apexs = instance.GetDataApexFiles();
+  auto data_apexs = ApexFileRepositoryAccessor::GetDataApexFiles(instance);
   ASSERT_EQ(data_apexs.size(), 0u);
 }
 
@@ -528,7 +531,7 @@ TEST(ApexFileRepositoryTest, AddDataApexIgnoreWrongPublicKey) {
       {{ApexPartition::System, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
-  auto data_apexs = instance.GetDataApexFiles();
+  auto data_apexs = ApexFileRepositoryAccessor::GetDataApexFiles(instance);
   ASSERT_EQ(data_apexs.size(), 0u);
 }
 
@@ -587,34 +590,6 @@ TEST(ApexFileRepositoryTest, AllApexFilesByName) {
                                    ApexFileEq(ByRef(*shim_v2))));
   ASSERT_THAT(result[compressed_apex->GetManifest().name()],
               UnorderedElementsAre(ApexFileEq(ByRef(*compressed_apex))));
-}
-
-TEST(ApexFileRepositoryTest, GetDataApex) {
-  // Prepare test data.
-  TemporaryDir built_in_dir, data_dir;
-  fs::copy(GetTestFile("apex.apexd_test.apex"), built_in_dir.path);
-  fs::copy(GetTestFile("apex.apexd_test_v2.apex"), data_dir.path);
-
-  ApexFileRepository instance;
-  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
-      {{ApexPartition::System, built_in_dir.path}}));
-  ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
-
-  auto apex =
-      ApexFile::Open(StringPrintf("%s/apex.apexd_test_v2.apex", data_dir.path));
-  ASSERT_RESULT_OK(apex);
-
-  auto ret = instance.GetDataApex("com.android.apex.test_package");
-  ASSERT_THAT(ret, ApexFileEq(ByRef(*apex)));
-}
-
-TEST(ApexFileRepositoryTest, GetDataApexNoSuchApexAborts) {
-  ASSERT_DEATH(
-      {
-        ApexFileRepository instance;
-        instance.GetDataApex("whatever");
-      },
-      "");
 }
 
 TEST(ApexFileRepositoryTest, GetPreInstalledApex) {
@@ -1118,7 +1093,8 @@ TEST(ApexFileRepositoryTestBrandNewApex,
   ASSERT_THAT(instance.GetPreinstalledPath(apex->GetManifest().name()),
               Not(Ok()));
   ASSERT_FALSE(instance.HasPreInstalledVersion(apex->GetManifest().name()));
-  ASSERT_TRUE(instance.HasDataVersion(apex->GetManifest().name()));
+  ASSERT_THAT(instance.AllApexFilesByName(),
+              Contains(Pair(apex->GetManifest().name(), _)));
 
   instance.Reset();
 }
@@ -1133,8 +1109,8 @@ TEST(ApexFileRepositoryTestBrandNewApex,
   auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
   ASSERT_RESULT_OK(apex);
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
-
-  ASSERT_FALSE(instance.HasDataVersion(apex->GetManifest().name()));
+  ASSERT_THAT(instance.AllApexFilesByName(),
+              Not(Contains(Pair(apex->GetManifest().name(), _))));
   instance.Reset();
 }
 
@@ -1146,8 +1122,8 @@ TEST(ApexFileRepositoryTestBrandNewApex, AddDataApexFailBrandNewApexDisabled) {
   auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
   ASSERT_RESULT_OK(apex);
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
-
-  ASSERT_FALSE(instance.HasDataVersion(apex->GetManifest().name()));
+  ASSERT_THAT(instance.AllApexFilesByName(),
+              Not(Contains(Pair(apex->GetManifest().name(), _))));
   instance.Reset();
 }
 
