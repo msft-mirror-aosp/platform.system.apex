@@ -32,6 +32,16 @@ namespace android::apex {
 
 using ApexFileRef = std::reference_wrapper<const android::apex::ApexFile>;
 
+struct ApexPath {
+  std::string path;
+  ApexPartition partition;
+};
+
+struct ApexFileAndPartition {
+  ApexFile apex_file;
+  ApexPartition partition;
+};
+
 // This class serves as a ApexFile repository for all apexes on device. It also
 // provides information about the ApexFiles it hosts, such as which are
 // pre-installed and which are data. Such information can be used, for example,
@@ -60,6 +70,17 @@ class ApexFileRepository final {
   // single thread during initialization of apexd. After initialization is
   // finished, all queries to the instance are thread safe.
   android::base::Result<void> AddPreInstalledApex(
+      const std::unordered_map<ApexPartition, std::string>&
+          partition_to_prebuilt_dirs);
+
+  // Populate instance by collecting pre-installed apex files from the given
+  // |partition_to_prebuilt_dirs|.
+  // The difference between this function and |AddPreInstalledApex| is that this
+  // function opens pre-installed apex files in parallel. Note: this call is
+  // **not thread safe** and is expected to be performed in a single thread
+  // during initialization of apexd. After initialization is finished, all
+  // queries to the instance are thread safe.
+  android::base::Result<void> AddPreInstalledApexParallel(
       const std::unordered_map<ApexPartition, std::string>&
           partition_to_prebuilt_dirs);
 
@@ -196,10 +217,18 @@ class ApexFileRepository final {
   ApexFileRepository& operator=(ApexFileRepository&&) = delete;
   ApexFileRepository(ApexFileRepository&&) = delete;
 
-  // Scans apexes in the given directory and adds collected data into
-  // |pre_installed_store_| and |partition_store_|.
-  android::base::Result<void> ScanBuiltInDir(const std::string& dir,
-                                             ApexPartition partition);
+  // Stores the given single apex data into |pre_installed_store_| and
+  // |partition_store_|.
+  void StorePreInstalledApex(ApexFile&& apex_file, ApexPartition partition);
+
+  // Scans and returns apexes in the given directories.
+  android::base::Result<std::vector<ApexPath>> CollectPreInstalledApex(
+      const std::unordered_map<ApexPartition, std::string>&
+          partition_to_prebuilt_dirs);
+
+  // Opens and returns the apexes in the given paths.
+  android::base::Result<std::vector<ApexFileAndPartition>> OpenApexFiles(
+      const std::vector<ApexPath>& apex_paths);
 
   std::unordered_map<std::string, ApexFile> pre_installed_store_, data_store_;
 

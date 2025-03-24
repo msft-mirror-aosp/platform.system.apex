@@ -166,33 +166,6 @@ TEST(ApexDatabaseTest, GetLatestMountedApexReturnsNullopt) {
   ASSERT_FALSE(ret.has_value());
 }
 
-#pragma clang diagnostic push
-// error: 'ReturnSentinel' was marked unused but was used
-// [-Werror,-Wused-but-marked-unused]
-#pragma clang diagnostic ignored "-Wused-but-marked-unused"
-
-TEST(MountedApexDataTest, NoDuplicateLoopDataLoopDevices) {
-  ASSERT_DEATH(
-      {
-        MountedApexDatabase db;
-        db.AddMountedApex("package", 0, "loop", "path", "mount", "dm");
-        db.AddMountedApex("package2", 0, "loop", "path2", "mount2", "dm2");
-      },
-      "Duplicate loop device: loop");
-}
-
-TEST(MountedApexDataTest, NoDuplicateDm) {
-  ASSERT_DEATH(
-      {
-        MountedApexDatabase db;
-        db.AddMountedApex("package", 0, "loop", "path", "mount", "dm");
-        db.AddMountedApex("package2", 0, "loop2", "path2", "mount2", "dm");
-      },
-      "Duplicate dm device: dm");
-}
-
-#pragma clang diagnostic pop
-
 }  // namespace
 }  // namespace apex
 }  // namespace android

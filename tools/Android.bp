@@ -186,3 +186,16 @@ python_binary_host {
         "fsck.erofs",
     ],
 }
+
+python_binary_host {
+    name: "brand_new_apex_verifier",
+    srcs: ["brand_new_apex_verifier.py"],
+    version: {
+        py3: {
+            embedded_launcher: true,
+        },
+    },
+    libs: [
+        "apex_blocklist_proto",
+    ],
+}

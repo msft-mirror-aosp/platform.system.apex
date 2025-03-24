@@ -62,26 +62,16 @@ class MountedApexDatabase {
   template <typename... Args>
   inline void AddMountedApexLocked(const std::string& package, Args&&... args)
       REQUIRES(mounted_apexes_mutex_) {
-    auto it = mounted_apexes_.find(package);
-    if (it == mounted_apexes_.end()) {
-      auto insert_it =
-          mounted_apexes_.emplace(package, std::set<MountedApexData>());
-      CHECK(insert_it.second);
-      it = insert_it.first;
-    }
-
-    auto check_it =
-        it->second.emplace(MountedApexData(std::forward<Args>(args)...));
-    CHECK(check_it.second);
-
-    CheckUniqueLoopDm();
+    auto [_, inserted] =
+        mounted_apexes_[package].emplace(std::forward<Args>(args)...);
+    CHECK(inserted);
   }
 
   template <typename... Args>
   inline void AddMountedApex(const std::string& package, Args&&... args)
       REQUIRES(!mounted_apexes_mutex_) {
     std::lock_guard lock(mounted_apexes_mutex_);
-    AddMountedApexLocked(package, args...);
+    AddMountedApexLocked(package, std::forward<Args>(args)...);
   }
 
   inline void RemoveMountedApex(const std::string& package,
@@ -150,7 +140,7 @@ class MountedApexDatabase {
   }
 
   inline std::optional<MountedApexData> GetLatestMountedApex(
-      const std::string& package) REQUIRES(!mounted_apexes_mutex_) {
+      const std::string& package) const REQUIRES(!mounted_apexes_mutex_) {
     std::optional<MountedApexData> ret;
     ForallMountedApexes(package,
                         [&ret](const MountedApexData& data, bool latest) {
@@ -186,23 +176,6 @@ class MountedApexDatabase {
     const Mutex& operator!() const { return *this; }
   };
   mutable Mutex mounted_apexes_mutex_;
-
-  inline void CheckUniqueLoopDm() REQUIRES(mounted_apexes_mutex_) {
-    std::unordered_set<std::string> loop_devices;
-    std::unordered_set<std::string> dm_devices;
-    for (const auto& apex_set : mounted_apexes_) {
-      for (const auto& mount : apex_set.second) {
-        if (mount.loop_name != "") {
-          CHECK(loop_devices.insert(mount.loop_name).second)
-              << "Duplicate loop device: " << mount.loop_name;
-        }
-        if (mount.device_name != "") {
-          CHECK(dm_devices.insert(mount.device_name).second)
-              << "Duplicate dm device: " << mount.device_name;
-        }
-      }
-    }
-  }
 };
 
 }  // namespace apex

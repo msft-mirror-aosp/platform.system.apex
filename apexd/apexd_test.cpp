@@ -250,20 +250,23 @@ class ApexdUnitTest : public ::testing::Test {
   }
 
   // Copies the compressed apex to |built_in_dir| and decompresses it to
-  // |decompressed_dir| and then hard links to |target_dir|
-  std::string PrepareCompressedApex(const std::string& name,
-                                    const std::string& built_in_dir) {
+  // |decompressed_dir| and returns both paths as tuple.
+  std::tuple<std::string, std::string> PrepareCompressedApex(
+      const std::string& name, const std::string& built_in_dir) {
     fs::copy(GetTestFile(name), built_in_dir);
-    auto compressed_apex = ApexFile::Open(
-        StringPrintf("%s/%s", built_in_dir.c_str(), name.c_str()));
+    auto compressed_file_path =
+        StringPrintf("%s/%s", built_in_dir.c_str(), name.c_str());
+    auto compressed_apex = ApexFile::Open(compressed_file_path);
     std::vector<ApexFileRef> compressed_apex_list;
     compressed_apex_list.emplace_back(std::cref(*compressed_apex));
-    auto return_value =
+    auto decompressed =
         ProcessCompressedApex(compressed_apex_list, /*is_ota_chroot*/ false);
-    return StringPrintf("%s/%s", built_in_dir.c_str(), name.c_str());
+    CHECK(decompressed.size() == 1);
+    return std::make_tuple(compressed_file_path, decompressed[0].GetPath());
   }
 
-  std::string PrepareCompressedApex(const std::string& name) {
+  std::tuple<std::string, std::string> PrepareCompressedApex(
+      const std::string& name) {
     return PrepareCompressedApex(name, built_in_dir_);
   }
 
@@ -309,7 +312,11 @@ class ApexdUnitTest : public ::testing::Test {
     InitializeImageManager(image_manager_.get());
   }
 
-  void TearDown() override { DeleteDirContent(GetSessionsDir()); }
+  void TearDown() override {
+    DeleteDirContent(GetSessionsDir());
+    // Reset vold; some tests changing this might affect other tests.
+    InitializeVold(nullptr);
+  }
 
  protected:
   TemporaryDir td_;
@@ -350,14 +357,7 @@ TEST_F(ApexdUnitTest, SelectApexForActivationSuccess) {
       AddDataApex("com.android.apex.test.sharedlibs_generated.v1.libvX.apex"));
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
-  const auto all_apex = instance.AllApexFilesByName();
-  // Pass a blank instance so that no apex file is considered
-  // pre-installed
-  const ApexFileRepository instance_blank;
-  auto result = SelectApexForActivation(all_apex, instance_blank);
-  ASSERT_EQ(result.size(), 6u);
-  // When passed proper instance they should get selected
-  result = SelectApexForActivation(all_apex, instance);
+  auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 3u);
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*apexd_test_file)),
                                            ApexFileEq(ByRef(*shim_v1)),
@@ -379,8 +379,7 @@ TEST_F(ApexdUnitTest, HigherVersionOfApexIsSelected) {
       ApexFile::Open(AddDataApex("com.android.apex.cts.shim.v2.apex"));
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
-  auto all_apex = instance.AllApexFilesByName();
-  auto result = SelectApexForActivation(all_apex, instance);
+  auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 2u);
 
   ASSERT_THAT(result,
@@ -402,8 +401,7 @@ TEST_F(ApexdUnitTest, DataApexGetsPriorityForSameVersions) {
   // Initialize ApexFile repo
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
-  auto all_apex = instance.AllApexFilesByName();
-  auto result = SelectApexForActivation(all_apex, instance);
+  auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 2u);
 
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*apexd_test_file)),
@@ -425,8 +423,7 @@ TEST_F(ApexdUnitTest, SharedLibsCanHaveBothVersionSelected) {
   // Initialize data APEX information
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
-  auto all_apex = instance.AllApexFilesByName();
-  auto result = SelectApexForActivation(all_apex, instance);
+  auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 2u);
 
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*shared_lib_v1)),
@@ -448,8 +445,7 @@ TEST_F(ApexdUnitTest, SharedLibsDataVersionDeletedIfLower) {
   // Initialize data APEX information
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
-  auto all_apex = instance.AllApexFilesByName();
-  auto result = SelectApexForActivation(all_apex, instance);
+  auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 1u);
 
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*shared_lib_v2))));
@@ -623,138 +619,123 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexReuseOtaApex) {
                          kDecompressedApexPackageSuffix));
 }
 
-TEST_F(ApexdUnitTest, ShouldAllocateSpaceForDecompressionNewApex) {
-  auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
+TEST_F(ApexdUnitTest, ShouldAllocateSpaceForDecompression_NewApex) {
+  ApexFileRepository instance;
+  MountedApexDatabase db;
 
   // A brand new compressed APEX is being introduced: selected
-  bool result =
-      ShouldAllocateSpaceForDecompression("com.android.brand.new", 1, instance);
+  bool result = ShouldAllocateSpaceForDecompression("com.android.brand.new", 1,
+                                                    instance, db);
   ASSERT_TRUE(result);
 }
 
 TEST_F(ApexdUnitTest,
-       ShouldAllocateSpaceForDecompressionWasNotCompressedBefore) {
-  // Prepare fake pre-installed apex
-  AddPreInstalledApex("apex.apexd_test.apex");
-  auto& instance = ApexFileRepository::GetInstance();
+       ShouldAllocateSpaceForDecompression_WasNotCompressedBefore) {
+  ApexFileRepository instance;
+  auto preinstalled_path = AddPreInstalledApex("apex.apexd_test.apex");
   ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
               Ok());
 
   // An existing pre-installed APEX is now compressed in the OTA: selected
   {
+    MountedApexDatabase db;
+    db.AddMountedApex("com.android.apex.test_package", 1, "", preinstalled_path,
+                      "mount_point", "device_name");
     bool result = ShouldAllocateSpaceForDecompression(
-        "com.android.apex.test_package", 1, instance);
+        "com.android.apex.test_package", 1, instance, db);
     ASSERT_TRUE(result);
   }
 
   // Even if there is a data apex (lower version)
   // Include data apex within calculation now
-  AddDataApex("apex.apexd_test_v2.apex");
+  auto data_path = AddDataApex("apex.apexd_test_v2.apex");
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
   {
+    MountedApexDatabase db;
+    db.AddMountedApex("com.android.apex.test_package", 2, "", data_path,
+                      "mount_point", "device_name");
     bool result = ShouldAllocateSpaceForDecompression(
-        "com.android.apex.test_package", 3, instance);
+        "com.android.apex.test_package", 3, instance, db);
     ASSERT_TRUE(result);
   }
 
   // But not if data apex has equal or higher version
   {
+    MountedApexDatabase db;
+    db.AddMountedApex("com.android.apex.test_package", 2, "", data_path,
+                      "mount_point", "device_name");
     bool result = ShouldAllocateSpaceForDecompression(
-        "com.android.apex.test_package", 2, instance);
+        "com.android.apex.test_package", 2, instance, db);
     ASSERT_FALSE(result);
   }
 }
 
-TEST_F(ApexdUnitTest, ShouldAllocateSpaceForDecompressionVersionCompare) {
+TEST_F(ApexdUnitTest, ShouldAllocateSpaceForDecompression_VersionCompare) {
   // Prepare fake pre-installed apex
-  PrepareCompressedApex("com.android.apex.compressed.v1.capex");
-  auto& instance = ApexFileRepository::GetInstance();
+  ApexFileRepository instance(decompression_dir_);
+  auto [_, decompressed_path] =
+      PrepareCompressedApex("com.android.apex.compressed.v1.capex");
   ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
               Ok());
-  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
+  // Fake mount
+  MountedApexDatabase db;
+  db.AddMountedApex("com.android.apex.compressed", 1, "", decompressed_path,
+                    "mount_point", "device_name");
 
   {
     // New Compressed apex has higher version than decompressed data apex:
     // selected
+
     bool result = ShouldAllocateSpaceForDecompression(
-        "com.android.apex.compressed", 2, instance);
+        "com.android.apex.compressed", 2, instance, db);
     ASSERT_TRUE(result)
         << "Higher version test with decompressed data returned false";
   }
 
   // Compare against decompressed data apex
   {
-    // New Compressed apex has same version as decompressed data apex: not
-    // selected
+    // New Compressed apex has same version as decompressed data apex: selected
     bool result = ShouldAllocateSpaceForDecompression(
-        "com.android.apex.compressed", 1, instance);
-    ASSERT_FALSE(result)
-        << "Same version test with decompressed data returned true";
+        "com.android.apex.compressed", 1, instance, db);
+    ASSERT_TRUE(result) << "Even with same version, the incoming apex may have "
+                           "a different size. Need to decompress";
   }
 
   {
     // New Compressed apex has lower version than decompressed data apex:
     // selected
     bool result = ShouldAllocateSpaceForDecompression(
-        "com.android.apex.compressed", 0, instance);
+        "com.android.apex.compressed", 0, instance, db);
     ASSERT_TRUE(result)
         << "lower version test with decompressed data returned false";
   }
 
   // Replace decompressed data apex with a higher version
-  ApexFileRepository instance_new(GetDecompressionDir());
-  ASSERT_THAT(
-      instance_new.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-      Ok());
-  TemporaryDir data_dir_new;
-  fs::copy(GetTestFile("com.android.apex.compressed.v2_original.apex"),
-           data_dir_new.path);
-  ASSERT_THAT(instance_new.AddDataApex(data_dir_new.path), Ok());
-
+  auto data_path = AddDataApex("com.android.apex.compressed.v2_original.apex");
+  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
+  db.Reset();
+  db.AddMountedApex("com.android.apex.compressed", 2, "", data_path,
+                    "mount_point", "device_name");
   {
     // New Compressed apex has higher version as data apex: selected
     bool result = ShouldAllocateSpaceForDecompression(
-        "com.android.apex.compressed", 3, instance_new);
+        "com.android.apex.compressed", 3, instance, db);
     ASSERT_TRUE(result) << "Higher version test with new data returned false";
   }
 
   {
     // New Compressed apex has same version as data apex: not selected
     bool result = ShouldAllocateSpaceForDecompression(
-        "com.android.apex.compressed", 2, instance_new);
+        "com.android.apex.compressed", 2, instance, db);
     ASSERT_FALSE(result) << "Same version test with new data returned true";
   }
 
   {
     // New Compressed apex has lower version than data apex: not selected
     bool result = ShouldAllocateSpaceForDecompression(
-        "com.android.apex.compressed", 1, instance_new);
+        "com.android.apex.compressed", 1, instance, db);
     ASSERT_FALSE(result) << "lower version test with new data returned true";
   }
-}
-
-TEST_F(ApexdUnitTest, CalculateSizeForCompressedApexEmptyList) {
-  ApexFileRepository instance;
-  int64_t result = CalculateSizeForCompressedApex({}, instance);
-  ASSERT_EQ(0LL, result);
-}
-
-TEST_F(ApexdUnitTest, CalculateSizeForCompressedApex) {
-  ApexFileRepository instance;
-  AddPreInstalledApex("com.android.apex.compressed.v1.capex");
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  std::vector<std::tuple<std::string, int64_t, int64_t>> input = {
-      std::make_tuple("new_apex", 1, 1),
-      std::make_tuple("new_apex_2", 1, 2),
-      std::make_tuple("com.android.apex.compressed", 1, 4),  // will be ignored
-      std::make_tuple("com.android.apex.compressed", 2, 8),
-  };
-  int64_t result = CalculateSizeForCompressedApex(input, instance);
-  ASSERT_EQ(1 + 2 + 8LL, result);
 }
 
 TEST_F(ApexdUnitTest, ReserveSpaceForCompressedApexCreatesSingleFile) {
@@ -1016,6 +997,48 @@ class ApexdMountTest : public ApexdUnitTest {
   // in test-purpose mount namespace.
   std::vector<BlockApex> block_apexes_;
 };
+
+TEST_F(ApexdMountTest, CalculateSizeForCompressedApexEmptyList) {
+  int64_t result = CalculateSizeForCompressedApex({});
+  ASSERT_EQ(0LL, result);
+}
+
+TEST_F(ApexdMountTest, CalculateSizeForCompressedApex) {
+  auto& instance = ApexFileRepository::GetInstance();
+  AddPreInstalledApex("com.android.apex.compressed.v1.capex");
+  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
+              Ok());
+
+  OnStart();
+
+  std::vector<std::tuple<std::string, int64_t, int64_t>> input = {
+      std::make_tuple("new_apex", 1, 1),
+      std::make_tuple("new_apex_2", 1, 2),
+      std::make_tuple("com.android.apex.compressed", 1, 8),
+  };
+  int64_t result = CalculateSizeForCompressedApex(input);
+  ASSERT_EQ(1 + 2 + 8LL, result);
+}
+
+TEST_F(
+    ApexdMountTest,
+    CalculateSizeForCompressedApex_SkipIfDataApexIsNewerThanOrEqualToPreInstalledApex) {
+  auto& instance = ApexFileRepository::GetInstance();
+  AddPreInstalledApex("com.android.apex.compressed.v1.capex");
+  AddDataApex("com.android.apex.compressed.v2_original.apex");
+  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
+              Ok());
+  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
+
+  OnStart();
+
+  std::vector<std::tuple<std::string, int64_t, int64_t>> input = {
+      std::make_tuple("new_apex", 1, 1),
+      std::make_tuple("com.android.apex.compressed", 2, 8),  // ignored
+  };
+  int64_t result = CalculateSizeForCompressedApex(input);
+  ASSERT_EQ(1LL, result);
+}
 
 // TODO(b/187864524): cover other negative scenarios.
 TEST_F(ApexdMountTest, InstallPackageRejectsApexWithoutRebootlessSupport) {
@@ -2468,7 +2491,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapSamegradeCapex) {
 // Test when we update existing CAPEX to same version, but different digest
 TEST_F(ApexdMountTest, OnOtaChrootBootstrapSamegradeCapexDifferentDigest) {
   TemporaryDir previous_built_in_dir;
-  auto different_digest_apex_path = PrepareCompressedApex(
+  auto [different_digest_apex_path, _] = PrepareCompressedApex(
       "com.android.apex.compressed.v1_different_digest.capex",
       previous_built_in_dir.path);
   // Place a same version capex in current built_in_dir, which has different
@@ -2656,7 +2679,7 @@ TEST_F(ApexdMountTest,
 
 // Test when we update CAPEX and there is a higher version present in data
 TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataHigherThanCapex) {
-  auto system_apex_path =
+  auto [system_apex_path, _] =
       PrepareCompressedApex("com.android.apex.compressed.v1.capex");
   auto data_apex_path =
       AddDataApex("com.android.apex.compressed.v2_original.apex");
@@ -2751,7 +2774,7 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataLowerThanCapex) {
 
 // Test when we update CAPEX and there is a same version present in data
 TEST_F(ApexdMountTest, OnOtaChrootBootstrapDataSameAsCapex) {
-  auto system_apex_path =
+  auto [system_apex_path, _] =
       PrepareCompressedApex("com.android.apex.compressed.v1.capex");
   auto data_apex_path = AddDataApex("com.android.apex.compressed.v1.apex");
 
@@ -3057,10 +3080,6 @@ TEST_F(ApexdMountTest,
 }
 
 TEST_F(ApexdMountTest, OnStartOnlyPreInstalledApexes) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -3081,10 +3100,6 @@ TEST_F(ApexdMountTest, OnStartOnlyPreInstalledApexes) {
 }
 
 TEST_F(ApexdMountTest, OnStartDataHasHigherVersion) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -3106,10 +3121,6 @@ TEST_F(ApexdMountTest, OnStartDataHasHigherVersion) {
 }
 
 TEST_F(ApexdMountTest, OnStartDataHasWrongSHA) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   std::string apex_path = AddPreInstalledApex("com.android.apex.cts.shim.apex");
   AddDataApex("com.android.apex.cts.shim.v2_wrong_sha.apex");
 
@@ -3127,10 +3138,6 @@ TEST_F(ApexdMountTest, OnStartDataHasWrongSHA) {
 }
 
 TEST_F(ApexdMountTest, OnStartDataHasSameVersion) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -3160,10 +3167,6 @@ TEST_F(ApexdMountTest, OnStartDataHasSameVersion) {
 }
 
 TEST_F(ApexdMountTest, OnStartSystemHasHigherVersion) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test_v2.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -3193,10 +3196,6 @@ TEST_F(ApexdMountTest, OnStartSystemHasHigherVersion) {
 }
 
 TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToBuiltIn) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -3226,10 +3225,6 @@ TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToBuiltIn) {
 }
 
 TEST_F(ApexdMountTest, OnStartApexOnDataHasWrongKeyFallsBackToBuiltIn) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -3266,10 +3261,6 @@ TEST_F(ApexdMountTest, OnStartApexOnDataHasWrongKeyFallsBackToBuiltIn) {
 }
 
 TEST_F(ApexdMountTest, OnStartOnlyPreInstalledCapexes) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   std::string apex_path_1 =
       AddPreInstalledApex("com.android.apex.compressed.v1.capex");
 
@@ -3301,10 +3292,6 @@ TEST_F(ApexdMountTest, OnStartOnlyPreInstalledCapexes) {
 }
 
 TEST_F(ApexdMountTest, OnStartDataHasHigherVersionThanCapex) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   std::string apex_path_2 =
       AddDataApex("com.android.apex.compressed.v2_original.apex");
@@ -3332,10 +3319,6 @@ TEST_F(ApexdMountTest, OnStartDataHasHigherVersionThanCapex) {
 }
 
 TEST_F(ApexdMountTest, OnStartDataHasSameVersionAsCapex) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   std::string apex_path_2 = AddDataApex("com.android.apex.compressed.v1.apex");
 
@@ -3365,10 +3348,6 @@ TEST_F(ApexdMountTest, OnStartDataHasSameVersionAsCapex) {
 }
 
 TEST_F(ApexdMountTest, OnStartSystemHasHigherVersionCapexThanData) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   std::string apex_path_1 =
       AddPreInstalledApex("com.android.apex.compressed.v2.capex");
   AddDataApex("com.android.apex.compressed.v1.apex");
@@ -3402,10 +3381,6 @@ TEST_F(ApexdMountTest, OnStartSystemHasHigherVersionCapexThanData) {
 }
 
 TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToCapex) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   AddDataApex("com.android.apex.compressed.v2_manifest_mismatch.apex");
 
@@ -3440,10 +3415,6 @@ TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToCapex) {
 // Test scenario when we fallback to capex but it already has a decompressed
 // version on data
 TEST_F(ApexdMountTest, OnStartFallbackToAlreadyDecompressedCapex) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   PrepareCompressedApex("com.android.apex.compressed.v1.capex");
   AddDataApex("com.android.apex.compressed.v2_manifest_mismatch.apex");
 
@@ -3477,10 +3448,6 @@ TEST_F(ApexdMountTest, OnStartFallbackToAlreadyDecompressedCapex) {
 // Test scenario when we fallback to capex but it has same version as corrupt
 // data apex
 TEST_F(ApexdMountTest, OnStartFallbackToCapexSameVersion) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   AddPreInstalledApex("com.android.apex.compressed.v2.capex");
   // Add data apex using the common naming convention for /data/apex/active
   // directory
@@ -3515,10 +3482,6 @@ TEST_F(ApexdMountTest, OnStartFallbackToCapexSameVersion) {
 }
 
 TEST_F(ApexdMountTest, OnStartCapexToApex) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   TemporaryDir previous_built_in_dir;
   PrepareCompressedApex("com.android.apex.compressed.v1.capex",
                         previous_built_in_dir.path);
@@ -3549,10 +3512,6 @@ TEST_F(ApexdMountTest, OnStartCapexToApex) {
 
 // Test to ensure we do not mount decompressed APEX from /data/apex/active
 TEST_F(ApexdMountTest, OnStartOrphanedDecompressedApexInActiveDirectory) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   // Place a decompressed APEX in /data/apex/active. This apex should not
   // be mounted since it's not in correct location. Instead, the
   // pre-installed APEX should be mounted.
@@ -3583,10 +3542,6 @@ TEST_F(ApexdMountTest, OnStartOrphanedDecompressedApexInActiveDirectory) {
 // Test scenario when decompressed version has different version than
 // pre-installed CAPEX
 TEST_F(ApexdMountTest, OnStartDecompressedApexVersionDifferentThanCapex) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   TemporaryDir previous_built_in_dir;
   PrepareCompressedApex("com.android.apex.compressed.v2.capex",
                         previous_built_in_dir.path);
@@ -3622,10 +3577,6 @@ TEST_F(ApexdMountTest, OnStartDecompressedApexVersionDifferentThanCapex) {
 
 // Test that ota_apex is persisted until slot switch
 TEST_F(ApexdMountTest, OnStartOtaApexKeptUntilSlotSwitch) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   // Imagine current system has v1 capex and we have v2 incoming via ota
   auto old_capex = AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   auto ota_apex_path =
@@ -3672,10 +3623,6 @@ TEST_F(ApexdMountTest, OnStartOtaApexKeptUntilSlotSwitch) {
 // digest
 TEST_F(ApexdMountTest,
        OnStartDecompressedApexVersionSameAsCapexDifferentDigest) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   // Push a CAPEX to system without decompressing it
   auto apex_path = AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   auto pre_installed_apex = ApexFile::Open(apex_path);
@@ -3711,12 +3658,8 @@ TEST_F(ApexdMountTest,
 
 // Test when decompressed APEX has different key than CAPEX
 TEST_F(ApexdMountTest, OnStartDecompressedApexVersionSameAsCapexDifferentKey) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   TemporaryDir previous_built_in_dir;
-  auto different_key_apex_path =
+  auto [different_key_apex_path, _] =
       PrepareCompressedApex("com.android.apex.compressed_different_key.capex",
                             previous_built_in_dir.path);
   // Place a same version capex in current built_in_dir, which has different key
@@ -3996,10 +3939,6 @@ TEST_F(ApexdMountTest, UnmountAllStaged) {
 }
 
 TEST_F(ApexdMountTest, OnStartInVmModeActivatesPreInstalled) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   auto path1 = AddPreInstalledApex("apex.apexd_test.apex");
   auto path2 = AddPreInstalledApex("apex.apexd_test_different_app.apex");
   // In VM mode, we don't scan /data/apex
@@ -4012,28 +3951,18 @@ TEST_F(ApexdMountTest, OnStartInVmModeActivatesPreInstalled) {
               UnorderedElementsAre("/apex/com.android.apex.test_package",
                                    "/apex/com.android.apex.test_package@1",
                                    "/apex/com.android.apex.test_package_2",
-                                   "/apex/com.android.apex.test_package_2@1",
-                                   // Emits apex-info-list as well
-                                   "/apex/apex-info-list.xml"));
+                                   "/apex/com.android.apex.test_package_2@1"));
 
   ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "ready");
 }
 
 TEST_F(ApexdMountTest, OnStartInVmModeFailsWithCapex) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   AddPreInstalledApex("com.android.apex.compressed.v2.capex");
 
   ASSERT_EQ(1, OnStartInVmMode());
 }
 
 TEST_F(ApexdMountTest, OnStartInVmModeActivatesBlockDevicesAsWell) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   // Set system property to enable block apexes
   SetBlockApexEnabled(true);
 
@@ -4044,9 +3973,7 @@ TEST_F(ApexdMountTest, OnStartInVmModeActivatesBlockDevicesAsWell) {
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.test_package",
-                                   "/apex/com.android.apex.test_package@1",
-                                   // Emits apex-info-list as well
-                                   "/apex/apex-info-list.xml"));
+                                   "/apex/com.android.apex.test_package@1"));
 
   ASSERT_EQ(access("/apex/apex-info-list.xml", F_OK), 0);
   auto info_list =
@@ -4065,10 +3992,6 @@ TEST_F(ApexdMountTest, OnStartInVmModeActivatesBlockDevicesAsWell) {
 }
 
 TEST_F(ApexdMountTest, OnStartInVmModeFailsWithDuplicateNames) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   // Set system property to enable block apexes
   SetBlockApexEnabled(true);
 
@@ -4096,9 +4019,7 @@ TEST_F(ApexdMountTest, OnStartInVmSupportsMultipleSharedLibsApexes) {
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.test.sharedlibs@1",
-                                   "/apex/com.android.apex.test.sharedlibs@2",
-                                   // Emits apex-info-list as well
-                                   "/apex/apex-info-list.xml"));
+                                   "/apex/com.android.apex.test.sharedlibs@2"));
 }
 
 TEST_F(ApexdMountTest, OnStartInVmShouldRejectInDuplicateFactoryApexes) {
@@ -4132,10 +4053,6 @@ TEST_F(ApexdMountTest, OnStartInVmShouldRejectInDuplicateNonFactoryApexes) {
 }
 
 TEST_F(ApexdMountTest, OnStartInVmModeFailsWithWrongPubkey) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   // Set system property to enable block apexes
   SetBlockApexEnabled(true);
 
@@ -4145,10 +4062,6 @@ TEST_F(ApexdMountTest, OnStartInVmModeFailsWithWrongPubkey) {
 }
 
 TEST_F(ApexdMountTest, GetActivePackagesReturningBlockApexesAsWell) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   // Set system property to enable block apexes
   SetBlockApexEnabled(true);
 
@@ -4162,10 +4075,6 @@ TEST_F(ApexdMountTest, GetActivePackagesReturningBlockApexesAsWell) {
 }
 
 TEST_F(ApexdMountTest, OnStartInVmModeFailsWithWrongRootDigest) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   // Set system property to enable block apexes
   SetBlockApexEnabled(true);
 
@@ -4178,10 +4087,6 @@ TEST_F(ApexdMountTest, OnStartInVmModeFailsWithWrongRootDigest) {
 class ApexActivationFailureTests : public ApexdMountTest {};
 
 TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
   ASSERT_RESULT_OK(apex_session);
   apex_session->SetBuildFingerprint("wrong fingerprint");
@@ -4196,10 +4101,6 @@ TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent) {
 }
 
 TEST_F(ApexActivationFailureTests, ApexFileMissingInStagingDirectory) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
   ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
@@ -4210,15 +4111,10 @@ TEST_F(ApexActivationFailureTests, ApexFileMissingInStagingDirectory) {
 
   apex_session = GetSessionManager()->GetSession(123);
   ASSERT_RESULT_OK(apex_session);
-  ASSERT_THAT(apex_session->GetErrorMessage(),
-              HasSubstr("No APEX packages found"));
+  ASSERT_THAT(apex_session->GetErrorMessage(), HasSubstr("Found: 0"));
 }
 
 TEST_F(ApexActivationFailureTests, MultipleApexFileInStagingDirectory) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
   ASSERT_RESULT_OK(apex_session);
   CreateStagedSession("com.android.apex.compressed.v1.apex", 123);
@@ -4228,15 +4124,10 @@ TEST_F(ApexActivationFailureTests, MultipleApexFileInStagingDirectory) {
 
   apex_session = GetSessionManager()->GetSession(123);
   ASSERT_RESULT_OK(apex_session);
-  ASSERT_THAT(apex_session->GetErrorMessage(),
-              HasSubstr("More than one APEX package found"));
+  ASSERT_THAT(apex_session->GetErrorMessage(), HasSubstr("Found: 2"));
 }
 
 TEST_F(ApexActivationFailureTests, CorruptedSuperblockApexCannotBeStaged) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   auto apex_session =
       CreateStagedSession("apex.apexd_test_corrupt_superblock_apex.apex", 123);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
@@ -4251,10 +4142,6 @@ TEST_F(ApexActivationFailureTests, CorruptedSuperblockApexCannotBeStaged) {
 }
 
 TEST_F(ApexActivationFailureTests, CorruptedApexCannotBeStaged) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   auto apex_session = CreateStagedSession("corrupted_b146895998.apex", 123);
   ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
@@ -4268,10 +4155,6 @@ TEST_F(ApexActivationFailureTests, CorruptedApexCannotBeStaged) {
 }
 
 TEST_F(ApexActivationFailureTests, ActivatePackageImplFails) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   auto shim_path = AddPreInstalledApex("com.android.apex.cts.shim.apex");
   auto& instance = ApexFileRepository::GetInstance();
   ASSERT_RESULT_OK(
@@ -4363,6 +4246,12 @@ TEST_F(ApexdMountTest, OnBootstrapCreatesEmptyDmDevices) {
 TEST_F(ApexdMountTest, OnBootstrapLoadBootstrapApexOnly) {
   AddPreInstalledApex("apex.apexd_test.apex");
   AddPreInstalledApex("apex.apexd_bootstrap_test.apex");
+
+  DeviceMapper& dm = DeviceMapper::Instance();
+  auto cleaner = make_scope_guard([&]() {
+    dm.DeleteDeviceIfExists("com.android.apex.test_package", 1s);
+    dm.DeleteDeviceIfExists("com.android.apex.bootstrap_test_package", 1s);
+  });
 
   ASSERT_EQ(0, OnBootstrap());
 
@@ -4615,10 +4504,6 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexWrongSELinuxContext) {
 }
 
 TEST_F(ApexdMountTest, OnStartNoApexUpdated) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
@@ -4641,10 +4526,6 @@ TEST_F(ApexdMountTest, OnStartNoApexUpdated) {
 }
 
 TEST_F(ApexdMountTest, OnStartDecompressingConsideredApexUpdate) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
   std::string decompressed_active_apex = StringPrintf(
@@ -4665,10 +4546,6 @@ TEST_F(ApexdMountTest, OnStartDecompressingConsideredApexUpdate) {
 }
 
 TEST_F(ApexdMountTest, ActivatesStagedSession) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
   auto apex_session = CreateStagedSession("apex.apexd_test_v2.apex", 37);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
@@ -4697,10 +4574,6 @@ TEST_F(ApexdMountTest, ActivatesStagedSession) {
 }
 
 TEST_F(ApexdMountTest, FailsToActivateStagedSession) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
   auto apex_session =
       CreateStagedSession("apex.apexd_test_manifest_mismatch.apex", 73);
@@ -4728,10 +4601,6 @@ TEST_F(ApexdMountTest, FailsToActivateStagedSession) {
 }
 
 TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
   AddDataApex("apex.apexd_test_manifest_mismatch.apex");
 
@@ -4992,10 +4861,6 @@ TEST_F(ApexdUnitTest, StagePackagesFailUnverifiedBrandNewApex) {
 }
 
 TEST_F(ApexdMountTest, ActivatesStagedSessionSucceedVerifiedBrandNewApex) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   ApexFileRepository::EnableBrandNewApex();
   auto& file_repository = ApexFileRepository::GetInstance();
   const auto partition = ApexPartition::System;
@@ -5031,10 +4896,6 @@ TEST_F(ApexdMountTest, ActivatesStagedSessionSucceedVerifiedBrandNewApex) {
 }
 
 TEST_F(ApexdMountTest, ActivatesStagedSessionFailUnverifiedBrandNewApex) {
-  MockCheckpointInterface checkpoint_interface;
-  // Need to call InitializeVold before calling OnStart
-  InitializeVold(&checkpoint_interface);
-
   ApexFileRepository::EnableBrandNewApex();
   auto& file_repository = ApexFileRepository::GetInstance();
   const auto partition = ApexPartition::System;
@@ -5270,15 +5131,21 @@ TEST_F(SubmitStagedSessionTest, SuccessWithMultiSession) {
 }
 
 // Temporary test cases until the feature is fully enabled/implemented
-class MountBeforeDataTest : public SubmitStagedSessionTest {
+class MountBeforeDataTest : public ApexdMountTest {
  protected:
   void SetUp() override {
     config_.mount_before_data = true;
-    SubmitStagedSessionTest::SetUp();
+    ApexdMountTest::SetUp();
+
+    // preinstalled APEXes
+    AddPreInstalledApex("apex.apexd_test.apex");
+    AddPreInstalledApex("apex.apexd_test_different_app.apex");
   }
 };
 
 TEST_F(MountBeforeDataTest, StagingCreatesBackingImages) {
+  ASSERT_EQ(0, OnBootstrap());
+
   auto session_id = 42;
   PrepareStagedSession("apex.apexd_test.apex", session_id);
   ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
@@ -5289,12 +5156,24 @@ TEST_F(MountBeforeDataTest, StagingCreatesBackingImages) {
 }
 
 TEST_F(MountBeforeDataTest, AbortSessionRemovesBackingImages) {
+  ASSERT_EQ(0, OnBootstrap());
+
   auto session_id = 42;
   PrepareStagedSession("apex.apexd_test.apex", session_id);
   ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
   ASSERT_THAT(AbortStagedSession(session_id), Ok());
 
   ASSERT_THAT(image_manager_->GetAllImages(), IsEmpty());
+}
+
+TEST_F(MountBeforeDataTest, OnBootstrapActivatesAllApexes) {
+  ASSERT_EQ(0, OnBootstrap());
+
+  ASSERT_THAT(GetApexMounts(),
+              UnorderedElementsAre("/apex/com.android.apex.test_package_2"s,
+                                   "/apex/com.android.apex.test_package_2@1"s,
+                                   "/apex/com.android.apex.test_package"s,
+                                   "/apex/com.android.apex.test_package@1"s));
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {

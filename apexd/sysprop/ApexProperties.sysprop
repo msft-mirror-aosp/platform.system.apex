@@ -66,3 +66,15 @@ prop {
     access: Readonly
     prop_name: "apexd.config.loopback.readahead"
 }
+
+# This sysprop allows adjusting the number of threads that are used
+# to open APEX files during bootstrap. If this sysprop is not set or set to 0,
+# the total number of threads equal the number of pre-installed packages.
+# The maximum number of threads is capped to the number of pre-installed packages.
+prop {
+    api_name: "apex_file_open_threads"
+    type: UInt
+    scope: Internal
+    access: Readonly
+    prop_name: "apexd.config.apex_file_open.threads"
+}
