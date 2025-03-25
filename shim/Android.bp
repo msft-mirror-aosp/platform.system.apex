@@ -41,6 +41,12 @@ prebuilt_apex {
     },
     filename: "com.android.apex.cts.shim.apex",
     installable: true,
+    // Declare the apps included in the prebuilt apex so that they can be
+    // signed using apkcerts.txt
+    apps: [
+        "CtsShim",
+        "CtsShimPriv",
+    ],
 }
 
 prebuilt_apex {
@@ -64,6 +70,12 @@ prebuilt_apex {
     },
     filename: "com.android.apex.cts.shim.v2.apex",
     installable: false,
+    // Declare the apps included in the prebuilt apex so that they can be
+    // signed using apkcerts.txt
+    apps: [
+        "CtsShim",
+        "CtsShimPriv",
+    ],
 }
 
 prebuilt_apex {
@@ -202,6 +214,12 @@ prebuilt_apex {
     },
     filename: "com.android.apex.cts.shim.v3.apex",
     installable: false,
+    // Declare the apps included in the prebuilt apex so that they can be
+    // signed using apkcerts.txt
+    apps: [
+        "CtsShim",
+        "CtsShimPriv",
+    ],
 }
 
 prebuilt_apex {
