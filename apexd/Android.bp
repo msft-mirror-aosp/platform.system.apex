@@ -564,6 +564,7 @@ cc_test {
         "apex_manifest_test.cpp",
         "apexd_brand_new_verifier_test.cpp",
         "apexd_image_manager_test.cpp",
+        "apexd_loop_test.cpp",
         "apexd_test.cpp",
         "apexd_session_test.cpp",
         "apexd_utils_test.cpp",

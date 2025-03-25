@@ -4715,27 +4715,6 @@ TEST_F(ApexdMountTest, SendEventOnSubmitStagedSession) {
   ASSERT_EQ(0u, spy->ended.size());
 }
 
-TEST(Loop, CreateWithApexFile) {
-  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
-  ASSERT_THAT(apex, Ok());
-  ASSERT_TRUE(apex->GetImageOffset().has_value());
-  ASSERT_TRUE(apex->GetImageSize().has_value());
-
-  auto loop = loop::CreateAndConfigureLoopDevice(apex->GetPath(),
-                                                 apex->GetImageOffset().value(),
-                                                 apex->GetImageSize().value());
-  ASSERT_THAT(loop, Ok());
-}
-
-TEST(Loop, NoSuchFile) {
-  CaptureStderr();
-  {
-    auto loop = loop::CreateAndConfigureLoopDevice("invalid_path", 0, 0);
-    ASSERT_THAT(loop, Not(Ok()));
-  }
-  ASSERT_EQ(GetCapturedStderr(), "");
-}
-
 TEST_F(ApexdMountTest, SubmitStagedSessionSucceedVerifiedBrandNewApex) {
   ApexFileRepository::EnableBrandNewApex();
   auto& file_repository = ApexFileRepository::GetInstance();
