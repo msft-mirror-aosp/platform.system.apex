@@ -54,4 +54,43 @@ TEST(ApexImageManagerTest, PinApexFiles) {
                                    "com.android.apex.test_pack_1.apex"s}));
 }
 
+TEST(ApexImageManagerTest, ManageApexList) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  ASSERT_THAT(image_manager->GetApexList(ApexListType::ACTIVE),
+              HasValue(IsEmpty()));
+
+  std::vector<ApexListEntry> list;
+  list.emplace_back("image1", "package1");
+  list.emplace_back("image2", "package2");
+  ASSERT_THAT(image_manager->UpdateApexList(ApexListType::ACTIVE, list), Ok());
+  ASSERT_THAT(image_manager->GetApexList(ApexListType::ACTIVE), HasValue(list));
+}
+
+TEST(ApexImageManagerTest, UpdateApexListMultipleTimes) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  // Write/read empty list
+  ASSERT_THAT(image_manager->UpdateApexList(ApexListType::ACTIVE, {}), Ok());
+  ASSERT_THAT(image_manager->GetApexList(ApexListType::ACTIVE),
+              HasValue(IsEmpty()));
+
+  // Update should overwrite the list
+  auto list =
+      std::vector<ApexListEntry>{{"image", "apex"}, {"image2", "apex2"}};
+  ASSERT_THAT(image_manager->UpdateApexList(ApexListType::ACTIVE, list), Ok());
+  ASSERT_THAT(image_manager->GetApexList(ApexListType::ACTIVE), HasValue(list));
+
+  // Update the list again with empty list
+  ASSERT_THAT(image_manager->UpdateApexList(ApexListType::ACTIVE, {}), Ok());
+  ASSERT_THAT(image_manager->GetApexList(ApexListType::ACTIVE),
+              HasValue(IsEmpty()));
+}
+
 }  // namespace android::apex

@@ -16,20 +16,25 @@
 
 #include "apexd_image_manager.h"
 
+#include <android-base/file.h>
 #include <android-base/result.h>
 #include <android-base/unique_fd.h>
 #include <libdm/dm.h>
 #include <sys/sendfile.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 
+#include "apex_image_list.pb.h"
 #include "apexd.h"
 #include "apexd_utils.h"
 
 using android::base::borrowed_fd;
 using android::base::ErrnoError;
 using android::base::Error;
+using android::base::RemoveFileIfExists;
 using android::base::Result;
 using android::base::unique_fd;
 using android::dm::DeviceMapper;
@@ -72,6 +77,59 @@ std::string AllocateNewName(const std::vector<std::string>& known_names,
     }
   }
   return base_name + "_" + std::to_string(count) + ".apex";
+}
+
+Result<void> WriteImageList(const std::vector<ApexListEntry>& list,
+                            const std::string& filename) {
+  unique_fd fd(
+      open(filename.c_str(), O_CREAT | O_WRONLY | O_CLOEXEC | O_TRUNC, 0660));
+  if (fd < 0) {
+    return ErrnoError() << "Failed to open " << filename;
+  }
+
+  // Serialize using proto
+  using ::apex::proto::ApexImageList;
+
+  ApexImageList pb_list;
+  pb_list.mutable_entries()->Reserve(list.size());
+  for (const auto& entry : list) {
+    ApexImageList::Entry pb_entry;
+    pb_entry.set_image_name(entry.image_name);
+    pb_entry.set_apex_name(entry.apex_name);
+    *pb_list.add_entries() = std::move(pb_entry);
+  }
+  if (!pb_list.SerializeToFileDescriptor(fd.get())) {
+    return Error() << "Failed to save APEX image list to " << filename;
+  }
+
+  fsync(fd.get());
+  return {};
+}
+
+Result<std::vector<ApexListEntry>> ReadImageList(const std::string& filename) {
+  unique_fd fd(open(filename.c_str(), O_RDONLY | O_CLOEXEC));
+  if (fd < 0) {
+    if (errno == ENOENT) {
+      return {};
+    }
+    return ErrnoError() << "Failed to open " << filename;
+  }
+
+  std::vector<ApexListEntry> list;
+
+  // Deserialize using proto
+  using ::apex::proto::ApexImageList;
+
+  ApexImageList pb_list;
+  if (!pb_list.ParseFromFileDescriptor(fd.get())) {
+    return Error() << "Failed to parse APEX image list from " << filename;
+  }
+  list.reserve(pb_list.entries_size());
+  for (const auto& entry : pb_list.entries()) {
+    list.emplace_back(entry.image_name(), entry.apex_name());
+  }
+
+  return list;
 }
 
 }  // namespace
@@ -188,6 +246,44 @@ Result<void> ApexImageManager::UnmapImage(const std::string& image) {
     return Error() << "Failed to unmap dm-linear device for " << image;
   }
   return {};
+}
+
+std::string ApexImageManager::GetApexListFile(ApexListType list_type) const {
+  switch (list_type) {
+    case ApexListType::ACTIVE:
+      return metadata_dir_ + "/active";
+    case ApexListType::BACKUP:
+      return metadata_dir_ + "/backup";
+  }
+}
+
+Result<void> ApexImageManager::UpdateApexList(
+    ApexListType list_type, const std::vector<ApexListEntry>& list) {
+  auto listfile = GetApexListFile(list_type);
+
+  // Write to a tempfile first and then rename it to target name to avoid
+  // losing an existing file or half-written file.
+
+  auto tempfile = listfile + ".tmp";
+  OR_RETURN(WriteImageList(list, tempfile));
+
+  auto cleanup = base::make_scope_guard([&]() {
+    if (auto rc = unlink(tempfile.c_str()); rc == -1 && errno != ENOENT) {
+      PLOG(ERROR) << "Fail to delete " << tempfile;
+    }
+  });
+
+  // rename() replaces an existing file if there's any.
+  if (auto rc = rename(tempfile.c_str(), listfile.c_str()); rc == -1) {
+    return ErrnoError() << "Fail to create " << listfile;
+  }
+  return {};
+}
+
+Result<std::vector<ApexListEntry>> ApexImageManager::GetApexList(
+    ApexListType list_type) {
+  auto list_file = GetApexListFile(list_type);
+  return ReadImageList(list_file);
 }
 
 ApexImageManager* GetImageManager() { return gImageManager; }
