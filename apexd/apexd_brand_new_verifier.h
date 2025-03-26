@@ -21,6 +21,7 @@
 #include <string>
 
 #include "apex_constants.h"
+#include "apex_database.h"
 #include "apex_file.h"
 
 namespace android::apex {
@@ -43,11 +44,11 @@ android::base::Result<ApexPartition> VerifyBrandNewPackageAgainstPreinstalled(
 
 // Returns the verification result of a specific brand-new package.
 // Verifies a brand-new APEX in that its public key is the same as the existing
-// active version if any. Pre-installed APEX is skipped.
+// active version if any.
 //
 // The function is called in
 // |SubmitStagedSession| (brand-new apex becomes 'staged')
 android::base::Result<void> VerifyBrandNewPackageAgainstActive(
-    const ApexFile& apex);
+    const ApexFile& apex, const MountedApexDatabase& db);
 
 }  // namespace android::apex

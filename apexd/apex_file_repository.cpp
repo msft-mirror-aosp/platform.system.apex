@@ -593,10 +593,6 @@ bool ApexFileRepository::HasPreInstalledVersion(const std::string& name) const {
   return pre_installed_store_.find(name) != pre_installed_store_.end();
 }
 
-bool ApexFileRepository::HasDataVersion(const std::string& name) const {
-  return data_store_.find(name) != data_store_.end();
-}
-
 // ApexFile is considered a decompressed APEX if it is located in decompression
 // dir
 bool ApexFileRepository::IsDecompressedApex(const ApexFile& apex) const {
@@ -620,15 +616,6 @@ std::vector<ApexFileRef> ApexFileRepository::GetPreInstalledApexFiles() const {
   std::vector<ApexFileRef> result;
   result.reserve(pre_installed_store_.size());
   for (const auto& it : pre_installed_store_) {
-    result.emplace_back(std::cref(it.second));
-  }
-  return result;
-}
-
-std::vector<ApexFileRef> ApexFileRepository::GetDataApexFiles() const {
-  std::vector<ApexFileRef> result;
-  result.reserve(data_store_.size());
-  for (const auto& it : data_store_) {
     result.emplace_back(std::cref(it.second));
   }
   return result;
@@ -669,12 +656,6 @@ ApexFileRepository::AllApexFilesByName() const {
     }
   }
   return result;
-}
-
-ApexFileRef ApexFileRepository::GetDataApex(const std::string& name) const {
-  auto it = data_store_.find(name);
-  CHECK(it != data_store_.end());
-  return std::cref(it->second);
 }
 
 ApexFileRef ApexFileRepository::GetPreInstalledApex(

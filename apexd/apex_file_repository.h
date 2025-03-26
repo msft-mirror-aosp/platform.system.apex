@@ -147,9 +147,6 @@ class ApexFileRepository final {
   // |name|.
   bool HasPreInstalledVersion(const std::string& name) const;
 
-  // Checks whether there is a data version of an apex with the given |name|.
-  bool HasDataVersion(const std::string& name) const;
-
   // Checks if given |apex| is pre-installed.
   bool IsPreInstalledApex(const ApexFile& apex) const;
 
@@ -161,9 +158,6 @@ class ApexFileRepository final {
 
   // Returns reference to all pre-installed APEX on device
   std::vector<ApexFileRef> GetPreInstalledApexFiles() const;
-
-  // Returns reference to all data APEX on device
-  std::vector<ApexFileRef> GetDataApexFiles() const;
 
   // Returns the partition of the pre-installed public key which exactly matches
   // the |public_key|.
@@ -185,10 +179,6 @@ class ApexFileRepository final {
   // expected to check if there is a pre-installed apex with the given name
   // using |HasPreinstalledVersion| function.
   ApexFileRef GetPreInstalledApex(const std::string& name) const;
-  // Returns a data version of apex with the given name. Caller is
-  // expected to check if there is a data apex with the given name
-  // using |HasDataVersion| function.
-  ApexFileRef GetDataApex(const std::string& name) const;
 
   // Returns if installation of brand-new APEX is enabled.
   static inline bool IsBrandNewApexEnabled() { return enable_brand_new_apex_; };
@@ -280,6 +270,9 @@ class ApexFileRepository final {
   // Use "path" as key instead of APEX name because there can be multiple
   // versions of sharedlibs APEXes.
   std::unordered_map<std::string, BlockApexOverride> block_apex_overrides_;
+
+  // for tests to access ApexFileRepository's private data
+  friend class ApexFileRepositoryAccessor;
 };
 
 }  // namespace android::apex

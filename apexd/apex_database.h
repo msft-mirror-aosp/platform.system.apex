@@ -36,24 +36,27 @@ class MountedApexDatabase {
   // Stores associated low-level data for a mounted APEX. To conserve memory,
   // the APEX file isn't stored, but must be opened to retrieve specific data.
   struct MountedApexData {
-    int version = 0;        // APEX version for this mount
-    std::string loop_name;  // Loop device used (fs path).
-    std::string full_path;  // Full path to the apex file.
-    std::string mount_point;  // Path this apex is mounted on.
-    std::string device_name;  // Name of the dm verity device.
+    int64_t version = 0;      // APEX version for this mount
+    std::string loop_name;    // Loop device used (fs path)
+    std::string full_path;    // Full path to the apex file
+    std::string mount_point;  // Path this apex is mounted on
+    std::string verity_name;  // Name of the dm-verity device
+    std::string linear_name;  // Name of the dm-linear device
     // Whenever apex file specified in full_path was deleted.
     bool deleted = false;
 
     MountedApexData() = default;
-    MountedApexData(int version, const std::string& loop_name,
+    MountedApexData(int64_t version, const std::string& loop_name,
                     const std::string& full_path,
                     const std::string& mount_point,
-                    const std::string& device_name)
+                    const std::string& verity_name,
+                    const std::string& linear_name)
         : version(version),
           loop_name(loop_name),
           full_path(full_path),
           mount_point(mount_point),
-          device_name(device_name),
+          verity_name(verity_name),
+          linear_name(linear_name),
           deleted(false) {}
 
     inline auto operator<=>(const MountedApexData& rhs) const = default;

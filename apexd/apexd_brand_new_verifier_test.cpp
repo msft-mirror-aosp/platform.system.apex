@@ -39,11 +39,33 @@ using android::base::testing::Ok;
 using android::base::testing::WithMessage;
 using ::testing::Not;
 
-TEST(BrandNewApexVerifierTest, SucceedPublicKeyMatch) {
-  ApexFileRepository::EnableBrandNewApex();
+class BrandNewApexVerifierTest : public ::testing::Test {
+ protected:
+  void SetUp() override { ApexFileRepository::EnableBrandNewApex(); }
+  void TearDown() override { ApexFileRepository::GetInstance().Reset(); }
+
+  // Copy test file to the data dir and populate db with fake mount info
+  void PrepareDataApex(const std::string& test_file) {
+    fs::copy(GetTestFile(test_file), data_dir.path);
+    auto data_apex_path = std::string(data_dir.path) + "/" + test_file;
+    auto apex_file = ApexFile::Open(data_apex_path);
+    ASSERT_THAT(apex_file, Ok());
+    MountedApexDatabase::MountedApexData data;
+    data.version = apex_file->GetManifest().version();
+    data.full_path = data_apex_path;
+    db.AddMountedApex(apex_file->GetManifest().name(), data);
+  }
+
+  TemporaryDir trusted_key_dir;
+  TemporaryDir config_dir;
+  TemporaryDir data_dir;
+  TemporaryDir built_in_dir;
+  MountedApexDatabase db;
+};
+
+TEST_F(BrandNewApexVerifierTest, SucceedPublicKeyMatch) {
   auto& file_repository = ApexFileRepository::GetInstance();
   const auto partition = ApexPartition::System;
-  TemporaryDir trusted_key_dir;
   fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
            trusted_key_dir.path);
   file_repository.AddBrandNewApexCredentialAndBlocklist(
@@ -55,15 +77,11 @@ TEST(BrandNewApexVerifierTest, SucceedPublicKeyMatch) {
   auto ret = VerifyBrandNewPackageAgainstPreinstalled(*apex);
   ASSERT_RESULT_OK(ret);
   ASSERT_EQ(*ret, partition);
-
-  file_repository.Reset();
 }
 
-TEST(BrandNewApexVerifierTest, SucceedVersionBiggerThanBlocked) {
-  ApexFileRepository::EnableBrandNewApex();
+TEST_F(BrandNewApexVerifierTest, SucceedVersionBiggerThanBlocked) {
   auto& file_repository = ApexFileRepository::GetInstance();
   const auto partition = ApexPartition::System;
-  TemporaryDir config_dir;
   fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
            config_dir.path);
   fs::copy(GetTestFile("apexd_testdata/blocklist.json"), config_dir.path);
@@ -76,34 +94,25 @@ TEST(BrandNewApexVerifierTest, SucceedVersionBiggerThanBlocked) {
   auto ret = VerifyBrandNewPackageAgainstPreinstalled(*apex);
   ASSERT_RESULT_OK(ret);
   ASSERT_EQ(*ret, partition);
-
-  file_repository.Reset();
 }
 
-TEST(BrandNewApexVerifierTest, SucceedMatchActive) {
-  ApexFileRepository::EnableBrandNewApex();
+TEST_F(BrandNewApexVerifierTest, SucceedMatchActive) {
   auto& file_repository = ApexFileRepository::GetInstance();
-  TemporaryDir trusted_key_dir, data_dir;
   fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
            trusted_key_dir.path);
-  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
   file_repository.AddBrandNewApexCredentialAndBlocklist(
       {{ApexPartition::System, trusted_key_dir.path}});
-  file_repository.AddDataApex(data_dir.path);
+  PrepareDataApex("com.android.apex.brand.new.apex");
 
   auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.v2.apex"));
   ASSERT_RESULT_OK(apex);
 
-  auto ret = VerifyBrandNewPackageAgainstActive(*apex);
+  auto ret = VerifyBrandNewPackageAgainstActive(*apex, db);
   ASSERT_RESULT_OK(ret);
-
-  file_repository.Reset();
 }
 
-TEST(BrandNewApexVerifierTest, SucceedSkipPreinstalled) {
-  ApexFileRepository::EnableBrandNewApex();
+TEST_F(BrandNewApexVerifierTest, SucceedSkipPreinstalled) {
   auto& file_repository = ApexFileRepository::GetInstance();
-  TemporaryDir built_in_dir;
   fs::copy(GetTestFile("apex.apexd_test.apex"), built_in_dir.path);
   file_repository.AddPreInstalledApex(
       {{ApexPartition::System, built_in_dir.path}});
@@ -111,29 +120,23 @@ TEST(BrandNewApexVerifierTest, SucceedSkipPreinstalled) {
   auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
   ASSERT_RESULT_OK(apex);
 
-  auto ret = VerifyBrandNewPackageAgainstActive(*apex);
+  auto ret = VerifyBrandNewPackageAgainstActive(*apex, db);
   ASSERT_RESULT_OK(ret);
-
-  file_repository.Reset();
 }
 
-TEST(BrandNewApexVerifierTest, SucceedSkipWithoutDataVersion) {
-  ApexFileRepository::EnableBrandNewApex();
+TEST_F(BrandNewApexVerifierTest, SucceedSkipWithoutDataVersion) {
   auto& file_repository = ApexFileRepository::GetInstance();
-
   auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
   ASSERT_RESULT_OK(apex);
 
-  auto ret = VerifyBrandNewPackageAgainstActive(*apex);
+  auto ret = VerifyBrandNewPackageAgainstActive(*apex, db);
   ASSERT_RESULT_OK(ret);
-
-  file_repository.Reset();
 }
 
-TEST(BrandNewApexVerifierTest, FailBrandNewApexDisabled) {
+TEST_F(BrandNewApexVerifierTest, FailBrandNewApexDisabled) {
   auto& file_repository = ApexFileRepository::GetInstance();
+  file_repository.Reset();  // Disable brand-new-apex
   const auto partition = ApexPartition::System;
-  TemporaryDir trusted_key_dir;
   fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
            trusted_key_dir.path);
   file_repository.AddBrandNewApexCredentialAndBlocklist(
@@ -146,15 +149,11 @@ TEST(BrandNewApexVerifierTest, FailBrandNewApexDisabled) {
       { VerifyBrandNewPackageAgainstPreinstalled(*apex); },
       "Brand-new APEX must be enabled in order to do verification.");
   ASSERT_DEATH(
-      { VerifyBrandNewPackageAgainstActive(*apex); },
+      { VerifyBrandNewPackageAgainstActive(*apex, db); },
       "Brand-new APEX must be enabled in order to do verification.");
-
-  file_repository.Reset();
 }
 
-TEST(BrandNewApexVerifierTest, FailNoMatchingPublicKey) {
-  ApexFileRepository::EnableBrandNewApex();
-
+TEST_F(BrandNewApexVerifierTest, FailNoMatchingPublicKey) {
   auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
   ASSERT_RESULT_OK(apex);
 
@@ -165,11 +164,9 @@ TEST(BrandNewApexVerifierTest, FailNoMatchingPublicKey) {
                             "brand-new APEX: com.android.apex.brand.new"))));
 }
 
-TEST(BrandNewApexVerifierTest, FailBlockedByVersion) {
-  ApexFileRepository::EnableBrandNewApex();
+TEST_F(BrandNewApexVerifierTest, FailBlockedByVersion) {
   auto& file_repository = ApexFileRepository::GetInstance();
   const auto partition = ApexPartition::System;
-  TemporaryDir config_dir;
   fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
            config_dir.path);
   fs::copy(GetTestFile("apexd_testdata/blocklist.json"), config_dir.path);
@@ -183,35 +180,28 @@ TEST(BrandNewApexVerifierTest, FailBlockedByVersion) {
   ASSERT_THAT(ret,
               HasError(WithMessage(
                   ("Brand-new APEX is blocked: com.android.apex.brand.new"))));
-
-  file_repository.Reset();
 }
 
-TEST(BrandNewApexVerifierTest, FailPublicKeyNotMatchActive) {
-  ApexFileRepository::EnableBrandNewApex();
+TEST_F(BrandNewApexVerifierTest, FailPublicKeyNotMatchActive) {
   auto& file_repository = ApexFileRepository::GetInstance();
-  TemporaryDir trusted_key_dir, data_dir;
   fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
            trusted_key_dir.path);
   fs::copy(GetTestFile(
                "apexd_testdata/com.android.apex.brand.new.another.avbpubkey"),
            trusted_key_dir.path);
-  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
   file_repository.AddBrandNewApexCredentialAndBlocklist(
       {{ApexPartition::System, trusted_key_dir.path}});
-  file_repository.AddDataApex(data_dir.path);
+  PrepareDataApex("com.android.apex.brand.new.apex");
 
   auto apex =
       ApexFile::Open(GetTestFile("com.android.apex.brand.new.v2.diffkey.apex"));
   ASSERT_RESULT_OK(apex);
 
-  auto ret = VerifyBrandNewPackageAgainstActive(*apex);
+  auto ret = VerifyBrandNewPackageAgainstActive(*apex, db);
   ASSERT_THAT(
       ret,
       HasError(WithMessage(("Brand-new APEX public key doesn't match existing "
                             "active APEX: com.android.apex.brand.new"))));
-
-  file_repository.Reset();
 }
 
 }  // namespace android::apex

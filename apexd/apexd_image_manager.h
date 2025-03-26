@@ -41,6 +41,15 @@ class ApexImageManager {
   base::Result<void> DeleteImage(const std::string& image);
   std::vector<std::string> GetAllImages();
 
+  // True if the apex is backed by a dm-linear device created by
+  // ApexImageManager
+  bool IsPinnedApex(const ApexFile& file) const;
+
+  // Creates a dm-linear block device for a pinned apex and returns the path of
+  // the created block device.
+  base::Result<std::string> MapImage(const std::string& image);
+  base::Result<void> UnmapImage(const std::string& image);
+
   static std::unique_ptr<ApexImageManager> Create(
       const std::string& metadata_images_dir,
       const std::string& data_images_dir);
