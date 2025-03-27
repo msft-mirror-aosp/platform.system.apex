@@ -593,20 +593,8 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
     OR_RETURN(DeleteDmDevice(data.linear_name, deferred));
   }
 
-  // Try to free up the loop device.
-  auto log_fn = [](const std::string& path, const std::string& /*id*/) {
-    LOG(VERBOSE) << "Freeing loop device " << path << " for unmount.";
-  };
-
-  // Since we now use LO_FLAGS_AUTOCLEAR when configuring loop devices, in
-  // theory we don't need to manually call DestroyLoopDevice here even if
-  // |deferred| is false. However we prefer to call it to ensure the invariant
-  // of SubmitStagedSession (after it's done, loop devices created for temp
-  // mount are freed).
-  if (!data.loop_name.empty() && !deferred) {
-    loop::DestroyLoopDevice(data.loop_name, log_fn);
-  }
-
+  // Since we now use LO_FLAGS_AUTOCLEAR when configuring loop devices, we don't
+  // need to manually clear the loop here. (umount2 above will clear the loop.)
   return {};
 }
 

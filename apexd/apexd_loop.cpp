@@ -63,8 +63,6 @@ namespace android {
 namespace apex {
 namespace loop {
 
-static constexpr const char* kApexLoopIdPrefix = "apex:";
-
 // 128 kB read-ahead, which we currently use for /system as well
 static constexpr const unsigned int kReadAheadKb = 128;
 
@@ -415,7 +413,6 @@ static Result<LoopbackDeviceUniqueFd> ConfigureLoopDevice(
 
   struct loop_info64 li;
   memset(&li, 0, sizeof(li));
-  strlcpy((char*)li.lo_crypt_name, kApexLoopIdPrefix, LO_NAME_SIZE);
   li.lo_offset = image_offset;
   li.lo_sizelimit = image_size;
   // Automatically free loop device on last close.
@@ -581,33 +578,6 @@ Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
   }
 
   return loop_device;
-}
-
-void DestroyLoopDevice(const std::string& path, const DestroyLoopFn& extra) {
-  unique_fd fd(open(path.c_str(), O_RDWR | O_CLOEXEC));
-  if (fd.get() == -1) {
-    if (errno != ENOENT) {
-      PLOG(WARNING) << "Failed to open " << path;
-    }
-    return;
-  }
-
-  struct loop_info64 li;
-  if (ioctl(fd.get(), LOOP_GET_STATUS64, &li) < 0) {
-    if (errno != ENXIO) {
-      PLOG(WARNING) << "Failed to LOOP_GET_STATUS64 " << path;
-    }
-    return;
-  }
-
-  auto id = std::string((char*)li.lo_crypt_name);
-  if (StartsWith(id, kApexLoopIdPrefix)) {
-    extra(path, id);
-
-    if (ioctl(fd.get(), LOOP_CLR_FD, 0) < 0) {
-      PLOG(WARNING) << "Failed to LOOP_CLR_FD " << path;
-    }
-  }
 }
 
 }  // namespace loop

@@ -65,10 +65,6 @@ android::base::Result<void> PreAllocateLoopDevices(size_t num);
 android::base::Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
     const std::string& target, uint32_t image_offset, size_t image_size);
 
-using DestroyLoopFn =
-    std::function<void(const std::string&, const std::string&)>;
-void DestroyLoopDevice(const std::string& path, const DestroyLoopFn& extra);
-
 }  // namespace loop
 }  // namespace apex
 }  // namespace android
