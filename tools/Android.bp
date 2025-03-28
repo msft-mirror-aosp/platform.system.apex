@@ -25,8 +25,7 @@ python_binary_host {
         "apex_manifest",
     ],
     required: [
-        "blkid_static",
-        "debugfs_static",
+        "debugfs",
         "fsck.erofs",
     ],
 }
@@ -37,9 +36,7 @@ python_binary_host {
         "apex_elf_checker.py",
     ],
     required: [
-        "blkid_static",
-        "debugfs_static",
-        "fsck.erofs",
+        "deapexer",
     ],
 }
 
@@ -94,34 +91,8 @@ cc_binary_host {
         "libapex",
         "libinit_host",
     ],
-}
-
-sh_test_host {
-    name: "host-apex-verifier",
-    src: "host-apex-verifier.sh",
-    test_suites: ["device-tests"],
-    test_config: "host-apex-verifier.xml",
-    test_options: {
-        unit_test: false,
-    },
-    data_bins: [
+    required: [
         "deapexer",
-        "debugfs_static",
-        "fsck.erofs",
-        "host_apex_verifier",
-    ],
-    data_libs: [
-        "libbase",
-        "libc++",
-        "libcrypto",
-        "libcutils",
-        "liblog",
-        "libpcre2", // used by libselinux
-        "libprotobuf-cpp-full", // used by libapex
-        "libprotobuf-cpp-lite", // used by libinit_host
-        "libselinux", // used by libapex
-        "libz",
-        "libziparchive",
     ],
 }
 
