@@ -36,24 +36,27 @@ class MountedApexDatabase {
   // Stores associated low-level data for a mounted APEX. To conserve memory,
   // the APEX file isn't stored, but must be opened to retrieve specific data.
   struct MountedApexData {
-    int version = 0;        // APEX version for this mount
-    std::string loop_name;  // Loop device used (fs path).
-    std::string full_path;  // Full path to the apex file.
-    std::string mount_point;  // Path this apex is mounted on.
-    std::string device_name;  // Name of the dm verity device.
+    int64_t version = 0;      // APEX version for this mount
+    std::string loop_name;    // Loop device used (fs path)
+    std::string full_path;    // Full path to the apex file
+    std::string mount_point;  // Path this apex is mounted on
+    std::string verity_name;  // Name of the dm-verity device
+    std::string linear_name;  // Name of the dm-linear device
     // Whenever apex file specified in full_path was deleted.
     bool deleted = false;
 
     MountedApexData() = default;
-    MountedApexData(int version, const std::string& loop_name,
+    MountedApexData(int64_t version, const std::string& loop_name,
                     const std::string& full_path,
                     const std::string& mount_point,
-                    const std::string& device_name)
+                    const std::string& verity_name,
+                    const std::string& linear_name)
         : version(version),
           loop_name(loop_name),
           full_path(full_path),
           mount_point(mount_point),
-          device_name(device_name),
+          verity_name(verity_name),
+          linear_name(linear_name),
           deleted(false) {}
 
     inline auto operator<=>(const MountedApexData& rhs) const = default;
@@ -62,26 +65,16 @@ class MountedApexDatabase {
   template <typename... Args>
   inline void AddMountedApexLocked(const std::string& package, Args&&... args)
       REQUIRES(mounted_apexes_mutex_) {
-    auto it = mounted_apexes_.find(package);
-    if (it == mounted_apexes_.end()) {
-      auto insert_it =
-          mounted_apexes_.emplace(package, std::set<MountedApexData>());
-      CHECK(insert_it.second);
-      it = insert_it.first;
-    }
-
-    auto check_it =
-        it->second.emplace(MountedApexData(std::forward<Args>(args)...));
-    CHECK(check_it.second);
-
-    CheckUniqueLoopDm();
+    auto [_, inserted] =
+        mounted_apexes_[package].emplace(std::forward<Args>(args)...);
+    CHECK(inserted);
   }
 
   template <typename... Args>
   inline void AddMountedApex(const std::string& package, Args&&... args)
       REQUIRES(!mounted_apexes_mutex_) {
     std::lock_guard lock(mounted_apexes_mutex_);
-    AddMountedApexLocked(package, args...);
+    AddMountedApexLocked(package, std::forward<Args>(args)...);
   }
 
   inline void RemoveMountedApex(const std::string& package,
@@ -150,7 +143,7 @@ class MountedApexDatabase {
   }
 
   inline std::optional<MountedApexData> GetLatestMountedApex(
-      const std::string& package) REQUIRES(!mounted_apexes_mutex_) {
+      const std::string& package) const REQUIRES(!mounted_apexes_mutex_) {
     std::optional<MountedApexData> ret;
     ForallMountedApexes(package,
                         [&ret](const MountedApexData& data, bool latest) {
@@ -186,23 +179,6 @@ class MountedApexDatabase {
     const Mutex& operator!() const { return *this; }
   };
   mutable Mutex mounted_apexes_mutex_;
-
-  inline void CheckUniqueLoopDm() REQUIRES(mounted_apexes_mutex_) {
-    std::unordered_set<std::string> loop_devices;
-    std::unordered_set<std::string> dm_devices;
-    for (const auto& apex_set : mounted_apexes_) {
-      for (const auto& mount : apex_set.second) {
-        if (mount.loop_name != "") {
-          CHECK(loop_devices.insert(mount.loop_name).second)
-              << "Duplicate loop device: " << mount.loop_name;
-        }
-        if (mount.device_name != "") {
-          CHECK(dm_devices.insert(mount.device_name).second)
-              << "Duplicate dm device: " << mount.device_name;
-        }
-      }
-    }
-  }
 };
 
 }  // namespace apex

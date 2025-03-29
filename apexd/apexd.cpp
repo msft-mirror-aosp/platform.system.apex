@@ -358,6 +358,52 @@ Result<void> VerifyMountedImage(const ApexFile& apex,
   return {};
 }
 
+Result<loop::LoopbackDeviceUniqueFd> CreateLoopForApex(const ApexFile& apex) {
+  if (!apex.GetImageOffset() || !apex.GetImageSize()) {
+    return Error() << "Cannot create mount point without image offset and size";
+  }
+  const std::string& full_path = apex.GetPath();
+  loop::LoopbackDeviceUniqueFd loopback_device;
+  for (size_t attempts = 1;; ++attempts) {
+    Result<loop::LoopbackDeviceUniqueFd> ret =
+        loop::CreateAndConfigureLoopDevice(full_path,
+                                           apex.GetImageOffset().value(),
+                                           apex.GetImageSize().value());
+    if (ret.ok()) {
+      loopback_device = std::move(*ret);
+      break;
+    }
+    if (attempts >= kLoopDeviceSetupAttempts) {
+      return Error() << "Could not create loop device for " << full_path << ": "
+                     << ret.error();
+    }
+  }
+  LOG(VERBOSE) << "Loopback device created: " << loopback_device.name;
+  return std::move(loopback_device);
+}
+
+bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
+
+Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex,
+                                          const std::string& device_name) {
+  if (!apex.GetImageOffset() || !apex.GetImageSize()) {
+    return Error() << "Cannot create mount point without image offset and size";
+  }
+  // TODO(b/405904883) measure the IO performance and reduce # of layers if
+  // necessary
+  DmTable table;
+  constexpr auto kBytesInSector = 512;
+  table.Emplace<dm::DmTargetLinear>(0, *apex.GetImageSize() / kBytesInSector,
+                                    apex.GetPath(),
+                                    *apex.GetImageOffset() / kBytesInSector);
+  table.set_readonly(true);
+  auto dev =
+      OR_RETURN(CreateDmDevice(device_name, table, /* reuse device */ false));
+
+  OR_RETURN(loop::ConfigureReadAhead(dev.GetDevPath()));
+  return std::move(dev);
+}
+
 Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                          const std::string& mount_point,
                                          const std::string& device_name,
@@ -368,6 +414,17 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     return Error() << "Cannot directly mount compressed APEX "
                    << apex.GetPath();
   }
+
+  // Steps to mount an APEX file:
+  //
+  // 1. create a mount point (directory)
+  // 2. create a block device for the payload part of the APEX
+  // 3. wrap it with a dm-verity device if the APEX is not on top of verity
+  //    device
+  // 4. mount the payload filesystm
+  // 5. verify the mount
+
+  // Step 1. Create a directory for the mount point
 
   LOG(VERBOSE) << "Creating mount point: " << mount_point;
   auto time_started = boot_clock::now();
@@ -398,25 +455,22 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
 
   const std::string& full_path = apex.GetPath();
 
-  if (!apex.GetImageOffset() || !apex.GetImageSize()) {
-    return Error() << "Cannot create mount point without image offset and size";
+  // Step 2. Create a block device for the payload
+
+  std::string block_device;
+  loop::LoopbackDeviceUniqueFd loop;
+  DmDevice linear_dev;
+
+  if (IsMountBeforeDataEnabled() && GetImageManager()->IsPinnedApex(apex)) {
+    linear_dev =
+        OR_RETURN(CreateDmLinearForPayload(apex, device_name + ".payload"));
+    block_device = linear_dev.GetDevPath();
+  } else {
+    loop = OR_RETURN(CreateLoopForApex(apex));
+    block_device = loop.name;
   }
-  loop::LoopbackDeviceUniqueFd loopback_device;
-  for (size_t attempts = 1;; ++attempts) {
-    Result<loop::LoopbackDeviceUniqueFd> ret =
-        loop::CreateAndConfigureLoopDevice(full_path,
-                                           apex.GetImageOffset().value(),
-                                           apex.GetImageSize().value());
-    if (ret.ok()) {
-      loopback_device = std::move(*ret);
-      break;
-    }
-    if (attempts >= kLoopDeviceSetupAttempts) {
-      return Error() << "Could not create loop device for " << full_path << ": "
-                     << ret.error();
-    }
-  }
-  LOG(VERBOSE) << "Loopback device created: " << loopback_device.name;
+
+  // Step 3. Wrap the block device with dm-verity (optional)
 
   auto verity_data = apex.VerifyApexVerity(apex.GetBundledPublicKey());
   if (!verity_data.ok()) {
@@ -436,11 +490,6 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     }
   }
 
-  std::string block_device = loopback_device.name;
-  MountedApexData apex_data(apex.GetManifest().version(), loopback_device.name,
-                            apex.GetPath(), mount_point,
-                            /* device_name = */ "");
-
   // for APEXes in immutable partitions, we don't need to mount them on
   // dm-verity because they are already in the dm-verity protected partition;
   // system. However, note that we don't skip verification to ensure that APEXes
@@ -454,7 +503,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   DmDevice verity_dev;
   if (mount_on_verity) {
     auto verity_table =
-        CreateVerityTable(*verity_data, loopback_device.name,
+        CreateVerityTable(*verity_data, block_device,
                           /* restart_on_corruption = */ !verify_image);
     Result<DmDevice> verity_dev_res =
         CreateDmDevice(device_name, *verity_table, reuse_device);
@@ -463,23 +512,19 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                      << ": " << verity_dev_res.error();
     }
     verity_dev = std::move(*verity_dev_res);
-    apex_data.device_name = device_name;
-    block_device = verity_dev.GetDevPath();
+    OR_RETURN(loop::ConfigureReadAhead(verity_dev.GetDevPath()));
 
-    Result<void> read_ahead_status =
-        loop::ConfigureReadAhead(verity_dev.GetDevPath());
-    if (!read_ahead_status.ok()) {
-      return read_ahead_status.error();
+    // TODO(b/158467418): consider moving this inside
+    // RunVerifyFnInsideTempMount.
+    if (verify_image) {
+      OR_RETURN(ReadVerityDevice(verity_dev.GetDevPath(),
+                                 (*verity_data).desc->image_size));
     }
+
+    block_device = verity_dev.GetDevPath();
   }
-  // TODO(b/158467418): consider moving this inside RunVerifyFnInsideTempMount.
-  if (mount_on_verity && verify_image) {
-    Result<void> verity_status =
-        ReadVerityDevice(block_device, (*verity_data).desc->image_size);
-    if (!verity_status.ok()) {
-      return verity_status.error();
-    }
-  }
+
+  // Step 4. Mount the payload filesystem at the mount point
 
   uint32_t mount_flags = MS_NOATIME | MS_NODEV | MS_DIRSYNC | MS_RDONLY;
   if (apex.GetManifest().nocode()) {
@@ -490,32 +535,38 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     return Error() << "Cannot mount package without FsType";
   }
   if (mount(block_device.c_str(), mount_point.c_str(),
-            apex.GetFsType().value().c_str(), mount_flags, nullptr) == 0) {
-    auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            boot_clock::now() - time_started)
-                            .count();
-    LOG(INFO) << "Successfully mounted package " << full_path << " on "
-              << mount_point << " duration=" << time_elapsed;
-    auto status = VerifyMountedImage(apex, mount_point);
-    if (!status.ok()) {
-      if (umount2(mount_point.c_str(), UMOUNT_NOFOLLOW) != 0) {
-        PLOG(ERROR) << "Failed to umount " << mount_point;
-      }
-      return Error() << "Failed to verify " << full_path << ": "
-                     << status.error();
-    }
-    // Time to accept the temporaries as good.
-    verity_dev.Release();
-    loopback_device.CloseGood();
-
-    scope_guard.Disable();  // Accept the mount.
-    return apex_data;
-  } else {
+            apex.GetFsType().value().c_str(), mount_flags, nullptr) != 0) {
     return ErrnoError() << "Mounting failed for package " << full_path;
   }
-}
 
-bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
+  // Step 5. After mounting, verify the mounted image
+
+  auto status = VerifyMountedImage(apex, mount_point);
+  if (!status.ok()) {
+    if (umount2(mount_point.c_str(), UMOUNT_NOFOLLOW) != 0) {
+      PLOG(ERROR) << "Failed to umount " << mount_point;
+    }
+    return Error() << "Failed to verify " << full_path << ": "
+                   << status.error();
+  }
+
+  auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          boot_clock::now() - time_started)
+                          .count();
+  LOG(INFO) << "Successfully mounted package " << full_path << " on "
+            << mount_point << " duration=" << time_elapsed;
+
+  MountedApexData apex_data(apex.GetManifest().version(), loop.name,
+                            apex.GetPath(), mount_point, verity_dev.GetName(),
+                            linear_dev.GetName());
+
+  // Time to accept the temporaries as good.
+  linear_dev.Release();
+  verity_dev.Release();
+  loop.CloseGood();
+  scope_guard.Disable();
+  return apex_data;
+}
 
 }  // namespace
 
@@ -534,28 +585,16 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
     }
   }
 
-  // Try to free up the device-mapper device.
-  if (!data.device_name.empty()) {
-    const auto& result = DeleteDmDevice(data.device_name, deferred);
-    if (!result.ok()) {
-      return result;
-    }
+  // Try to free up the device-mapper devices.
+  if (!data.verity_name.empty()) {
+    OR_RETURN(DeleteDmDevice(data.verity_name, deferred));
+  }
+  if (!data.linear_name.empty()) {
+    OR_RETURN(DeleteDmDevice(data.linear_name, deferred));
   }
 
-  // Try to free up the loop device.
-  auto log_fn = [](const std::string& path, const std::string& /*id*/) {
-    LOG(VERBOSE) << "Freeing loop device " << path << " for unmount.";
-  };
-
-  // Since we now use LO_FLAGS_AUTOCLEAR when configuring loop devices, in
-  // theory we don't need to manually call DestroyLoopDevice here even if
-  // |deferred| is false. However we prefer to call it to ensure the invariant
-  // of SubmitStagedSession (after it's done, loop devices created for temp
-  // mount are freed).
-  if (!data.loop_name.empty() && !deferred) {
-    loop::DestroyLoopDevice(data.loop_name, log_fn);
-  }
-
+  // Since we now use LO_FLAGS_AUTOCLEAR when configuring loop devices, we don't
+  // need to manually clear the loop here. (umount2 above will clear the loop.)
   return {};
 }
 
@@ -732,12 +771,14 @@ Result<VerificationResult> VerifyPackagesStagedInstall(
     const std::vector<ApexFile>& apex_files) {
   for (const auto& apex_file : apex_files) {
     OR_RETURN(VerifyPackageBoot(apex_file));
+  }
 
-    // Extra verification for brand-new APEX. The case that brand-new APEX is
-    // not enabled when there is install request for brand-new APEX is already
-    // covered in |VerifyPackageBoot|.
-    if (ApexFileRepository::IsBrandNewApexEnabled()) {
-      OR_RETURN(VerifyBrandNewPackageAgainstActive(apex_file));
+  // Extra verification for brand-new APEX. The case that brand-new APEX is
+  // not enabled when there is install request for brand-new APEX is already
+  // covered in |VerifyPackageBoot|.
+  if (ApexFileRepository::IsBrandNewApexEnabled()) {
+    for (const auto& apex_file : apex_files) {
+      OR_RETURN(VerifyBrandNewPackageAgainstActive(apex_file, gMountedApexes));
     }
   }
 
@@ -1161,16 +1202,11 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file,
   // We roll this into a single check.
   bool version_found_mounted = false;
   {
-    uint64_t new_version = manifest.version();
+    int64_t new_version = manifest.version();
     bool version_found_active = false;
     gMountedApexes.ForallMountedApexes(
         manifest.name(), [&](const MountedApexData& data, bool latest) {
-          Result<ApexFile> other_apex = ApexFile::Open(data.full_path);
-          if (!other_apex.ok()) {
-            return;
-          }
-          if (static_cast<uint64_t>(other_apex->GetManifest().version()) ==
-              new_version) {
+          if (data.version == new_version) {
             version_found_mounted = true;
             version_found_active = latest;
           }
@@ -2278,24 +2314,29 @@ int OnBootstrap() {
 }
 
 void InitializeVold(CheckpointInterface* checkpoint_service) {
-  if (checkpoint_service != nullptr) {
-    gVoldService = checkpoint_service;
-    Result<bool> supports_fs_checkpoints =
-        gVoldService->SupportsFsCheckpoints();
-    if (supports_fs_checkpoints.ok()) {
-      gSupportsFsCheckpoints = *supports_fs_checkpoints;
+  if (checkpoint_service == nullptr) {
+    // For tests to reset global states because tests that change global states
+    // may affect other tests.
+    gVoldService = nullptr;
+    gSupportsFsCheckpoints = false;
+    gInFsCheckpointMode = false;
+    return;
+  }
+  gVoldService = checkpoint_service;
+  Result<bool> supports_fs_checkpoints = gVoldService->SupportsFsCheckpoints();
+  if (supports_fs_checkpoints.ok()) {
+    gSupportsFsCheckpoints = *supports_fs_checkpoints;
+  } else {
+    LOG(ERROR) << "Failed to check if filesystem checkpoints are supported: "
+               << supports_fs_checkpoints.error();
+  }
+  if (gSupportsFsCheckpoints) {
+    Result<bool> needs_checkpoint = gVoldService->NeedsCheckpoint();
+    if (needs_checkpoint.ok()) {
+      gInFsCheckpointMode = *needs_checkpoint;
     } else {
-      LOG(ERROR) << "Failed to check if filesystem checkpoints are supported: "
-                 << supports_fs_checkpoints.error();
-    }
-    if (gSupportsFsCheckpoints) {
-      Result<bool> needs_checkpoint = gVoldService->NeedsCheckpoint();
-      if (needs_checkpoint.ok()) {
-        gInFsCheckpointMode = *needs_checkpoint;
-      } else {
-        LOG(ERROR) << "Failed to check if we're in filesystem checkpoint mode: "
-                   << needs_checkpoint.error();
-      }
+      LOG(ERROR) << "Failed to check if we're in filesystem checkpoint mode: "
+                 << needs_checkpoint.error();
     }
   }
 }
@@ -2330,7 +2371,7 @@ void Initialize(CheckpointInterface* checkpoint_service) {
 //  ApexFileRepository can act as cache and re-scanning is not expensive
 void InitializeDataApex() {
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  Result<void> status = instance.AddDataApex(kActiveApexPackagesDataDir);
+  auto status = instance.AddDataApex(gConfig->active_apex_data_dir);
   if (!status.ok()) {
     LOG(ERROR) << "Failed to collect data APEX files : " << status.error();
     return;
@@ -3020,7 +3061,8 @@ int UnmountAll(bool also_include_staged_apexes) {
 // Given a single new APEX incoming via OTA, should we allocate space for it?
 bool ShouldAllocateSpaceForDecompression(const std::string& new_apex_name,
                                          const int64_t new_apex_version,
-                                         const ApexFileRepository& instance) {
+                                         const ApexFileRepository& instance,
+                                         const MountedApexDatabase& db) {
   // An apex at most will have two versions on device: pre-installed and data.
 
   // Check if there is a pre-installed version for the new apex.
@@ -3030,47 +3072,43 @@ bool ShouldAllocateSpaceForDecompression(const std::string& new_apex_name,
   }
 
   // Check if there is a data apex
-  if (!instance.HasDataVersion(new_apex_name)) {
-    // Data apex doesn't exist. Compare against pre-installed APEX
-    auto pre_installed_apex = instance.GetPreInstalledApex(new_apex_name);
-    if (!pre_installed_apex.get().IsCompressed()) {
-      // Compressing an existing uncompressed system APEX.
-      return true;
-    }
-    // Since there is no data apex, it means device is using the compressed
-    // pre-installed version. If new apex has higher version, we are upgrading
-    // the pre-install version and if new apex has lower version, we are
-    // downgrading it. So the current decompressed apex should be replaced
-    // with the new decompressed apex to reflect that.
-    const int64_t pre_installed_version =
-        instance.GetPreInstalledApex(new_apex_name)
-            .get()
-            .GetManifest()
-            .version();
-    return new_apex_version != pre_installed_version;
+  // If the current active apex is preinstalled, then it means no data apex.
+  auto current_active = db.GetLatestMountedApex(new_apex_name);
+  if (!current_active) {
+    LOG(ERROR) << "Failed to get mount data for : " << new_apex_name
+               << " is preinstalled, but not activated.";
+    return true;
+  }
+  auto current_active_apex_file = ApexFile::Open(current_active->full_path);
+  if (!current_active_apex_file.ok()) {
+    LOG(ERROR) << "Failed to open " << current_active->full_path << " : "
+               << current_active_apex_file.error();
+    return true;
+  }
+  if (instance.IsPreInstalledApex(*current_active_apex_file)) {
+    return true;
   }
 
   // From here on, data apex exists. So we should compare directly against data
   // apex.
-  auto data_apex = instance.GetDataApex(new_apex_name);
-  // Compare the data apex version with new apex
-  const int64_t data_version = data_apex.get().GetManifest().version();
+  const int64_t data_version =
+      current_active_apex_file->GetManifest().version();
   // We only decompress the new_apex if it has higher version than data apex.
   return new_apex_version > data_version;
 }
 
 int64_t CalculateSizeForCompressedApex(
     const std::vector<std::tuple<std::string, int64_t, int64_t>>&
-        compressed_apexes,
-    const ApexFileRepository& instance) {
+        compressed_apexes) {
+  const auto& instance = ApexFileRepository::GetInstance();
   int64_t result = 0;
   for (const auto& compressed_apex : compressed_apexes) {
     std::string module_name;
     int64_t version_code;
     int64_t decompressed_size;
     std::tie(module_name, version_code, decompressed_size) = compressed_apex;
-    if (ShouldAllocateSpaceForDecompression(module_name, version_code,
-                                            instance)) {
+    if (ShouldAllocateSpaceForDecompression(module_name, version_code, instance,
+                                            gMountedApexes)) {
       result += decompressed_size;
     }
   }

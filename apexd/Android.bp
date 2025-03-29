@@ -87,6 +87,7 @@ cc_defaults {
     ],
     static_libs: [
         "lib_apex_blocklist_proto",
+        "lib_apex_image_list_proto",
         "lib_microdroid_metadata_proto",
         "libapex",
         "libavb",
@@ -564,6 +565,7 @@ cc_test {
         "apex_manifest_test.cpp",
         "apexd_brand_new_verifier_test.cpp",
         "apexd_image_manager_test.cpp",
+        "apexd_loop_test.cpp",
         "apexd_test.cpp",
         "apexd_session_test.cpp",
         "apexd_utils_test.cpp",

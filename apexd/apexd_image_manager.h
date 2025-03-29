@@ -28,6 +28,23 @@
 
 namespace android::apex {
 
+// ApexImageManager manages two lists of APEX files (or image names).
+// - ACTIVE: the list of "active" apexes. Candidates for activation.
+// - BACKUP: a copy of the last ACTIVE list that was successful.
+//
+// The lists are stored in /metadata/apex/images directory.
+enum ApexListType {
+  ACTIVE,
+  BACKUP,
+};
+
+struct ApexListEntry {
+  std::string image_name;
+  std::string apex_name;
+
+  inline auto operator<=>(const ApexListEntry&) const = default;
+};
+
 class ApexImageManager {
  public:
   ~ApexImageManager() = default;
@@ -41,6 +58,19 @@ class ApexImageManager {
   base::Result<void> DeleteImage(const std::string& image);
   std::vector<std::string> GetAllImages();
 
+  // True if the apex is backed by a dm-linear device created by
+  // ApexImageManager
+  bool IsPinnedApex(const ApexFile& file) const;
+
+  // Creates a dm-linear block device for a pinned apex and returns the path of
+  // the created block device.
+  base::Result<std::string> MapImage(const std::string& image);
+  base::Result<void> UnmapImage(const std::string& image);
+
+  base::Result<void> UpdateApexList(ApexListType list_type,
+                                    const std::vector<ApexListEntry>& entries);
+  base::Result<std::vector<ApexListEntry>> GetApexList(ApexListType list_type);
+
   static std::unique_ptr<ApexImageManager> Create(
       const std::string& metadata_images_dir,
       const std::string& data_images_dir);
@@ -48,6 +78,8 @@ class ApexImageManager {
  private:
   ApexImageManager(const std::string& metadata_dir,
                    const std::string& data_dir);
+
+  std::string GetApexListFile(ApexListType list_type) const;
 
   std::string metadata_dir_;
   std::string data_dir_;

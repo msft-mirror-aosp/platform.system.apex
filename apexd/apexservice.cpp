@@ -283,9 +283,8 @@ BinderStatus ApexService::calculateSizeForCompressedApex(
     compressed_apexes.emplace_back(apex_info.moduleName, apex_info.versionCode,
                                    apex_info.decompressedSize);
   }
-  const auto& instance = ApexFileRepository::GetInstance();
-  *required_size = ::android::apex::CalculateSizeForCompressedApex(
-      compressed_apexes, instance);
+  *required_size =
+      ::android::apex::CalculateSizeForCompressedApex(compressed_apexes);
   return BinderStatus::ok();
 }
 

@@ -191,12 +191,12 @@ GetTempMountedApexData(const std::string& package);
 // Exposed for unit tests
 bool ShouldAllocateSpaceForDecompression(const std::string& new_apex_name,
                                          int64_t new_apex_version,
-                                         const ApexFileRepository& instance);
+                                         const ApexFileRepository& instance,
+                                         const MountedApexDatabase& db);
 
 int64_t CalculateSizeForCompressedApex(
     const std::vector<std::tuple<std::string, int64_t, int64_t>>&
-        compressed_apexes,
-    const ApexFileRepository& instance);
+        compressed_apexes);
 
 // Casts |ApexPartition| to partition string used in XSD.
 std::string CastPartition(ApexPartition partition);

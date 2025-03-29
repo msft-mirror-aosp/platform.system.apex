@@ -15,22 +15,24 @@
  */
 
 #include "apex_database.h"
-#include "apex_constants.h"
-#include "apex_file.h"
-#include "apexd_utils.h"
-#include "string_log.h"
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/parseint.h>
 #include <android-base/result.h>
 #include <android-base/strings.h>
+#include <libdm/dm.h>
 
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
+
+#include "apex_constants.h"
+#include "apex_file.h"
+#include "apexd_utils.h"
+#include "string_log.h"
 
 using android::base::ConsumeSuffix;
 using android::base::EndsWith;
@@ -42,6 +44,7 @@ using android::base::Result;
 using android::base::Split;
 using android::base::StartsWith;
 using android::base::Trim;
+using android::dm::DeviceMapper;
 
 namespace fs = std::filesystem;
 
@@ -130,29 +133,35 @@ bool IsTempMountPoint(const std::string& mount_point) {
   return EndsWith(mount_point, ".tmp");
 }
 
-Result<void> PopulateLoopInfo(const BlockDevice& top_device,
-                              const std::vector<std::string>& data_dirs,
-                              MountedApexData* apex_data) {
+Result<BlockDevice> GetUnderlying(const BlockDevice& top_device) {
   std::vector<BlockDevice> slaves = top_device.GetSlaves();
   if (slaves.size() != 1) {
     return Error() << "dm device " << top_device.DevPath()
                    << " has unexpected number of slaves (should be 1) : "
                    << slaves.size();
   }
-  if (slaves[0].GetType() != LoopDevice) {
-    return Error() << slaves[0].DevPath() << " is not a loop device";
+  return std::move(slaves[0]);
+}
+
+static Result<void> ValidateDm(const std::string& device_name,
+                               const std::string& expected_type) {
+  auto& dm = DeviceMapper::Instance();
+  std::vector<DeviceMapper::TargetInfo> table;
+  if (!dm.GetTableInfo(device_name, &table)) {
+    return Error() << "Could not read device-mapper table for DM device: "
+                   << device_name;
   }
-  std::string backing_file =
-      OR_RETURN(slaves[0].GetProperty("loop/backing_file"));
-  bool is_data_loop_device = std::any_of(
-      data_dirs.begin(), data_dirs.end(),
-      [&](const std::string& dir) { return StartsWith(backing_file, dir); });
-  if (!is_data_loop_device) {
-    return Error() << "Data loop device " << slaves[0].DevPath()
-                   << " has unexpected backing file " << backing_file;
+  if (table.size() != 1) {
+    return Error() << "Unexpected table info(size=" << table.size()
+                   << ", expected=1) for DM device: " << device_name;
   }
-  apex_data->loop_name = slaves[0].DevPath();
-  apex_data->full_path = backing_file;
+  const auto& entry = table[0].spec;
+  auto target_type = DeviceMapper::GetTargetType(entry);
+  if (expected_type != target_type) {
+    return Error() << "Unexpected table type (" << target_type
+                   << ") for DM device: " << device_name
+                   << " (expected: " << expected_type << ")";
+  }
   return {};
 }
 
@@ -178,60 +187,70 @@ void NormalizeIfDeleted(MountedApexData* apex_data) {
 Result<MountedApexData> ResolveMountInfo(
     const BlockDevice& block, const std::string& mount_point,
     const std::vector<std::string>& data_dirs) {
+  MountedApexData result;
+  result.mount_point = mount_point;
+
   // Now, see if it is dm-verity or loop mounted
   switch (block.GetType()) {
     case LoopDevice: {
-      auto backing_file = block.GetProperty("loop/backing_file");
-      if (!backing_file.ok()) {
-        return backing_file.error();
-      }
-      MountedApexData result;
       result.loop_name = block.DevPath();
-      result.full_path = *backing_file;
-      result.mount_point = mount_point;
-      NormalizeIfDeleted(&result);
-      return result;
-    }
+      result.full_path = OR_RETURN(block.GetProperty("loop/backing_file"));
+    } break;
     case DeviceMapperDevice: {
-      auto name = block.GetProperty("dm/name");
-      if (!name.ok()) {
-        return name.error();
+      result.verity_name = OR_RETURN(block.GetProperty("dm/name"));
+      OR_RETURN(ValidateDm(result.verity_name, "verity"));
+      auto underlying = OR_RETURN(GetUnderlying(block));
+      switch (underlying.GetType()) {
+        case LoopDevice: {
+          result.loop_name = underlying.DevPath();
+          result.full_path =
+              OR_RETURN(underlying.GetProperty("loop/backing_file"));
+        } break;
+        case DeviceMapperDevice: {
+          result.linear_name = OR_RETURN(underlying.GetProperty("dm/name"));
+          OR_RETURN(ValidateDm(result.linear_name, "linear"));
+          result.full_path = OR_RETURN(GetUnderlying(underlying)).DevPath();
+        } break;
+        default:
+          return Error() << "Unknown underlying device type for dm-verity:"
+                         << underlying.DevPath();
       }
-      MountedApexData result;
-      result.mount_point = mount_point;
-      result.device_name = *name;
-      auto status = PopulateLoopInfo(block, data_dirs, &result);
-      if (!status.ok()) {
-        return status.error();
-      }
-      NormalizeIfDeleted(&result);
-      return result;
-    }
+    } break;
     case UnknownDevice: {
       return Errorf("Can't resolve {}", block.DevPath().string());
     }
   }
+
+  // Check if a mount with dm-verity + loop is backed by a data apex
+  if (!result.verity_name.empty() && !result.loop_name.empty()) {
+    bool is_data_loop_device = std::any_of(
+        data_dirs.begin(), data_dirs.end(), [&](const std::string& dir) {
+          return StartsWith(result.full_path, dir);
+        });
+    if (!is_data_loop_device) {
+      return Error() << "Data loop device " << result.loop_name
+                     << " has unexpected backing file " << result.full_path;
+    }
+  }
+
+  NormalizeIfDeleted(&result);
+  return result;
 }
 
 }  // namespace
 
 // On startup, APEX database is populated from /proc/mounts.
-
+//
 // /apex/<package-id> can be mounted from
 // - /dev/block/loopX : loop device
 // - /dev/block/dm-X : dm-verity
-
+//
 // In case of loop device, the original APEX file can be tracked
 // by /sys/block/loopX/loop/backing_file.
-
-// In case of dm-verity, it is mapped to a loop device.
-// This mapped loop device can be traced by
-// /sys/block/dm-X/slaves/ directory which contains
-// a symlink to /sys/block/loopY, which leads to
-// the original APEX file.
-// Device name can be retrieved from
-// /sys/block/dm-Y/dm/name.
-
+//
+// In case of dm-verity, its underlying block device can be
+// either a loop device or a dm-linear device.
+//
 // Need to read /proc/mounts on startup since apexd can start
 // at any time (It's a lazy service).
 void MountedApexDatabase::PopulateFromMounts(
@@ -263,13 +282,11 @@ void MountedApexDatabase::PopulateFromMounts(
 
     auto [package, version] = ParseMountPoint(mount_point);
     mount_data->version = version;
-    AddMountedApexLocked(package, *mount_data);
-
     LOG(INFO) << "Found " << mount_point << " backed by"
               << (mount_data->deleted ? " deleted " : " ") << "file "
               << mount_data->full_path;
+    AddMountedApexLocked(package, std::move(*mount_data));
   }
-
   LOG(INFO) << mounted_apexes_.size() << " packages restored.";
 }
 
