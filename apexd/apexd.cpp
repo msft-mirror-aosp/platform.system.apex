@@ -2381,18 +2381,6 @@ void Initialize(CheckpointInterface* checkpoint_service) {
       {gConfig->active_apex_data_dir, gConfig->decompression_dir});
 }
 
-// Note: Pre-installed apex are initialized in Initialize(CheckpointInterface*)
-// TODO(b/172911822): Consolidate this with Initialize() when
-//  ApexFileRepository can act as cache and re-scanning is not expensive
-void InitializeDataApex() {
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  auto status = instance.AddDataApex(gConfig->active_apex_data_dir);
-  if (!status.ok()) {
-    LOG(ERROR) << "Failed to collect data APEX files : " << status.error();
-    return;
-  }
-}
-
 /**
  * For every package X, there can be at most two APEX, pre-installed vs
  * installed on data. We usually select only one of these APEX for each package
