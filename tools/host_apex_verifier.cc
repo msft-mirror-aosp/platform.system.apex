@@ -41,10 +41,11 @@ passwd* getpwnam(const char*) {
   static char fake_buf[] = "fake";
   static passwd fake_passwd = {
       .pw_name = fake_buf,
-      .pw_dir = fake_buf,
-      .pw_shell = fake_buf,
+      .pw_passwd = nullptr,
       .pw_uid = 123,
       .pw_gid = 123,
+      .pw_dir = fake_buf,
+      .pw_shell = fake_buf,
   };
   return &fake_passwd;
 }
@@ -62,22 +63,14 @@ void PrintUsage(const std::string& msg = "") {
   }
   printf(R"(usage: host_apex_verifier [options]
 
-Tests APEX file(s) for correctness.
+Tests APEX file for correctness.
 
 Options:
-  --deapexer=PATH             Use the deapexer binary at this path when extracting APEXes.
-  --debugfs=PATH              Use the debugfs binary at this path when extracting APEXes.
-  --fsckerofs=PATH            Use the fsck.erofs binary at this path when extracting APEXes.
+  --deapexer=PATH             Use the deapexer binary at this path when extracting APEX.
+  --debugfs=PATH              Use the debugfs binary at this path when extracting APEX.
+  --fsckerofs=PATH            Use the fsck.erofs binary at this path when extracting APEX.
   --sdk_version=INT           The active system SDK version used when filtering versioned
                               init.rc files.
-for checking all APEXes:
-  --out_system=DIR            Path to the factory APEX directory for the system partition.
-  --out_system_ext=DIR        Path to the factory APEX directory for the system_ext partition.
-  --out_product=DIR           Path to the factory APEX directory for the product partition.
-  --out_vendor=DIR            Path to the factory APEX directory for the vendor partition.
-  --out_odm=DIR               Path to the factory APEX directory for the odm partition.
-
-for checking a single APEX:
   --apex=PATH                 Path to the target APEX.
   --partition_tag=[system|vendor|...] Partition for the target APEX.
 )");
@@ -177,37 +170,6 @@ void ScanApex(const std::string& deapexer, int sdk_version,
   CheckInitRc(extracted_apex_dir, manifest, sdk_version, is_vendor);
 }
 
-// Scan the factory APEX files in the partition apex dir.
-// Scans APEX files directly, rather than flattened ${PRODUCT_OUT}/apex/
-// directories. This allows us to check:
-//   - Prebuilt APEXes which do not flatten to that path.
-//   - Multi-installed APEXes, where only the default
-//     APEX may flatten to that path.
-//   - Extracted target_files archives which may not contain
-//     flattened <PARTITON>/apex/ directories.
-void ScanPartitionApexes(const std::string& deapexer, int sdk_version,
-                         const std::string& partition_dir,
-                         const std::string& partition_tag) {
-  LOG(INFO) << "Scanning " << partition_dir << " for factory APEXes in "
-            << partition_tag;
-
-  std::unique_ptr<DIR, decltype(&closedir)> apex_dir(
-      opendir(partition_dir.c_str()), closedir);
-  if (!apex_dir) {
-    LOG(WARNING) << "Unable to open dir " << partition_dir;
-    return;
-  }
-
-  dirent* entry;
-  while ((entry = readdir(apex_dir.get()))) {
-    if (base::EndsWith(entry->d_name, ".apex") ||
-        base::EndsWith(entry->d_name, ".capex")) {
-      ScanApex(deapexer, sdk_version, partition_dir + "/" + entry->d_name,
-               partition_tag);
-    }
-  }
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -219,11 +181,10 @@ int main(int argc, char** argv) {
   const char* host_out = getenv("ANDROID_HOST_OUT");
   if (host_out) {
     deapexer = std::string(host_out) + "/bin/deapexer";
-    debugfs = std::string(host_out) + "/bin/debugfs_static";
+    debugfs = std::string(host_out) + "/bin/debugfs";
     fsckerofs = std::string(host_out) + "/bin/fsck.erofs";
   }
   int sdk_version = INT_MAX;
-  std::map<std::string, std::string> partition_map;
   std::string apex;
   std::string partition_tag;
 
@@ -234,11 +195,6 @@ int main(int argc, char** argv) {
         {"debugfs", required_argument, nullptr, 0},
         {"fsckerofs", required_argument, nullptr, 0},
         {"sdk_version", required_argument, nullptr, 0},
-        {"out_system", required_argument, nullptr, 0},
-        {"out_system_ext", required_argument, nullptr, 0},
-        {"out_product", required_argument, nullptr, 0},
-        {"out_vendor", required_argument, nullptr, 0},
-        {"out_odm", required_argument, nullptr, 0},
         {"apex", required_argument, nullptr, 0},
         {"partition_tag", required_argument, nullptr, 0},
         {nullptr, 0, nullptr, 0},
@@ -273,12 +229,11 @@ int main(int argc, char** argv) {
           apex = optarg;
         }
         if (name == "partition_tag") {
-          partition_tag = optarg;
-        }
-        for (const auto& p : partitions) {
-          if (name == "out_" + p) {
-            partition_map[p] = optarg;
+          if (std::ranges::count(partitions, optarg) == 0) {
+            PrintUsage();
+            return EXIT_FAILURE;
           }
+          partition_tag = optarg;
         }
         break;
       }
@@ -298,34 +253,15 @@ int main(int argc, char** argv) {
     PrintUsage();
     return EXIT_FAILURE;
   }
-  if (deapexer.empty() || debugfs.empty() || fsckerofs.empty()) {
+  if (deapexer.empty() || debugfs.empty() || fsckerofs.empty() ||
+      apex.empty() || partition_tag.empty()) {
     PrintUsage();
     return EXIT_FAILURE;
   }
   deapexer += " --debugfs_path " + debugfs;
   deapexer += " --fsckerofs_path " + fsckerofs;
 
-  if (!!apex.empty() + !!partition_map.empty() != 1) {
-    PrintUsage("use either --apex or --out_<partition>.\n");
-    return EXIT_FAILURE;
-  }
-  if (!apex.empty()) {
-    if (std::find(partitions.begin(), partitions.end(), partition_tag) ==
-        partitions.end()) {
-      PrintUsage(
-          "--apex should come with "
-          "--partition_tag=[system|system_ext|product|vendor|odm].\n");
-      return EXIT_FAILURE;
-    }
-  }
-
-  if (!partition_map.empty()) {
-    for (const auto& [partition, dir] : partition_map) {
-      ScanPartitionApexes(deapexer, sdk_version, dir, partition);
-    }
-  } else {
-    ScanApex(deapexer, sdk_version, apex, partition_tag);
-  }
+  ScanApex(deapexer, sdk_version, apex, partition_tag);
   return EXIT_SUCCESS;
 }
 
