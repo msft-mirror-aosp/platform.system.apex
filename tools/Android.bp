@@ -25,7 +25,7 @@ python_binary_host {
         "apex_manifest",
     ],
     required: [
-        "debugfs",
+        "debugfs_static", // "debugfs" fails with BUILD_HOST_static=1
         "fsck.erofs",
     ],
 }
