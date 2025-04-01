@@ -125,10 +125,6 @@ class ApexFileRepository final {
   // credentials to verify the package reside.
   android::base::Result<ApexPartition> GetPartition(const ApexFile& apex) const;
 
-  // Returns trusted public key for an apex with the given |name|.
-  android::base::Result<const std::string> GetPublicKey(
-      const std::string& name) const;
-
   // Returns path to the pre-installed version of an apex with the given |name|.
   // For brand-new APEX, returns Error.
   // For block APEX which is not set as factory, returns Error.
@@ -175,10 +171,8 @@ class ApexFileRepository final {
   std::unordered_map<std::string, std::vector<ApexFileRef>> AllApexFilesByName()
       const;
 
-  // Returns a pre-installed version of apex with the given name. Caller is
-  // expected to check if there is a pre-installed apex with the given name
-  // using |HasPreinstalledVersion| function.
-  ApexFileRef GetPreInstalledApex(const std::string& name) const;
+  // Returns a pre-installed version of apex with the given name.
+  std::optional<ApexFileRef> GetPreInstalledApex(const std::string& name) const;
 
   // Returns if installation of brand-new APEX is enabled.
   static inline bool IsBrandNewApexEnabled() { return enable_brand_new_apex_; };

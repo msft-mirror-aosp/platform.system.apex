@@ -543,25 +543,6 @@ Result<ApexPartition> ApexFileRepository::GetPartition(
   return VerifyBrandNewPackageAgainstPreinstalled(apex);
 }
 
-// TODO(b/179497746): remove this method when we add api for fetching ApexFile
-//  by name
-Result<const std::string> ApexFileRepository::GetPublicKey(
-    const std::string& name) const {
-  auto it = pre_installed_store_.find(name);
-  if (it == pre_installed_store_.end()) {
-    // Special casing for APEXes backed by block devices, i.e. APEXes in VM.
-    // Inside a VM, we fall back to find the key from data_store_. This is
-    // because an APEX is put to either pre_installed_store_ or data_store,
-    // depending on whether it was a factory APEX or not in the host.
-    it = data_store_.find(name);
-    if (it != data_store_.end() && IsBlockApex(it->second)) {
-      return it->second.GetBundledPublicKey();
-    }
-    return Error() << "No preinstalled apex found for package " << name;
-  }
-  return it->second.GetBundledPublicKey();
-}
-
 Result<const std::string> ApexFileRepository::GetPreinstalledPath(
     const std::string& name) const {
   auto it = pre_installed_store_.find(name);
@@ -658,11 +639,13 @@ ApexFileRepository::AllApexFilesByName() const {
   return result;
 }
 
-ApexFileRef ApexFileRepository::GetPreInstalledApex(
+std::optional<ApexFileRef> ApexFileRepository::GetPreInstalledApex(
     const std::string& name) const {
   auto it = pre_installed_store_.find(name);
-  CHECK(it != pre_installed_store_.end());
-  return std::cref(it->second);
+  if (it != pre_installed_store_.end()) {
+    return std::cref(it->second);
+  }
+  return std::nullopt;
 }
 
 }  // namespace apex
