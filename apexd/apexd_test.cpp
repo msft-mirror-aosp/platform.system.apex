@@ -5134,6 +5134,14 @@ class MountBeforeDataTest : public ApexdMountTest {
       GetImageManager()->UnmapImageIfExists(image);
     }
   }
+
+  void SimulateReboot() {
+    DeactivateAllPackages();
+    ApexFileRepository::GetInstance().Reset();
+    // Staged apexes in /data/app-staging are not accessible
+    DeleteDirContent(staged_session_dir_);
+    InitializeVold(nullptr);
+  }
 };
 
 TEST_F(MountBeforeDataTest, ActivatePinnedApex) {
@@ -5229,6 +5237,32 @@ TEST_F(MountBeforeDataTest, OnBootstrapActivatesAllApexes_IgnoreInvalidImage) {
   ASSERT_EQ(0, OnBootstrap());
   ASSERT_THAT(GetApexMounts(),
               Contains("/apex/com.android.apex.test_package@2"));
+}
+
+TEST_F(MountBeforeDataTest, OnBootstrapActivatesStagedSessions) {
+  // Given that com.android.apex.test_package@1 is preinstalled
+  ASSERT_EQ(0, OnBootstrap());
+  auto mounts = GetApexMounts();
+
+  // Stage com.android.apex.test_package@2
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test_v2.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  SimulateReboot();
+
+  ASSERT_THAT(OnBootstrap(), Eq(0));
+
+  // Staged session should be activated.
+  auto session = GetSessionManager()->GetSession(session_id);
+  ASSERT_THAT(session, Ok());
+  ASSERT_EQ(session->GetState(), SessionState::ACTIVATED);
+
+  // The apex in the session should be activated.
+  std::ranges::replace(mounts, "/apex/com.android.apex.test_package@1"s,
+                       "/apex/com.android.apex.test_package@2"s);
+  ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {

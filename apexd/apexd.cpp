@@ -1926,6 +1926,76 @@ void DeleteDePreRestoreSnapshots(const ApexSession& session) {
 
 void OnBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
 
+Result<std::vector<std::string>> ActivateStagedSession(
+    const ApexSession& session) {
+  std::string build_fingerprint = GetProperty(kBuildFingerprintSysprop, "");
+  if (session.GetBuildFingerprint().compare(build_fingerprint) != 0) {
+    return Error() << "APEX build fingerprint has changed";
+  }
+
+  // If device supports fs-checkpoint, then apex session should only be
+  // installed when in checkpoint-mode. Otherwise, we will not be able to
+  // revert /data on error.
+  if (gSupportsFsCheckpoints && !gInFsCheckpointMode) {
+    return Error()
+           << "Cannot install apex session if not in fs-checkpoint mode";
+  }
+
+  if (IsMountBeforeDataEnabled()) {
+    if (session.GetApexImages().empty()) {
+      return Error() << "No apex found in session";
+    }
+    auto image_manager = GetImageManager();
+    std::vector<std::string> images{std::from_range, session.GetApexImages()};
+
+    auto unmap_devices = base::make_scope_guard([&]() {
+      for (const auto& image : images) {
+        auto unmap = image_manager->UnmapImageIfExists(image);
+        if (!unmap.ok()) {
+          LOG(ERROR) << unmap.error();
+        }
+      }
+    });
+
+    std::vector<std::string> apex_names_in_session;
+    apex_names_in_session.reserve(images.size());
+    for (const auto& image : images) {
+      auto dm_device = OR_RETURN(image_manager->MapImage(image));
+      auto apex_file = OR_RETURN(ApexFile::Open(dm_device));
+      OR_RETURN(VerifyPackageBoot(apex_file));
+
+      apex_names_in_session.push_back(apex_file.GetManifest().name());
+    }
+
+    // Now, update "active" list
+    auto active_list =
+        OR_RETURN(image_manager->GetApexList(ApexListType::ACTIVE));
+    // First, remove previously active apexes of newly activated packages
+    std::erase_if(active_list, [&](const auto& entry) {
+      return std::ranges::contains(apex_names_in_session, entry.apex_name);
+    });
+    // Then, add new apexes to the list
+    for (size_t i = 0; i < images.size(); i++) {
+      active_list.emplace_back(images[i], apex_names_in_session[i]);
+    }
+    // Finally, save it in the /metadata partition
+    OR_RETURN(image_manager->UpdateApexList(ApexListType::ACTIVE, active_list));
+
+    // Let's keep mapped devices because they needs to be mapped as "active" in
+    // ScanDataApexFiles().
+    unmap_devices.Disable();
+    return apex_names_in_session;
+  } else {
+    auto apexes = OR_RETURN(ScanSessionApexFiles(session));
+    auto packages = StagePackagesImpl(apexes);
+    if (!packages.ok()) {
+      return Error() << "Activation failed for packages "
+                     << base::Join(apexes, ", ") << ": " << packages.error();
+    }
+    return std::move(*packages);
+  }
+}
+
 // Scans all STAGED sessions and activate them so that APEXes in those sessions
 // become available for activation. Sessions are updated to be ACTIVATED state,
 // or ACTIVATION_FAILED if something goes wrong.
@@ -1952,55 +2022,18 @@ void ActivateStagedSessions() {
 
   for (auto& session : sessions_to_activate) {
     auto session_id = session.GetId();
-
-    auto session_failed_fn = [&]() {
+    auto packages = ActivateStagedSession(session);
+    if (!packages.ok()) {
+      LOG(ERROR) << packages.error();
+      session.SetErrorMessage(packages.error().message());
       LOG(WARNING) << "Marking session " << session_id << " as failed.";
       auto st = session.UpdateStateAndCommit(SessionState::ACTIVATION_FAILED);
       if (!st.ok()) {
         LOG(WARNING) << "Failed to mark session " << session_id
                      << " as failed : " << st.error();
       }
-    };
-    auto scope_guard = android::base::make_scope_guard(session_failed_fn);
-
-    std::string build_fingerprint = GetProperty(kBuildFingerprintSysprop, "");
-    if (session.GetBuildFingerprint().compare(build_fingerprint) != 0) {
-      auto error_message = "APEX build fingerprint has changed";
-      LOG(ERROR) << error_message;
-      session.SetErrorMessage(error_message);
       continue;
     }
-
-    // If device supports fs-checkpoint, then apex session should only be
-    // installed when in checkpoint-mode. Otherwise, we will not be able to
-    // revert /data on error.
-    if (gSupportsFsCheckpoints && !gInFsCheckpointMode) {
-      auto error_message =
-          "Cannot install apex session if not in fs-checkpoint mode";
-      LOG(ERROR) << error_message;
-      session.SetErrorMessage(error_message);
-      continue;
-    }
-
-    auto apexes = ScanSessionApexFiles(session);
-    if (!apexes.ok()) {
-      LOG(WARNING) << apexes.error();
-      session.SetErrorMessage(apexes.error().message());
-      continue;
-    }
-
-    auto packages = StagePackagesImpl(*apexes);
-    if (!packages.ok()) {
-      std::string error_message =
-          std::format("Activation failed for packages {} : {}", *apexes,
-                      packages.error().message());
-      LOG(ERROR) << error_message;
-      session.SetErrorMessage(error_message);
-      continue;
-    }
-
-    // Session was OK, release scopeguard.
-    scope_guard.Disable();
 
     gChangedActiveApexes.insert_range(*packages);
 
@@ -2315,6 +2348,19 @@ int OnBootstrap() {
   std::vector<ApexFileRef> activation_list;
 
   if (IsMountBeforeDataEnabled()) {
+    // Before scanning "active" data apexes, we need to apply any pending
+    // changes:
+    // - First, activate staged sessions. Apexes in staged sessions will be
+    //   marked as "active".
+    // - Second, resume any pending reverts. Revert will discard all active
+    //   sessions and restore the last known good "active" list.
+
+    ActivateStagedSessions();
+    if (auto result = ResumeRevertIfNeeded(); !result.ok()) {
+      LOG(ERROR) << "Failed to resume revert : " << result.error();
+    }
+
+    // Continue to scan active apexes and activate them.
     auto data_apexes = ScanDataApexFiles(GetImageManager());
     instance.AddDataApexFiles(std::move(data_apexes));
     activation_list = SelectApexForActivation();
