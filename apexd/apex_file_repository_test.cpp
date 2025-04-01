@@ -56,6 +56,7 @@ using ::testing::ContainerEq;
 using ::testing::Contains;
 using ::testing::IsEmpty;
 using ::testing::Not;
+using ::testing::Optional;
 using ::testing::Pair;
 using ::testing::UnorderedElementsAre;
 
@@ -107,12 +108,6 @@ TEST(ApexFileRepositoryTest, InitializeSuccess) {
   auto test_fn = [&](const std::string& apex_name) {
     auto apex = ApexFile::Open(GetTestFile(apex_name));
     ASSERT_RESULT_OK(apex);
-
-    {
-      auto ret = instance.GetPublicKey(apex->GetManifest().name());
-      ASSERT_RESULT_OK(ret);
-      ASSERT_EQ(apex->GetBundledPublicKey(), *ret);
-    }
 
     {
       auto ret = instance.GetPreinstalledPath(apex->GetManifest().name());
@@ -304,36 +299,18 @@ TEST(ApexFileRepositoryTest,
 TEST(ApexFileRepositoryTest, InitializePublicKeyUnexpectdlyChangedAborts) {
   // Prepare test data.
   TemporaryDir td;
-  fs::copy(GetTestFile("apex.apexd_test.apex"), td.path);
+  auto apex_path = std::string(td.path) + "/test.apex";
+  fs::copy(GetTestFile("apex.apexd_test.apex"), apex_path);
 
   ApexFileRepository instance;
   ASSERT_RESULT_OK(
       instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
 
-  auto apex_file = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
-
-  // Check that apex was loaded.
-  auto path = instance.GetPreinstalledPath(apex_file->GetManifest().name());
-  ASSERT_RESULT_OK(path);
-  ASSERT_EQ(StringPrintf("%s/apex.apexd_test.apex", td.path), *path);
-
-  auto public_key = instance.GetPublicKey("com.android.apex.test_package");
-  ASSERT_RESULT_OK(public_key);
+  fs::copy(GetTestFile("apex.apexd_test_different_key.apex"), apex_path,
+           fs::copy_options::overwrite_existing);
 
   // Substitute it with another apex with the same name, but different public
   // key.
-  fs::copy(GetTestFile("apex.apexd_test_different_key.apex"), *path,
-           fs::copy_options::overwrite_existing);
-
-  {
-    auto apex = ApexFile::Open(*path);
-    ASSERT_RESULT_OK(apex);
-    // Check module name hasn't changed.
-    ASSERT_EQ("com.android.apex.test_package", apex->GetManifest().name());
-    // Check public key has changed.
-    ASSERT_NE(*public_key, apex->GetBundledPublicKey());
-  }
-
   ASSERT_DEATH(
       { instance.AddPreInstalledApex({{ApexPartition::System, td.path}}); },
       "");
@@ -343,36 +320,17 @@ TEST(ApexFileRepositoryTest,
      InitializePublicKeyUnexpectdlyChangedAbortsCompressedApex) {
   // Prepare test data.
   TemporaryDir td;
-  fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"), td.path);
+  auto apex_path = std::string(td.path) + "/test.apex";
+  fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"), apex_path);
 
   ApexFileRepository instance;
   ASSERT_RESULT_OK(
       instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
 
-  // Check that apex was loaded.
-  auto apex_file =
-      ApexFile::Open(GetTestFile("com.android.apex.compressed.v1.capex"));
-  auto path = instance.GetPreinstalledPath(apex_file->GetManifest().name());
-  ASSERT_RESULT_OK(path);
-  ASSERT_EQ(StringPrintf("%s/com.android.apex.compressed.v1.capex", td.path),
-            *path);
-
-  auto public_key = instance.GetPublicKey("com.android.apex.compressed");
-  ASSERT_RESULT_OK(public_key);
-
   // Substitute it with another apex with the same name, but different public
   // key.
   fs::copy(GetTestFile("com.android.apex.compressed_different_key.capex"),
-           *path, fs::copy_options::overwrite_existing);
-
-  {
-    auto apex = ApexFile::Open(*path);
-    ASSERT_RESULT_OK(apex);
-    // Check module name hasn't changed.
-    ASSERT_EQ("com.android.apex.compressed", apex->GetManifest().name());
-    // Check public key has changed.
-    ASSERT_NE(*public_key, apex->GetBundledPublicKey());
-  }
+           apex_path, fs::copy_options::overwrite_existing);
 
   ASSERT_DEATH(
       { instance.AddPreInstalledApex({{ApexPartition::System, td.path}}); },
@@ -606,16 +564,12 @@ TEST(ApexFileRepositoryTest, GetPreInstalledApex) {
   ASSERT_RESULT_OK(apex);
 
   auto ret = instance.GetPreInstalledApex("com.android.apex.test_package");
-  ASSERT_THAT(ret, ApexFileEq(ByRef(*apex)));
+  ASSERT_THAT(ret, Optional(ApexFileEq(ByRef(*apex))));
 }
 
-TEST(ApexFileRepositoryTest, GetPreInstalledApexNoSuchApexAborts) {
-  ASSERT_DEATH(
-      {
-        ApexFileRepository instance;
-        instance.GetPreInstalledApex("whatever");
-      },
-      "");
+TEST(ApexFileRepositoryTest, GetPreInstalledApexNoSuchApex) {
+  ApexFileRepository instance;
+  ASSERT_EQ(instance.GetPreInstalledApex("whatever"), std::nullopt);
 }
 
 struct ApexFileRepositoryTestAddBlockApex : public ::testing::Test {
@@ -689,7 +643,7 @@ TEST_F(ApexFileRepositoryTestAddBlockApex,
 
   // "block" apexes are treated as "pre-installed" with "is_factory: true"
   auto ret_foo = instance.GetPreInstalledApex("com.android.apex.test_package");
-  ASSERT_THAT(ret_foo, ApexFileEq(ByRef(*apex_foo)));
+  ASSERT_THAT(ret_foo, Optional(ApexFileEq(ByRef(*apex_foo))));
 
   auto partition_foo = instance.GetPartition(*apex_foo);
   ASSERT_RESULT_OK(partition_foo);
@@ -699,7 +653,7 @@ TEST_F(ApexFileRepositoryTestAddBlockApex,
   ASSERT_RESULT_OK(apex_bar);
   auto ret_bar =
       instance.GetPreInstalledApex("com.android.apex.test_package_2");
-  ASSERT_THAT(ret_bar, ApexFileEq(ByRef(*apex_bar)));
+  ASSERT_THAT(ret_bar, Optional(ApexFileEq(ByRef(*apex_bar))));
 
   auto partition_bar = instance.GetPartition(*apex_bar);
   ASSERT_EQ(*partition_bar, ApexPartition::System);

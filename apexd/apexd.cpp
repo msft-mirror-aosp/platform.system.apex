@@ -711,13 +711,10 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
 // This function should only verification checks that are necessary to run on
 // each boot. Try to avoid putting expensive checks inside this function.
 Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
-  // TODO(ioffe): why do we need this here?
-  const auto& public_key =
-      OR_RETURN(apexd_private::GetVerifiedPublicKey(apex_file));
-  Result<ApexVerityData> verity_or = apex_file.VerifyApexVerity(public_key);
-  if (!verity_or.ok()) {
-    return verity_or.error();
-  }
+  // Verify bundled key against preinstalled data
+  OR_RETURN(apexd_private::CheckBundledPublicKeyMatchesPreinstalled(apex_file));
+  // Verify bundled key against apex itself
+  OR_RETURN(apex_file.VerifyApexVerity(apex_file.GetBundledPublicKey()));
 
   if (shim::IsShimApex(apex_file)) {
     // Validating shim is not a very cheap operation, but it's fine to perform
@@ -1006,17 +1003,25 @@ Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
 
 namespace apexd_private {
 
-Result<std::string> GetVerifiedPublicKey(const ApexFile& apex) {
-  auto preinstalled_public_key =
-      ApexFileRepository::GetInstance().GetPublicKey(apex.GetManifest().name());
-  if (preinstalled_public_key.ok()) {
-    return *preinstalled_public_key;
-  } else if (ApexFileRepository::IsBrandNewApexEnabled() &&
-             VerifyBrandNewPackageAgainstPreinstalled(apex).ok()) {
-    return apex.GetBundledPublicKey();
+Result<void> CheckBundledPublicKeyMatchesPreinstalled(const ApexFile& apex) {
+  const auto& name = apex.GetManifest().name();
+  // Check if the bundled key matches the preinstalled one.
+  auto preinstalled =
+      ApexFileRepository::GetInstance().GetPreInstalledApex(name);
+  if (preinstalled.has_value()) {
+    if (preinstalled->get().GetBundledPublicKey() ==
+        apex.GetBundledPublicKey()) {
+      return {};
+    }
+    return Error() << "public key doesn't match the pre-installed one";
+  }
+  if (ApexFileRepository::IsBrandNewApexEnabled()) {
+    if (VerifyBrandNewPackageAgainstPreinstalled(apex).ok()) {
+      return {};
+    }
   }
   return Error() << "No preinstalled apex found for unverified package "
-                 << apex.GetManifest().name();
+                 << name;
 }
 
 bool IsMounted(const std::string& full_path) {
@@ -1635,9 +1640,19 @@ Result<void> ActivateMissingApexes(const std::vector<ApexFileRef>& apexes,
       continue;
     }
     const std::string& name = apex.GetManifest().name();
-    if (activated_apexes.find(name) == activated_apexes.end()) {
-      fallback_apexes.push_back(file_repository.GetPreInstalledApex(name));
+    if (activated_apexes.find(name) != activated_apexes.end()) {
+      // It's activated. No need to fallback.
+      continue;
     }
+    auto preinstalled = file_repository.GetPreInstalledApex(name);
+    if (!preinstalled.has_value()) {
+      // Not every apex has preinstalled.
+      CHECK(ApexFileRepository::IsBrandNewApexEnabled() ||
+            file_repository.IsBlockApex(apex))
+          << "No preinstalled APEX found for " << name;
+      continue;
+    }
+    fallback_apexes.push_back(preinstalled.value());
   }
 
   // Process compressed APEX, if any
@@ -3456,14 +3471,15 @@ Result<void> CheckSupportsNonStagedInstall(const ApexFile& new_apex,
     }
   }
 
-  auto expected_public_key =
-      ApexFileRepository::GetInstance().GetPublicKey(new_manifest.name());
-  if (!expected_public_key.ok()) {
-    return expected_public_key.error();
-  }
-  auto verity_data = new_apex.VerifyApexVerity(*expected_public_key);
-  if (!verity_data.ok()) {
-    return verity_data.error();
+  // Brand-new apexes are not supported.
+  if (ApexFileRepository::IsBrandNewApexEnabled()) {
+    // Make sure that the new apex has the preinstall one.
+    auto preinstalled = ApexFileRepository::GetInstance().GetPreInstalledApex(
+        new_manifest.name());
+    if (!preinstalled.has_value()) {
+      return Error() << "No preinstalled apex found for package "
+                     << new_manifest.name();
+    }
   }
   return {};
 }
