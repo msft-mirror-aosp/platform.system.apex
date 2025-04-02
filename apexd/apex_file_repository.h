@@ -111,6 +111,8 @@ class ApexFileRepository final {
   // Populate instance by adding data apex files. Note that files can be
   // skipped when
   // - its bundled pubkey doesn't match the preinstalled
+  // - its version is lower than the preinstalled
+  // - it's a compressed one
   // - its filename ends with .decompressed.apex (for historical reason)
   void AddDataApexFiles(std::vector<ApexFile>&& files);
 

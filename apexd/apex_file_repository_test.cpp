@@ -422,14 +422,35 @@ TEST(ApexFileRepositoryTest, AddAndGetDataApex) {
 
 TEST(ApexFileRepositoryTest, AddDataApexIgnoreCompressedApex) {
   // Prepare test data.
-  TemporaryDir data_dir, decompression_dir;
+  TemporaryDir preinstalled_dir, data_dir;
+  fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"),
+           preinstalled_dir.path);
   fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"), data_dir.path);
 
   ApexFileRepository instance;
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, preinstalled_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   auto data_apexs = ApexFileRepositoryAccessor::GetDataApexFiles(instance);
-  ASSERT_EQ(data_apexs.size(), 0u);
+  ASSERT_THAT(data_apexs, IsEmpty());
+}
+
+TEST(ApexFileRepositoryTest, AddDataApexIgnoreCompressedApexWithApexExtension) {
+  // Prepare test data.
+  TemporaryDir preinstalled_dir, data_dir;
+  fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"),
+           preinstalled_dir.path);
+  fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"),
+           std::string(data_dir.path) + "/com.android.apex.compressed.apex");
+
+  ApexFileRepository instance;
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, preinstalled_dir.path}}));
+  ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
+
+  auto data_apexs = ApexFileRepositoryAccessor::GetDataApexFiles(instance);
+  ASSERT_THAT(data_apexs, IsEmpty());
 }
 
 TEST(ApexFileRepositoryTest, AddDataApexIgnoreIfNotPreInstalled) {
@@ -461,6 +482,21 @@ TEST(ApexFileRepositoryTest, AddDataApexPrioritizeHigherVersionApex) {
       ApexFile::Open(StringPrintf("%s/apex.apexd_test_v2.apex", data_dir.path));
   ASSERT_THAT(data_apexs,
               UnorderedElementsAre(ApexFileEq(ByRef(*normal_apex))));
+}
+
+TEST(ApexFileRepositoryTest, AddDataApexIgnoreIfLowerThanPreinstalled) {
+  // Prepare test data.
+  TemporaryDir built_in_dir, data_dir;
+  fs::copy(GetTestFile("apex.apexd_test_v2.apex"), built_in_dir.path);
+  fs::copy(GetTestFile("apex.apexd_test.apex"), data_dir.path);
+
+  ApexFileRepository instance;
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
+  ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
+
+  auto data_apexs = ApexFileRepositoryAccessor::GetDataApexFiles(instance);
+  ASSERT_THAT(data_apexs, IsEmpty());
 }
 
 TEST(ApexFileRepositoryTest, AddDataApexDoesNotScanDecompressedApex) {

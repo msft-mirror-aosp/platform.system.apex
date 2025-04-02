@@ -449,6 +449,14 @@ void ApexFileRepository::AddDataApexFiles(std::vector<ApexFile>&& apex_files) {
                    << " : public key doesn't match pre-installed one";
         continue;
       }
+      if (preinstalled->second.GetManifest().version() >
+          apex_file.GetManifest().version()) {
+        LOG(ERROR) << "Skipping " << file << " : version("
+                   << apex_file.GetManifest().version()
+                   << ") is lower than pre-installed one("
+                   << preinstalled->second.GetManifest().version() << ")";
+        continue;
+      }
     } else if (ApexFileRepository::IsBrandNewApexEnabled()) {
       auto verified_partition =
           VerifyBrandNewPackageAgainstPreinstalled(apex_file);
@@ -465,18 +473,15 @@ void ApexFileRepository::AddDataApexFiles(std::vector<ApexFile>&& apex_files) {
       continue;
     }
 
-    std::string select_filename = GetApexSelectFilenameFromProp(
-        multi_install_select_prop_prefixes_, name);
-    if (!select_filename.empty()) {
-      LOG(WARNING) << "APEX " << name << " is a multi-installed APEX."
-                   << " Any updated version in /data will always overwrite"
-                   << " the multi-installed preinstalled version, if possible.";
+    if (apex_file.IsCompressed()) {
+      LOG(ERROR) << "Skipping " << file
+                 << " : Compressed APEX in data is not supported";
+      continue;
     }
-
     if (EndsWith(file, kDecompressedApexPackageSuffix)) {
-      LOG(WARNING) << "Skipping " << file
-                   << " : Non-decompressed APEX should not have "
-                   << kDecompressedApexPackageSuffix << " suffix";
+      LOG(ERROR) << "Skipping " << file
+                 << " : Non-decompressed APEX should not have "
+                 << kDecompressedApexPackageSuffix << " suffix";
       continue;
     }
 
@@ -490,6 +495,11 @@ void ApexFileRepository::AddDataApexFiles(std::vector<ApexFile>&& apex_files) {
     auto new_version = apex_file.GetManifest().version();
     if (new_version > existing_version) {
       it->second = std::move(apex_file);
+    } else {
+      LOG(ERROR) << "Skipping " << file << " : version(" << new_version
+                 << ") is lower than or same as "
+                 << " the other (" << existing_version << ")";
+      continue;
     }
   }
 }
