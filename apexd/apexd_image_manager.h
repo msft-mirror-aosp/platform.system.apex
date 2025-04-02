@@ -66,6 +66,7 @@ class ApexImageManager {
   // the created block device.
   base::Result<std::string> MapImage(const std::string& image);
   base::Result<void> UnmapImage(const std::string& image);
+  base::Result<void> UnmapImageIfExists(const std::string& image);
 
   base::Result<void> UpdateApexList(ApexListType list_type,
                                     const std::vector<ApexListEntry>& entries);
