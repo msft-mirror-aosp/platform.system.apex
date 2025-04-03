@@ -1926,7 +1926,9 @@ void DeleteDePreRestoreSnapshots(const ApexSession& session) {
 
 void OnBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
 
-Result<std::vector<std::string>> ActivateStagedSession(
+// Moves all apexes in the session to "active" state in a transactional manner.
+// Returns the name list of the apexes in the session on success.
+Result<std::vector<std::string>> TryActivateStagedSession(
     const ApexSession& session) {
   std::string build_fingerprint = GetProperty(kBuildFingerprintSysprop, "");
   if (session.GetBuildFingerprint().compare(build_fingerprint) != 0) {
@@ -2022,7 +2024,7 @@ void ActivateStagedSessions() {
 
   for (auto& session : sessions_to_activate) {
     auto session_id = session.GetId();
-    auto packages = ActivateStagedSession(session);
+    auto packages = TryActivateStagedSession(session);
     if (!packages.ok()) {
       LOG(ERROR) << packages.error();
       session.SetErrorMessage(packages.error().message());
@@ -2306,6 +2308,21 @@ void PrepareResources(size_t loop_device_cnt,
   }
 }
 
+// Note that this needs to be called before scanning data apexes because revert
+// or activation may change the active set of data apexes. For example, revert
+// restores the active apexes from the last backup.
+void ProcessSessions() {
+  // If there's any pending revert, revert active sessions.
+  auto status = ResumeRevertIfNeeded();
+  if (!status.ok()) {
+    LOG(ERROR) << "Failed to resume revert : " << status.error();
+  }
+  // Then, activate STAGED sessions. Note that if ResumeRevertIfNeeded() had
+  // reverted active sessions, any STAGED sessions are all aborted and there's
+  // nothing to activate.
+  ActivateStagedSessions();
+}
+
 std::vector<ApexFile> ScanDataApexFiles(ApexImageManager* manager) {
   CHECK(IsMountBeforeDataEnabled());
   auto image_list = manager->GetApexList(ApexListType::ACTIVE);
@@ -2348,19 +2365,11 @@ int OnBootstrap() {
   std::vector<ApexFileRef> activation_list;
 
   if (IsMountBeforeDataEnabled()) {
-    // Before scanning "active" data apexes, we need to apply any pending
-    // changes:
-    // - First, activate staged sessions. Apexes in staged sessions will be
-    //   marked as "active".
-    // - Second, resume any pending reverts. Revert will discard all active
-    //   sessions and restore the last known good "active" list.
-
-    ActivateStagedSessions();
-    if (auto result = ResumeRevertIfNeeded(); !result.ok()) {
-      LOG(ERROR) << "Failed to resume revert : " << result.error();
-    }
-
-    // Continue to scan active apexes and activate them.
+    // Process sessions before scanning "active" data apexes because sessions
+    // can change the list of active data apexes:
+    // - if there's a pending revert, then reverts all active sessions.
+    // - if there's staged sessions, then activate them first.
+    ProcessSessions();
     auto data_apexes = ScanDataApexFiles(GetImageManager());
     instance.AddDataApexFiles(std::move(data_apexes));
     activation_list = SelectApexForActivation();
@@ -2781,18 +2790,15 @@ void OnStart() {
     LOG(ERROR) << sharedlibs_apex_dir.error();
   }
 
+  // Process sessions before adding data apexes.
   // If there is any new apex to be installed on /data/app-staging, hardlink
   // them to /data/apex/active first.
-  ActivateStagedSessions();
+  ProcessSessions();
+
   if (auto status = ApexFileRepository::GetInstance().AddDataApex(
           gConfig->active_apex_data_dir);
       !status.ok()) {
     LOG(ERROR) << "Failed to collect data APEX files : " << status.error();
-  }
-
-  auto status = ResumeRevertIfNeeded();
-  if (!status.ok()) {
-    LOG(ERROR) << "Failed to resume revert : " << status.error();
   }
 
   // Group every ApexFile on device by name
