@@ -2273,6 +2273,33 @@ void PrepareResources(size_t loop_device_cnt,
   }
 }
 
+std::vector<ApexFile> ScanDataApexFiles(ApexImageManager* manager) {
+  CHECK(IsMountBeforeDataEnabled());
+  auto image_list = manager->GetApexList(ApexListType::ACTIVE);
+  if (!image_list.ok()) {
+    LOG(ERROR) << "Failed to get active image list : " << image_list.error();
+    return {};
+  }
+  std::vector<ApexFile> apex_files;
+  apex_files.reserve(image_list->size());
+  for (const auto& entry : *image_list) {
+    auto path = manager->MapImage(entry.image_name);
+    // Log error and keep searching for active apexes
+    if (!path.ok()) {
+      LOG(ERROR) << "Skip " << entry.image_name << ": " << path.error();
+      continue;
+    }
+    auto apex_file = ApexFile::Open(*path);
+    if (!apex_file.ok()) {
+      manager->UnmapImage(entry.image_name);
+      LOG(ERROR) << "Skip " << entry.image_name << ": " << apex_file.error();
+      continue;
+    }
+    apex_files.push_back(std::move(*apex_file));
+  }
+  return apex_files;
+}
+
 int OnBootstrap() {
   ATRACE_NAME("OnBootstrap");
   auto time_started = boot_clock::now();
@@ -2288,6 +2315,8 @@ int OnBootstrap() {
   std::vector<ApexFileRef> activation_list;
 
   if (IsMountBeforeDataEnabled()) {
+    auto data_apexes = ScanDataApexFiles(GetImageManager());
+    instance.AddDataApexFiles(std::move(data_apexes));
     activation_list = SelectApexForActivation();
   } else {
     const auto& pre_installed_apexes = instance.GetPreInstalledApexFiles();
@@ -2382,18 +2411,6 @@ void Initialize(CheckpointInterface* checkpoint_service) {
 
   gMountedApexes.PopulateFromMounts(
       {gConfig->active_apex_data_dir, gConfig->decompression_dir});
-}
-
-// Note: Pre-installed apex are initialized in Initialize(CheckpointInterface*)
-// TODO(b/172911822): Consolidate this with Initialize() when
-//  ApexFileRepository can act as cache and re-scanning is not expensive
-void InitializeDataApex() {
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  auto status = instance.AddDataApex(gConfig->active_apex_data_dir);
-  if (!status.ok()) {
-    LOG(ERROR) << "Failed to collect data APEX files : " << status.error();
-    return;
-  }
 }
 
 /**
