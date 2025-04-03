@@ -195,13 +195,6 @@ int main(int argc, char** argv) {
 
   if (booting) {
     android::apex::OnStart();
-  } else {
-    // TODO(b/172911822): Trying to use data apex related ApexFileRepository
-    //  apis without initializing it should throw error. Also, unit tests should
-    //  not pass without initialization.
-    // TODO(b/172911822): Consolidate this with Initialize() when
-    //  ApexFileRepository can act as cache and re-scanning is not expensive
-    android::apex::InitializeDataApex();
   }
   // start apexservice before ApexdLifecycle::WaitForBootStatus which waits for
   // IApexService::markBootComplete().

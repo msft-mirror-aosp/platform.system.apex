@@ -248,6 +248,13 @@ Result<void> ApexImageManager::UnmapImage(const std::string& image) {
   return {};
 }
 
+Result<void> ApexImageManager::UnmapImageIfExists(const std::string& image) {
+  if (fsmgr_->IsImageMapped(image)) {
+    return UnmapImage(image);
+  }
+  return {};
+}
+
 std::string ApexImageManager::GetApexListFile(ApexListType list_type) const {
   switch (list_type) {
     case ApexListType::ACTIVE:
