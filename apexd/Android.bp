@@ -18,6 +18,7 @@ tidy_errors = [
     "bugprone-undelegated-constructor",
     // "bugprone-unhandled-self-assignment", // found in apex_manifest.proto
     "bugprone-unused-raii",
+    "bugprone-use-after-move",
     "cert-err34-c",
     "google-default-arguments",
     // "google-explicit-constructor", // found in com_android_apex.h
