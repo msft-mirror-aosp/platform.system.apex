@@ -108,6 +108,14 @@ class ApexFileRepository final {
   // finished, all queries to the instance are thread safe.
   android::base::Result<void> AddDataApex(const std::string& data_dir);
 
+  // Populate instance by adding data apex files. Note that files can be
+  // skipped when
+  // - its bundled pubkey doesn't match the preinstalled
+  // - its version is lower than the preinstalled
+  // - it's a compressed one
+  // - its filename ends with .decompressed.apex (for historical reason)
+  void AddDataApexFiles(std::vector<ApexFile>&& files);
+
   // Populates instance by collecting pre-installed credential files (.avbpubkey
   // for now) and blocklist files from the given directories. They are needed
   // specifically for brand-new APEX.
@@ -124,10 +132,6 @@ class ApexFileRepository final {
   // resides. For brand-new APEX, it is the partition where the
   // credentials to verify the package reside.
   android::base::Result<ApexPartition> GetPartition(const ApexFile& apex) const;
-
-  // Returns trusted public key for an apex with the given |name|.
-  android::base::Result<const std::string> GetPublicKey(
-      const std::string& name) const;
 
   // Returns path to the pre-installed version of an apex with the given |name|.
   // For brand-new APEX, returns Error.
@@ -175,10 +179,8 @@ class ApexFileRepository final {
   std::unordered_map<std::string, std::vector<ApexFileRef>> AllApexFilesByName()
       const;
 
-  // Returns a pre-installed version of apex with the given name. Caller is
-  // expected to check if there is a pre-installed apex with the given name
-  // using |HasPreinstalledVersion| function.
-  ApexFileRef GetPreInstalledApex(const std::string& name) const;
+  // Returns a pre-installed version of apex with the given name.
+  std::optional<ApexFileRef> GetPreInstalledApex(const std::string& name) const;
 
   // Returns if installation of brand-new APEX is enabled.
   static inline bool IsBrandNewApexEnabled() { return enable_brand_new_apex_; };
@@ -212,12 +214,12 @@ class ApexFileRepository final {
   void StorePreInstalledApex(ApexFile&& apex_file, ApexPartition partition);
 
   // Scans and returns apexes in the given directories.
-  android::base::Result<std::vector<ApexPath>> CollectPreInstalledApex(
+  static base::Result<std::vector<ApexPath>> CollectPreInstalledApex(
       const std::unordered_map<ApexPartition, std::string>&
           partition_to_prebuilt_dirs);
 
   // Opens and returns the apexes in the given paths.
-  android::base::Result<std::vector<ApexFileAndPartition>> OpenApexFiles(
+  static base::Result<std::vector<ApexFileAndPartition>> OpenApexFiles(
       const std::vector<ApexPath>& apex_paths);
 
   std::unordered_map<std::string, ApexFile> pre_installed_store_, data_store_;

@@ -73,7 +73,7 @@ def InitTools(tool_path):
       tool: ToolPath(tool)
       for tool in [
           'deapexer',
-          'debugfs_static',
+          'debugfs',
           'fsck.erofs',
           'llvm-readelf',
       ]
@@ -119,7 +119,7 @@ def CheckElfFiles(args, tools):
         [
             tools['deapexer'],
             '--debugfs_path',
-            tools['debugfs_static'],
+            tools['debugfs'],
             '--fsckerofs_path',
             tools['fsck.erofs'],
             'extract',
@@ -137,7 +137,7 @@ def CheckElfFiles(args, tools):
         if unwanted & needed:
           sys.exit(
               f'{os.path.relpath(file, work_dir)} has unwanted NEEDED:'
-              f' {",".join(unwanted & needed)}'
+              f' {','.join(unwanted & needed)}'
           )
 
 

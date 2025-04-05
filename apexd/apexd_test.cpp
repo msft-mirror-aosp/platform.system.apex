@@ -930,6 +930,12 @@ class ApexdMountTest : public ApexdUnitTest {
 
   void TearDown() override {
     SetBlockApexEnabled(false);
+    DeactivateAllPackages();
+    InitMetrics({});  // reset
+    ApexdUnitTest::TearDown();
+  }
+
+  void DeactivateAllPackages() {
     auto activated = std::vector<std::string>{};
     GetApexDatabaseForTesting().ForallMountedApexes(
         [&](auto pkg, auto data, auto latest) {
@@ -940,8 +946,6 @@ class ApexdMountTest : public ApexdUnitTest {
         LOG(ERROR) << "Failed to unmount " << apex << " : " << status.error();
       }
     }
-    InitMetrics({});  // reset
-    ApexdUnitTest::TearDown();
   }
 
   void SetBlockApexEnabled(bool enabled) {
@@ -5122,6 +5126,22 @@ class MountBeforeDataTest : public ApexdMountTest {
     AddPreInstalledApex("apex.apexd_test.apex");
     AddPreInstalledApex("apex.apexd_test_different_app.apex");
   }
+
+  void TearDown() override {
+    ApexdMountTest::TearDown();
+    // Unmap dm-linear devices mapped by ApexImageManager
+    for (const auto& image : GetImageManager()->GetAllImages()) {
+      GetImageManager()->UnmapImageIfExists(image);
+    }
+  }
+
+  void SimulateReboot() {
+    DeactivateAllPackages();
+    ApexFileRepository::GetInstance().Reset();
+    // Staged apexes in /data/app-staging are not accessible
+    DeleteDirContent(staged_session_dir_);
+    InitializeVold(nullptr);
+  }
 };
 
 TEST_F(MountBeforeDataTest, ActivatePinnedApex) {
@@ -5183,6 +5203,66 @@ TEST_F(MountBeforeDataTest, OnBootstrapActivatesAllApexes) {
                                    "/apex/com.android.apex.test_package_2@1"s,
                                    "/apex/com.android.apex.test_package"s,
                                    "/apex/com.android.apex.test_package@1"s));
+}
+
+TEST_F(MountBeforeDataTest, OnBootstrapActivatesAllApexes_ActivateData) {
+  // Prepare pinned data apex before onBootstrap()
+  auto data_apex = ApexFile::Open(GetTestFile("apex.apexd_test_v2.apex"));
+  auto pinned = image_manager_->PinApexFiles(Single(*data_apex));
+  ASSERT_THAT(pinned, Ok());
+  // Prepare the active list
+  std::vector<ApexListEntry> list;
+  list.emplace_back(pinned->at(0), data_apex->GetManifest().name());
+  ASSERT_THAT(image_manager_->UpdateApexList(ApexListType::ACTIVE, list), Ok());
+
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Pinned apex (com.android.apex.test_package@2) is activated.
+  ASSERT_THAT(GetApexMounts(),
+              Contains("/apex/com.android.apex.test_package@2"));
+}
+
+TEST_F(MountBeforeDataTest, OnBootstrapActivatesAllApexes_IgnoreInvalidImage) {
+  // Prepare pinned data apex before onBootstrap()
+  auto data_apex = ApexFile::Open(GetTestFile("apex.apexd_test_v2.apex"));
+  auto pinned = image_manager_->PinApexFiles(Single(*data_apex));
+  ASSERT_THAT(pinned, Ok());
+  // Prepare the active list
+  std::vector<ApexListEntry> list;
+  list.emplace_back("invalid", "invalid");                            // invalid
+  list.emplace_back(pinned->at(0), data_apex->GetManifest().name());  // valid
+  ASSERT_THAT(image_manager_->UpdateApexList(ApexListType::ACTIVE, list), Ok());
+
+  // OnBootstrap() should succeed with valid ones.
+  ASSERT_EQ(0, OnBootstrap());
+  ASSERT_THAT(GetApexMounts(),
+              Contains("/apex/com.android.apex.test_package@2"));
+}
+
+TEST_F(MountBeforeDataTest, OnBootstrapActivatesStagedSessions) {
+  // Given that com.android.apex.test_package@1 is preinstalled
+  ASSERT_EQ(0, OnBootstrap());
+  auto mounts = GetApexMounts();
+
+  // Stage com.android.apex.test_package@2
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test_v2.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  SimulateReboot();
+
+  ASSERT_THAT(OnBootstrap(), Eq(0));
+
+  // Staged session should be activated.
+  auto session = GetSessionManager()->GetSession(session_id);
+  ASSERT_THAT(session, Ok());
+  ASSERT_EQ(session->GetState(), SessionState::ACTIVATED);
+
+  // The apex in the session should be activated.
+  std::ranges::replace(mounts, "/apex/com.android.apex.test_package@1"s,
+                       "/apex/com.android.apex.test_package@2"s);
+  ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {

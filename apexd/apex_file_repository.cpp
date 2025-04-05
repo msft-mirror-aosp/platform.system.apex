@@ -47,6 +47,7 @@ using ::apex::proto::ApexBlocklist;
 namespace android {
 namespace apex {
 
+namespace {
 std::string ConsumeApexPackageSuffix(const std::string& path) {
   std::string_view path_view(path);
   android::base::ConsumeSuffix(&path_view, kApexPackageSuffix);
@@ -64,6 +65,7 @@ std::string GetApexSelectFilenameFromProp(
   }
   return "";
 }
+}  // namespace
 
 void ApexFileRepository::StorePreInstalledApex(ApexFile&& apex_file,
                                                ApexPartition partition) {
@@ -404,8 +406,6 @@ Result<int> ApexFileRepository::AddBlockApex(
   return {ret};
 }
 
-// TODO(b/179497746): AddDataApex should not concern with filtering out invalid
-//   apex.
 Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
   LOG(INFO) << "Scanning " << data_dir << " for data ApexFiles";
   if (access(data_dir.c_str(), F_OK) != 0 && errno == ENOENT) {
@@ -420,6 +420,8 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
   }
 
   // TODO(b/179248390): scan parallelly if possible
+  std::vector<ApexFile> apex_files;
+  apex_files.reserve(active_apex->size());
   for (const auto& file : *active_apex) {
     LOG(INFO) << "Found updated apex " << file;
     Result<ApexFile> apex_file = ApexFile::Open(file);
@@ -427,20 +429,37 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
       LOG(ERROR) << "Failed to open " << file << " : " << apex_file.error();
       continue;
     }
+    apex_files.push_back(std::move(*apex_file));
+  }
 
-    const std::string& name = apex_file->GetManifest().name();
+  AddDataApexFiles(std::move(apex_files));
+  return {};
+}
+
+void ApexFileRepository::AddDataApexFiles(std::vector<ApexFile>&& apex_files) {
+  for (auto& apex_file : apex_files) {
+    const std::string& file = apex_file.GetPath();
+    const std::string& name = apex_file.GetManifest().name();
     auto preinstalled = pre_installed_store_.find(name);
     if (preinstalled != pre_installed_store_.end()) {
       if (preinstalled->second.GetBundledPublicKey() !=
-          apex_file->GetBundledPublicKey()) {
+          apex_file.GetBundledPublicKey()) {
         // Ignore data apex if public key doesn't match with pre-installed apex
         LOG(ERROR) << "Skipping " << file
                    << " : public key doesn't match pre-installed one";
         continue;
       }
+      if (preinstalled->second.GetManifest().version() >
+          apex_file.GetManifest().version()) {
+        LOG(ERROR) << "Skipping " << file << " : version("
+                   << apex_file.GetManifest().version()
+                   << ") is lower than pre-installed one("
+                   << preinstalled->second.GetManifest().version() << ")";
+        continue;
+      }
     } else if (ApexFileRepository::IsBrandNewApexEnabled()) {
       auto verified_partition =
-          VerifyBrandNewPackageAgainstPreinstalled(*apex_file);
+          VerifyBrandNewPackageAgainstPreinstalled(apex_file);
       if (!verified_partition.ok()) {
         LOG(ERROR) << "Skipping " << file << " : "
                    << verified_partition.error();
@@ -454,37 +473,35 @@ Result<void> ApexFileRepository::AddDataApex(const std::string& data_dir) {
       continue;
     }
 
-    std::string select_filename = GetApexSelectFilenameFromProp(
-        multi_install_select_prop_prefixes_, name);
-    if (!select_filename.empty()) {
-      LOG(WARNING) << "APEX " << name << " is a multi-installed APEX."
-                   << " Any updated version in /data will always overwrite"
-                   << " the multi-installed preinstalled version, if possible.";
+    if (apex_file.IsCompressed()) {
+      LOG(ERROR) << "Skipping " << file
+                 << " : Compressed APEX in data is not supported";
+      continue;
     }
-
-    if (EndsWith(apex_file->GetPath(), kDecompressedApexPackageSuffix)) {
-      LOG(WARNING) << "Skipping " << file
-                   << " : Non-decompressed APEX should not have "
-                   << kDecompressedApexPackageSuffix << " suffix";
+    if (EndsWith(file, kDecompressedApexPackageSuffix)) {
+      LOG(ERROR) << "Skipping " << file
+                 << " : Non-decompressed APEX should not have "
+                 << kDecompressedApexPackageSuffix << " suffix";
       continue;
     }
 
     auto it = data_store_.find(name);
     if (it == data_store_.end()) {
-      data_store_.emplace(name, std::move(*apex_file));
+      data_store_.emplace(name, std::move(apex_file));
       continue;
     }
 
-    const auto& existing_version = it->second.GetManifest().version();
-    const auto new_version = apex_file->GetManifest().version();
-    // If multiple data apexs are preset, select the one with highest version
-    bool prioritize_higher_version = new_version > existing_version;
-    // For same version, non-decompressed apex gets priority
-    if (prioritize_higher_version) {
-      it->second = std::move(*apex_file);
+    auto existing_version = it->second.GetManifest().version();
+    auto new_version = apex_file.GetManifest().version();
+    if (new_version > existing_version) {
+      it->second = std::move(apex_file);
+    } else {
+      LOG(ERROR) << "Skipping " << file << " : version(" << new_version
+                 << ") is lower than or same as "
+                 << " the other (" << existing_version << ")";
+      continue;
     }
   }
-  return {};
 }
 
 Result<void> ApexFileRepository::AddBrandNewApexCredentialAndBlocklist(
@@ -541,25 +558,6 @@ Result<ApexPartition> ApexFileRepository::GetPartition(
     return Error() << "No preinstalled data found for package " << name;
   }
   return VerifyBrandNewPackageAgainstPreinstalled(apex);
-}
-
-// TODO(b/179497746): remove this method when we add api for fetching ApexFile
-//  by name
-Result<const std::string> ApexFileRepository::GetPublicKey(
-    const std::string& name) const {
-  auto it = pre_installed_store_.find(name);
-  if (it == pre_installed_store_.end()) {
-    // Special casing for APEXes backed by block devices, i.e. APEXes in VM.
-    // Inside a VM, we fall back to find the key from data_store_. This is
-    // because an APEX is put to either pre_installed_store_ or data_store,
-    // depending on whether it was a factory APEX or not in the host.
-    it = data_store_.find(name);
-    if (it != data_store_.end() && IsBlockApex(it->second)) {
-      return it->second.GetBundledPublicKey();
-    }
-    return Error() << "No preinstalled apex found for package " << name;
-  }
-  return it->second.GetBundledPublicKey();
 }
 
 Result<const std::string> ApexFileRepository::GetPreinstalledPath(
@@ -658,11 +656,13 @@ ApexFileRepository::AllApexFilesByName() const {
   return result;
 }
 
-ApexFileRef ApexFileRepository::GetPreInstalledApex(
+std::optional<ApexFileRef> ApexFileRepository::GetPreInstalledApex(
     const std::string& name) const {
   auto it = pre_installed_store_.find(name);
-  CHECK(it != pre_installed_store_.end());
-  return std::cref(it->second);
+  if (it != pre_installed_store_.end()) {
+    return std::cref(it->second);
+  }
+  return std::nullopt;
 }
 
 }  // namespace apex

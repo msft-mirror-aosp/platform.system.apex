@@ -201,9 +201,12 @@ bool IsBootstrapApex(const ApexFile& apex) {
     return ret;
   }();
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   if (apex.GetManifest().vendorbootstrap() || apex.GetManifest().bootstrap()) {
     return true;
   }
+#pragma clang diagnostic pop
 
   return std::find(kBootstrapApexes.begin(), kBootstrapApexes.end(),
                    apex.GetManifest().name()) != kBootstrapApexes.end() ||
@@ -711,13 +714,10 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
 // This function should only verification checks that are necessary to run on
 // each boot. Try to avoid putting expensive checks inside this function.
 Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
-  // TODO(ioffe): why do we need this here?
-  const auto& public_key =
-      OR_RETURN(apexd_private::GetVerifiedPublicKey(apex_file));
-  Result<ApexVerityData> verity_or = apex_file.VerifyApexVerity(public_key);
-  if (!verity_or.ok()) {
-    return verity_or.error();
-  }
+  // Verify bundled key against preinstalled data
+  OR_RETURN(apexd_private::CheckBundledPublicKeyMatchesPreinstalled(apex_file));
+  // Verify bundled key against apex itself
+  OR_RETURN(apex_file.VerifyApexVerity(apex_file.GetBundledPublicKey()));
 
   if (shim::IsShimApex(apex_file)) {
     // Validating shim is not a very cheap operation, but it's fine to perform
@@ -1006,17 +1006,25 @@ Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
 
 namespace apexd_private {
 
-Result<std::string> GetVerifiedPublicKey(const ApexFile& apex) {
-  auto preinstalled_public_key =
-      ApexFileRepository::GetInstance().GetPublicKey(apex.GetManifest().name());
-  if (preinstalled_public_key.ok()) {
-    return *preinstalled_public_key;
-  } else if (ApexFileRepository::IsBrandNewApexEnabled() &&
-             VerifyBrandNewPackageAgainstPreinstalled(apex).ok()) {
-    return apex.GetBundledPublicKey();
+Result<void> CheckBundledPublicKeyMatchesPreinstalled(const ApexFile& apex) {
+  const auto& name = apex.GetManifest().name();
+  // Check if the bundled key matches the preinstalled one.
+  auto preinstalled =
+      ApexFileRepository::GetInstance().GetPreInstalledApex(name);
+  if (preinstalled.has_value()) {
+    if (preinstalled->get().GetBundledPublicKey() ==
+        apex.GetBundledPublicKey()) {
+      return {};
+    }
+    return Error() << "public key doesn't match the pre-installed one";
+  }
+  if (ApexFileRepository::IsBrandNewApexEnabled()) {
+    if (VerifyBrandNewPackageAgainstPreinstalled(apex).ok()) {
+      return {};
+    }
   }
   return Error() << "No preinstalled apex found for unverified package "
-                 << apex.GetManifest().name();
+                 << name;
 }
 
 bool IsMounted(const std::string& full_path) {
@@ -1635,9 +1643,19 @@ Result<void> ActivateMissingApexes(const std::vector<ApexFileRef>& apexes,
       continue;
     }
     const std::string& name = apex.GetManifest().name();
-    if (activated_apexes.find(name) == activated_apexes.end()) {
-      fallback_apexes.push_back(file_repository.GetPreInstalledApex(name));
+    if (activated_apexes.find(name) != activated_apexes.end()) {
+      // It's activated. No need to fallback.
+      continue;
     }
+    auto preinstalled = file_repository.GetPreInstalledApex(name);
+    if (!preinstalled.has_value()) {
+      // Not every apex has preinstalled.
+      CHECK(ApexFileRepository::IsBrandNewApexEnabled() ||
+            file_repository.IsBlockApex(apex))
+          << "No preinstalled APEX found for " << name;
+      continue;
+    }
+    fallback_apexes.push_back(preinstalled.value());
   }
 
   // Process compressed APEX, if any
@@ -1908,6 +1926,78 @@ void DeleteDePreRestoreSnapshots(const ApexSession& session) {
 
 void OnBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
 
+// Moves all apexes in the session to "active" state in a transactional manner.
+// Returns the name list of the apexes in the session on success.
+Result<std::vector<std::string>> TryActivateStagedSession(
+    const ApexSession& session) {
+  std::string build_fingerprint = GetProperty(kBuildFingerprintSysprop, "");
+  if (session.GetBuildFingerprint().compare(build_fingerprint) != 0) {
+    return Error() << "APEX build fingerprint has changed";
+  }
+
+  // If device supports fs-checkpoint, then apex session should only be
+  // installed when in checkpoint-mode. Otherwise, we will not be able to
+  // revert /data on error.
+  if (gSupportsFsCheckpoints && !gInFsCheckpointMode) {
+    return Error()
+           << "Cannot install apex session if not in fs-checkpoint mode";
+  }
+
+  if (IsMountBeforeDataEnabled()) {
+    if (session.GetApexImages().empty()) {
+      return Error() << "No apex found in session";
+    }
+    auto image_manager = GetImageManager();
+    std::vector<std::string> images{std::from_range, session.GetApexImages()};
+
+    auto unmap_devices = base::make_scope_guard([&]() {
+      for (const auto& image : images) {
+        auto unmap = image_manager->UnmapImageIfExists(image);
+        if (!unmap.ok()) {
+          LOG(ERROR) << unmap.error();
+        }
+      }
+    });
+
+    std::vector<std::string> apex_names_in_session;
+    apex_names_in_session.reserve(images.size());
+    for (const auto& image : images) {
+      auto dm_device = OR_RETURN(image_manager->MapImage(image));
+      auto apex_file = OR_RETURN(ApexFile::Open(dm_device));
+      OR_RETURN(VerifyPackageBoot(apex_file));
+
+      apex_names_in_session.push_back(apex_file.GetManifest().name());
+    }
+
+    // Now, update "active" list
+    auto active_list =
+        OR_RETURN(image_manager->GetApexList(ApexListType::ACTIVE));
+    // First, remove previously active apexes of newly activated packages
+    std::erase_if(active_list, [&](const auto& entry) {
+      return std::ranges::contains(apex_names_in_session, entry.apex_name);
+    });
+    // Then, add new apexes to the list
+    for (size_t i = 0; i < images.size(); i++) {
+      active_list.emplace_back(images[i], apex_names_in_session[i]);
+    }
+    // Finally, save it in the /metadata partition
+    OR_RETURN(image_manager->UpdateApexList(ApexListType::ACTIVE, active_list));
+
+    // Let's keep mapped devices because they needs to be mapped as "active" in
+    // ScanDataApexFiles().
+    unmap_devices.Disable();
+    return apex_names_in_session;
+  } else {
+    auto apexes = OR_RETURN(ScanSessionApexFiles(session));
+    auto packages = StagePackagesImpl(apexes);
+    if (!packages.ok()) {
+      return Error() << "Activation failed for packages "
+                     << base::Join(apexes, ", ") << ": " << packages.error();
+    }
+    return std::move(*packages);
+  }
+}
+
 // Scans all STAGED sessions and activate them so that APEXes in those sessions
 // become available for activation. Sessions are updated to be ACTIVATED state,
 // or ACTIVATION_FAILED if something goes wrong.
@@ -1934,55 +2024,18 @@ void ActivateStagedSessions() {
 
   for (auto& session : sessions_to_activate) {
     auto session_id = session.GetId();
-
-    auto session_failed_fn = [&]() {
+    auto packages = TryActivateStagedSession(session);
+    if (!packages.ok()) {
+      LOG(ERROR) << packages.error();
+      session.SetErrorMessage(packages.error().message());
       LOG(WARNING) << "Marking session " << session_id << " as failed.";
       auto st = session.UpdateStateAndCommit(SessionState::ACTIVATION_FAILED);
       if (!st.ok()) {
         LOG(WARNING) << "Failed to mark session " << session_id
                      << " as failed : " << st.error();
       }
-    };
-    auto scope_guard = android::base::make_scope_guard(session_failed_fn);
-
-    std::string build_fingerprint = GetProperty(kBuildFingerprintSysprop, "");
-    if (session.GetBuildFingerprint().compare(build_fingerprint) != 0) {
-      auto error_message = "APEX build fingerprint has changed";
-      LOG(ERROR) << error_message;
-      session.SetErrorMessage(error_message);
       continue;
     }
-
-    // If device supports fs-checkpoint, then apex session should only be
-    // installed when in checkpoint-mode. Otherwise, we will not be able to
-    // revert /data on error.
-    if (gSupportsFsCheckpoints && !gInFsCheckpointMode) {
-      auto error_message =
-          "Cannot install apex session if not in fs-checkpoint mode";
-      LOG(ERROR) << error_message;
-      session.SetErrorMessage(error_message);
-      continue;
-    }
-
-    auto apexes = ScanSessionApexFiles(session);
-    if (!apexes.ok()) {
-      LOG(WARNING) << apexes.error();
-      session.SetErrorMessage(apexes.error().message());
-      continue;
-    }
-
-    auto packages = StagePackagesImpl(*apexes);
-    if (!packages.ok()) {
-      std::string error_message =
-          std::format("Activation failed for packages {} : {}", *apexes,
-                      packages.error().message());
-      LOG(ERROR) << error_message;
-      session.SetErrorMessage(error_message);
-      continue;
-    }
-
-    // Session was OK, release scopeguard.
-    scope_guard.Disable();
 
     gChangedActiveApexes.insert_range(*packages);
 
@@ -2255,6 +2308,48 @@ void PrepareResources(size_t loop_device_cnt,
   }
 }
 
+// Note that this needs to be called before scanning data apexes because revert
+// or activation may change the active set of data apexes. For example, revert
+// restores the active apexes from the last backup.
+void ProcessSessions() {
+  // If there's any pending revert, revert active sessions.
+  auto status = ResumeRevertIfNeeded();
+  if (!status.ok()) {
+    LOG(ERROR) << "Failed to resume revert : " << status.error();
+  }
+  // Then, activate STAGED sessions. Note that if ResumeRevertIfNeeded() had
+  // reverted active sessions, any STAGED sessions are all aborted and there's
+  // nothing to activate.
+  ActivateStagedSessions();
+}
+
+std::vector<ApexFile> ScanDataApexFiles(ApexImageManager* manager) {
+  CHECK(IsMountBeforeDataEnabled());
+  auto image_list = manager->GetApexList(ApexListType::ACTIVE);
+  if (!image_list.ok()) {
+    LOG(ERROR) << "Failed to get active image list : " << image_list.error();
+    return {};
+  }
+  std::vector<ApexFile> apex_files;
+  apex_files.reserve(image_list->size());
+  for (const auto& entry : *image_list) {
+    auto path = manager->MapImage(entry.image_name);
+    // Log error and keep searching for active apexes
+    if (!path.ok()) {
+      LOG(ERROR) << "Skip " << entry.image_name << ": " << path.error();
+      continue;
+    }
+    auto apex_file = ApexFile::Open(*path);
+    if (!apex_file.ok()) {
+      manager->UnmapImage(entry.image_name);
+      LOG(ERROR) << "Skip " << entry.image_name << ": " << apex_file.error();
+      continue;
+    }
+    apex_files.push_back(std::move(*apex_file));
+  }
+  return apex_files;
+}
+
 int OnBootstrap() {
   ATRACE_NAME("OnBootstrap");
   auto time_started = boot_clock::now();
@@ -2270,6 +2365,13 @@ int OnBootstrap() {
   std::vector<ApexFileRef> activation_list;
 
   if (IsMountBeforeDataEnabled()) {
+    // Process sessions before scanning "active" data apexes because sessions
+    // can change the list of active data apexes:
+    // - if there's a pending revert, then reverts all active sessions.
+    // - if there's staged sessions, then activate them first.
+    ProcessSessions();
+    auto data_apexes = ScanDataApexFiles(GetImageManager());
+    instance.AddDataApexFiles(std::move(data_apexes));
     activation_list = SelectApexForActivation();
   } else {
     const auto& pre_installed_apexes = instance.GetPreInstalledApexFiles();
@@ -2364,18 +2466,6 @@ void Initialize(CheckpointInterface* checkpoint_service) {
 
   gMountedApexes.PopulateFromMounts(
       {gConfig->active_apex_data_dir, gConfig->decompression_dir});
-}
-
-// Note: Pre-installed apex are initialized in Initialize(CheckpointInterface*)
-// TODO(b/172911822): Consolidate this with Initialize() when
-//  ApexFileRepository can act as cache and re-scanning is not expensive
-void InitializeDataApex() {
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  auto status = instance.AddDataApex(gConfig->active_apex_data_dir);
-  if (!status.ok()) {
-    LOG(ERROR) << "Failed to collect data APEX files : " << status.error();
-    return;
-  }
 }
 
 /**
@@ -2700,18 +2790,15 @@ void OnStart() {
     LOG(ERROR) << sharedlibs_apex_dir.error();
   }
 
+  // Process sessions before adding data apexes.
   // If there is any new apex to be installed on /data/app-staging, hardlink
   // them to /data/apex/active first.
-  ActivateStagedSessions();
+  ProcessSessions();
+
   if (auto status = ApexFileRepository::GetInstance().AddDataApex(
           gConfig->active_apex_data_dir);
       !status.ok()) {
     LOG(ERROR) << "Failed to collect data APEX files : " << status.error();
-  }
-
-  auto status = ResumeRevertIfNeeded();
-  if (!status.ok()) {
-    LOG(ERROR) << "Failed to resume revert : " << status.error();
   }
 
   // Group every ApexFile on device by name
@@ -3456,14 +3543,15 @@ Result<void> CheckSupportsNonStagedInstall(const ApexFile& new_apex,
     }
   }
 
-  auto expected_public_key =
-      ApexFileRepository::GetInstance().GetPublicKey(new_manifest.name());
-  if (!expected_public_key.ok()) {
-    return expected_public_key.error();
-  }
-  auto verity_data = new_apex.VerifyApexVerity(*expected_public_key);
-  if (!verity_data.ok()) {
-    return verity_data.error();
+  // Brand-new apexes are not supported.
+  if (ApexFileRepository::IsBrandNewApexEnabled()) {
+    // Make sure that the new apex has the preinstall one.
+    auto preinstalled = ApexFileRepository::GetInstance().GetPreInstalledApex(
+        new_manifest.name());
+    if (!preinstalled.has_value()) {
+      return Error() << "No preinstalled apex found for package "
+                     << new_manifest.name();
+    }
   }
   return {};
 }
