@@ -2757,37 +2757,7 @@ Result<void> ValidateDecompressedApex(const ApexFile& capex,
   return {};
 }
 
-void OnStart() {
-  ATRACE_NAME("OnStart");
-  LOG(INFO) << "Marking APEXd as starting";
-  auto time_started = boot_clock::now();
-  if (!SetProperty(gConfig->apex_status_sysprop, kApexStatusStarting)) {
-    PLOG(ERROR) << "Failed to set " << gConfig->apex_status_sysprop << " to "
-                << kApexStatusStarting;
-  }
-
-  // Ask whether we should revert any active sessions; this can happen if
-  // we've exceeded the retry count on a device that supports filesystem
-  // checkpointing.
-  if (gSupportsFsCheckpoints) {
-    Result<bool> needs_revert = gVoldService->NeedsRollback();
-    if (!needs_revert.ok()) {
-      LOG(ERROR) << "Failed to check if we need a revert: "
-                 << needs_revert.error();
-    } else if (*needs_revert) {
-      LOG(INFO) << "Exceeded number of session retries ("
-                << kNumRetriesWhenCheckpointingEnabled
-                << "). Starting a revert";
-      RevertActiveSessions("", "");
-    }
-  }
-
-  // Create directories for APEX shared libraries.
-  auto sharedlibs_apex_dir = CreateSharedLibsApexDir();
-  if (!sharedlibs_apex_dir.ok()) {
-    LOG(ERROR) << sharedlibs_apex_dir.error();
-  }
-
+void ActivateApexesOnStart() {
   // Process sessions before adding data apexes.
   // If there is any new apex to be installed on /data/app-staging, hardlink
   // them to /data/apex/active first.
@@ -2839,6 +2809,44 @@ void OnStart() {
     if (!retry_status.ok()) {
       LOG(ERROR) << retry_status.error();
     }
+  }
+}
+
+void OnStart() {
+  ATRACE_NAME("OnStart");
+  LOG(INFO) << "Marking APEXd as starting";
+  auto time_started = boot_clock::now();
+  if (!SetProperty(gConfig->apex_status_sysprop, kApexStatusStarting)) {
+    PLOG(ERROR) << "Failed to set " << gConfig->apex_status_sysprop << " to "
+                << kApexStatusStarting;
+  }
+
+  // Ask whether we should revert any active sessions; this can happen if
+  // we've exceeded the retry count on a device that supports filesystem
+  // checkpointing.
+  if (gSupportsFsCheckpoints) {
+    Result<bool> needs_revert = gVoldService->NeedsRollback();
+    if (!needs_revert.ok()) {
+      LOG(ERROR) << "Failed to check if we need a revert: "
+                 << needs_revert.error();
+    } else if (*needs_revert) {
+      LOG(INFO) << "Exceeded number of session retries ("
+                << kNumRetriesWhenCheckpointingEnabled
+                << "). Starting a revert";
+      RevertActiveSessions("", "");
+    }
+  }
+
+  // Create directories for APEX shared libraries.
+  auto sharedlibs_apex_dir = CreateSharedLibsApexDir();
+  if (!sharedlibs_apex_dir.ok()) {
+    LOG(ERROR) << sharedlibs_apex_dir.error();
+  }
+
+  // TODO(b/381175707) until migration is finished, OnStart should activate both
+  // locations: /data/apex/active + pinned apexes
+  if (!IsMountBeforeDataEnabled()) {
+    ActivateApexesOnStart();
   }
 
   // Clean up inactive APEXes on /data. We don't need them anyway.

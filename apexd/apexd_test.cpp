@@ -5265,6 +5265,20 @@ TEST_F(MountBeforeDataTest, OnBootstrapActivatesStagedSessions) {
   ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
 }
 
+TEST_F(MountBeforeDataTest, OnStartSkipsActivation) {
+  ASSERT_EQ(0, OnBootstrap());
+  auto mounts = GetApexMounts();
+
+  // Apexes in /data/apex/active should be ignored.
+  auto data_apex = AddDataApex("apex.apexd_test_v2.apex");
+  OnStart();
+
+  // Mounts remain unchanged.
+  ASSERT_THAT(GetApexMounts(), Eq(mounts));
+  // Data apex is removed.
+  ASSERT_FALSE(*PathExists(data_apex));
+}
+
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
   void OnTestStart(const ::testing::TestInfo& test_info) override {
 #ifdef __ANDROID__
