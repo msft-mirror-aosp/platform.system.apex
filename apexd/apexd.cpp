@@ -1969,19 +1969,17 @@ Result<std::vector<std::string>> TryActivateStagedSession(
       apex_names_in_session.push_back(apex_file.GetManifest().name());
     }
 
+    std::vector<ApexListEntry> new_entries;
+    new_entries.reserve(images.size());
+    for (size_t i = 0; i < images.size(); i++) {
+      new_entries.emplace_back(images[i], apex_names_in_session[i]);
+    }
     // Now, update "active" list
     auto active_list =
         OR_RETURN(image_manager->GetApexList(ApexListType::ACTIVE));
-    // First, remove previously active apexes of newly activated packages
-    std::erase_if(active_list, [&](const auto& entry) {
-      return std::ranges::contains(apex_names_in_session, entry.apex_name);
-    });
-    // Then, add new apexes to the list
-    for (size_t i = 0; i < images.size(); i++) {
-      active_list.emplace_back(images[i], apex_names_in_session[i]);
-    }
-    // Finally, save it in the /metadata partition
-    OR_RETURN(image_manager->UpdateApexList(ApexListType::ACTIVE, active_list));
+    OR_RETURN(image_manager->UpdateApexList(
+        ApexListType::ACTIVE,
+        UpdateApexListWithNewEntries(std::move(active_list), new_entries)));
 
     // Let's keep mapped devices because they needs to be mapped as "active" in
     // ScanDataApexFiles().

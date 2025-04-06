@@ -45,6 +45,12 @@ struct ApexListEntry {
   inline auto operator<=>(const ApexListEntry&) const = default;
 };
 
+// Returns an updated list. A new entry replaces any existing entries with the
+// same apex name.
+std::vector<ApexListEntry> UpdateApexListWithNewEntries(
+    std::vector<ApexListEntry> list,
+    const std::vector<ApexListEntry>& new_entries);
+
 class ApexImageManager {
  public:
   ~ApexImageManager() = default;
