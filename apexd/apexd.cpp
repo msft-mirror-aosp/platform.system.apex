@@ -465,8 +465,8 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   DmDevice linear_dev;
 
   if (IsMountBeforeDataEnabled() && GetImageManager()->IsPinnedApex(apex)) {
-    linear_dev =
-        OR_RETURN(CreateDmLinearForPayload(apex, device_name + ".payload"));
+    linear_dev = OR_RETURN(
+        CreateDmLinearForPayload(apex, device_name + kDmLinearPayloadSuffix));
     block_device = linear_dev.GetDevPath();
   } else {
     loop = OR_RETURN(CreateLoopForApex(apex));
@@ -3565,6 +3565,11 @@ Result<size_t> ComputePackageIdMinor(const ApexFile& apex) {
   size_t next_minor = 1;
   for (const auto& dm_device : dm_devices) {
     std::string_view dm_name(dm_device.name());
+    // Skip .payload and .apex dm-linear devices
+    if (dm_name.ends_with(kDmLinearPayloadSuffix) ||
+        dm_name.ends_with(kDmLinearApexSuffix)) {
+      continue;
+    }
     // Format is <module_name>@<version_code>[_<minor>]
     if (!ConsumePrefix(&dm_name, apex.GetManifest().name())) {
       continue;
@@ -3707,22 +3712,58 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     }
   }));
 
-  // 4. Hard-link to final destination
-  std::string target_file =
-      StringPrintf("%s/%s.apex", gConfig->active_apex_data_dir, new_id.c_str());
-  // At this point it should be safe to hard link |temp_apex| to
-  // |params->target_file|. In case reboot happens during one of the stages
-  // below, then on next boot apexd will pick up the new verified APEX.
-  if (link(package_path.c_str(), target_file.c_str()) != 0) {
-    return ErrnoError() << "Failed to link " << package_path << " to "
-                        << target_file;
-  }
-  // Remove the target file on error
-  guards.emplace_back(base::make_scope_guard([=]() {
-    if (unlink(target_file.c_str()) != 0 && errno != ENOENT) {
-      PLOG(ERROR) << "Failed to unlink " << target_file;
+  // 4. Put the new file in "active" as |target_file|
+  std::string target_file;
+  if (IsMountBeforeDataEnabled()) {
+    auto image_manager = GetImageManager();
+    // Pin the new file first.
+    auto image = OR_RETURN(image_manager->PinApexFiles(Single(*temp_apex)))[0];
+    guards.emplace_back(base::make_scope_guard([=]() {
+      if (auto st = image_manager->DeleteImage(image); !st.ok()) {
+        LOG(ERROR) << st.error();
+      }
+    }));
+
+    // Update "active" list with the new image.
+    auto active_list =
+        OR_RETURN(image_manager->GetApexList(ApexListType::ACTIVE));
+    OR_RETURN(image_manager->UpdateApexList(
+        ApexListType::ACTIVE,
+        UpdateApexListWithNewEntries(
+            active_list, std::vector{ApexListEntry{image, module_name}})));
+    guards.emplace_back(base::make_scope_guard([=]() {
+      if (auto st =
+              image_manager->UpdateApexList(ApexListType::ACTIVE, active_list);
+          !st.ok()) {
+        LOG(ERROR) << st.error();
+      }
+    }));
+
+    // Map the image so that we can access the pinned APEX
+    target_file = OR_RETURN(image_manager->MapImage(image));
+    guards.emplace_back(base::make_scope_guard([=]() {
+      if (auto st = image_manager->UnmapImage(image); !st.ok()) {
+        LOG(ERROR) << st.error();
+      }
+    }));
+  } else {
+    // Hard-link to final destination
+    target_file = StringPrintf("%s/%s.apex", gConfig->active_apex_data_dir,
+                               new_id.c_str());
+    // At this point it should be safe to hard link |temp_apex| to
+    // |params->target_file|. In case reboot happens during one of the stages
+    // below, then on next boot apexd will pick up the new verified APEX.
+    if (link(package_path.c_str(), target_file.c_str()) != 0) {
+      return ErrnoError() << "Failed to link " << package_path << " to "
+                          << target_file;
     }
-  }));
+    // Remove the target file on error
+    guards.emplace_back(base::make_scope_guard([=]() {
+      if (unlink(target_file.c_str()) != 0 && errno != ENOENT) {
+        PLOG(ERROR) << "Failed to unlink " << target_file;
+      }
+    }));
+  }
 
   // Reopen ApexFile from the new location
   auto new_apex = ApexFile::Open(target_file);
@@ -3742,8 +3783,14 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
 
   // 6. Now we can unlink old APEX if it's not pre-installed.
   if (!ApexFileRepository::GetInstance().IsPreInstalledApex(*cur_apex)) {
-    if (unlink(cur_mounted_data->full_path.c_str()) != 0) {
-      PLOG(ERROR) << "Failed to unlink " << cur_mounted_data->full_path;
+    if (auto image = GetImageManager()->FindPinnedApex(*cur_apex); image) {
+      if (auto st = GetImageManager()->UnmapAndDeleteImage(*image); !st.ok()) {
+        LOG(ERROR) << st.error();
+      }
+    } else {
+      if (unlink(cur_mounted_data->full_path.c_str()) != 0) {
+        PLOG(ERROR) << "Failed to unlink " << cur_mounted_data->full_path;
+      }
     }
   }
 

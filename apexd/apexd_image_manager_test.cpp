@@ -17,6 +17,7 @@
 #include "apexd_image_manager.h"
 
 #include <android-base/result-gmock.h>
+#include <android-base/scopeguard.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -24,9 +25,13 @@
 
 using namespace std::literals;
 
+using android::base::make_scope_guard;
 using android::base::testing::HasValue;
 using android::base::testing::Ok;
+using testing::Eq;
 using testing::IsEmpty;
+using testing::Optional;
+using testing::SizeIs;
 
 namespace android::apex {
 
@@ -52,6 +57,32 @@ TEST(ApexImageManagerTest, PinApexFiles) {
   ASSERT_THAT(image_manager->PinApexFiles(std::vector{*apex1, *apex2}),
               HasValue(std::vector{"com.android.apex.test_pack_0.apex"s,
                                    "com.android.apex.test_pack_1.apex"s}));
+}
+
+TEST(ApexImageManagerTest, FindPinnedApex) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(apex, Ok());
+  auto images = image_manager->PinApexFiles(std::vector{*apex});
+  ASSERT_THAT(images, HasValue(SizeIs(1)));
+  auto image = images->at(0);
+
+  auto dev = image_manager->MapImage(image);
+  ASSERT_THAT(dev, Ok());
+  auto guard = make_scope_guard(
+      [&]() { ASSERT_THAT(image_manager->UnmapImage(image), Ok()); });
+
+  auto apex_from_mapped = ApexFile::Open(dev.value());
+  ASSERT_THAT(apex_from_mapped, Ok());
+
+  // Find() works with ApexFile opened from the mapped image.
+  ASSERT_THAT(image_manager->FindPinnedApex(*apex), Eq(std::nullopt));
+  ASSERT_THAT(image_manager->FindPinnedApex(*apex_from_mapped),
+              Optional(image));
 }
 
 TEST(ApexImageManagerTest, ManageApexList) {
