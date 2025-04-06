@@ -3685,22 +3685,16 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     }
   });
 
-  // 2. Unmount currently active APEX.
-  if (auto res =
-          UnmountPackage(*cur_apex, /* allow_latest= */ true,
-                         /* deferred= */ true, /* detach_mount_point= */ force);
-      !res.ok()) {
-    return res.error();
-  }
+  // We need a few ScopeGuards to recover the current state when something goes
+  // wrong. Note that std::vector destroys elements from the end.
+  std::vector<base::ScopeGuard<std::function<void()>>> guards;
 
-  // 3. Hard link to final destination.
-  std::string target_file =
-      StringPrintf("%s/%s.apex", gConfig->active_apex_data_dir, new_id.c_str());
-
-  auto guard = android::base::make_scope_guard([&]() {
-    if (unlink(target_file.c_str()) != 0 && errno != ENOENT) {
-      PLOG(ERROR) << "Failed to unlink " << target_file;
-    }
+  // 3. Unmount currently active APEX.
+  OR_RETURN(UnmountPackage(*cur_apex, /* allow_latest= */ true,
+                           /* deferred= */ true,
+                           /* detach_mount_point= */ force));
+  // Re-activate the current apex on error.
+  guards.emplace_back(base::make_scope_guard([&]() {
     // We can't really rely on the fact that dm-verity device backing up
     // previously active APEX is still around. We need to create a new one.
     std::string old_new_id = GetPackageId(temp_apex->GetManifest()) + "_" +
@@ -3711,8 +3705,11 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
       // At this point not much we can do... :(
       LOG(ERROR) << res.error();
     }
-  });
+  }));
 
+  // 4. Hard-link to final destination
+  std::string target_file =
+      StringPrintf("%s/%s.apex", gConfig->active_apex_data_dir, new_id.c_str());
   // At this point it should be safe to hard link |temp_apex| to
   // |params->target_file|. In case reboot happens during one of the stages
   // below, then on next boot apexd will pick up the new verified APEX.
@@ -3720,23 +3717,30 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     return ErrnoError() << "Failed to link " << package_path << " to "
                         << target_file;
   }
+  // Remove the target file on error
+  guards.emplace_back(base::make_scope_guard([=]() {
+    if (unlink(target_file.c_str()) != 0 && errno != ENOENT) {
+      PLOG(ERROR) << "Failed to unlink " << target_file;
+    }
+  }));
 
+  // Reopen ApexFile from the new location
   auto new_apex = ApexFile::Open(target_file);
   if (!new_apex.ok()) {
     return new_apex.error();
   }
 
-  // 4. And activate new one.
+  // 5. And activate new one.
   auto activate_status = ActivatePackageImpl(*new_apex, new_id,
                                              /* reuse_device= */ false);
   if (!activate_status.ok()) {
     return activate_status.error();
   }
 
-  // Accept the install.
-  guard.Disable();
+  // Accept the install. Disable all ScopeGuards.
+  for (auto& guard : guards) guard.Disable();
 
-  // 4. Now we can unlink old APEX if it's not pre-installed.
+  // 6. Now we can unlink old APEX if it's not pre-installed.
   if (!ApexFileRepository::GetInstance().IsPreInstalledApex(*cur_apex)) {
     if (unlink(cur_mounted_data->full_path.c_str()) != 0) {
       PLOG(ERROR) << "Failed to unlink " << cur_mounted_data->full_path;
