@@ -83,9 +83,6 @@ android::base::Result<void> Unmount(
 
 android::base::Result<void> ResumeRevertIfNeeded();
 
-android::base::Result<void> PreinstallPackages(
-    const std::vector<std::string>& paths) WARN_UNUSED;
-
 android::base::Result<void> StagePackages(
     const std::vector<std::string>& tmpPaths) WARN_UNUSED;
 android::base::Result<void> UnstagePackages(
@@ -182,9 +179,6 @@ int SnapshotOrRestoreDeUserData();
 // If `also_include_staged_apexes` is true, it's for Pre-reboot Dexopt.
 int UnmountAll(bool also_include_staged_apexes);
 
-android::base::Result<MountedApexDatabase::MountedApexData>
-GetTempMountedApexData(const std::string& package);
-
 // Exposed for unit tests
 bool ShouldAllocateSpaceForDecompression(const std::string& new_apex_name,
                                          int64_t new_apex_version,
@@ -195,8 +189,6 @@ int64_t CalculateSizeForCompressedApex(
     const std::vector<std::tuple<std::string, int64_t, int64_t>>&
         compressed_apexes);
 
-// Casts |ApexPartition| to partition string used in XSD.
-std::string CastPartition(ApexPartition partition);
 void CollectApexInfoList(std::ostream& os,
                          const std::vector<ApexFile>& active_apexs,
                          const std::vector<ApexFile>& inactive_apexs);
