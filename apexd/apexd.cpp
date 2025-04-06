@@ -37,7 +37,6 @@
 #include <libdm/dm.h>
 #include <libdm/dm_table.h>
 #include <libdm/dm_target.h>
-#include <linux/f2fs.h>
 #include <linux/loop.h>
 #include <selinux/android.h>
 #include <stdlib.h>
@@ -212,31 +211,6 @@ bool IsBootstrapApex(const ApexFile& apex) {
                    apex.GetManifest().name()) != kBootstrapApexes.end() ||
          std::find(additional.begin(), additional.end(),
                    apex.GetManifest().name()) != additional.end();
-}
-
-void ReleaseF2fsCompressedBlocks(const std::string& file_path) {
-  unique_fd fd(
-      TEMP_FAILURE_RETRY(open(file_path.c_str(), O_RDONLY | O_CLOEXEC, 0)));
-  if (fd.get() == -1) {
-    PLOG(ERROR) << "Failed to open " << file_path;
-    return;
-  }
-  unsigned int flags;
-  if (ioctl(fd, FS_IOC_GETFLAGS, &flags) == -1) {
-    PLOG(ERROR) << "Failed to call FS_IOC_GETFLAGS on " << file_path;
-    return;
-  }
-  if ((flags & FS_COMPR_FL) == 0) {
-    // Doesn't support f2fs-compression.
-    return;
-  }
-  uint64_t blk_cnt;
-  if (ioctl(fd, F2FS_IOC_RELEASE_COMPRESS_BLOCKS, &blk_cnt) == -1) {
-    PLOG(ERROR) << "Failed to call F2FS_IOC_RELEASE_COMPRESS_BLOCKS on "
-                << file_path;
-  }
-  LOG(INFO) << "Released " << blk_cnt << " compressed blocks from "
-            << file_path;
 }
 
 std::unique_ptr<DmTable> CreateVerityTable(const ApexVerityData& verity_data,
@@ -2697,9 +2671,6 @@ Result<ApexFile> ProcessCompressedApex(const ApexFile& capex,
   }
 
   gChangedActiveApexes.insert(return_apex->GetManifest().name());
-  /// Release compressed blocks in case decompression_dest is on f2fs-compressed
-  // filesystem.
-  ReleaseF2fsCompressedBlocks(decompression_dest);
 
   scope_guard.Disable();
   return return_apex;
@@ -2968,11 +2939,6 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {
     return commit_status.error();
-  }
-
-  for (const auto& apex : ret) {
-    // Release compressed blocks in case /data is f2fs-compressed filesystem.
-    ReleaseF2fsCompressedBlocks(apex.GetPath());
   }
 
   event.MarkSucceeded();
@@ -3748,10 +3714,6 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   if (auto res = EmitApexInfoList(/*is_bootstrap*/ false); !res.ok()) {
     LOG(ERROR) << res.error();
   }
-
-  // Release compressed blocks in case target_file is on f2fs-compressed
-  // filesystem.
-  ReleaseF2fsCompressedBlocks(target_file);
 
   event.MarkSucceeded();
 
