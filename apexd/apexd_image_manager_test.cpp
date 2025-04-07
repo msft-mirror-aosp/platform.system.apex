@@ -93,4 +93,50 @@ TEST(ApexImageManagerTest, UpdateApexListMultipleTimes) {
               HasValue(IsEmpty()));
 }
 
+TEST(UpdateApexListWithNewEntries, AddNew) {
+  auto list = std::vector<ApexListEntry>{};
+  auto new_entries = std::vector<ApexListEntry>{
+      {"image1", "apex1"},
+      {"image2", "apex2"},
+  };
+  auto updated = std::vector<ApexListEntry>{
+      {"image1", "apex1"},
+      {"image2", "apex2"},
+  };
+  ASSERT_EQ(UpdateApexListWithNewEntries(list, new_entries), updated);
+}
+
+TEST(UpdateApexListWithNewEntries, ReplaceAndAddNew) {
+  auto list = std::vector<ApexListEntry>{
+      {"image1", "apex1"},
+      {"image2", "apex2"},
+  };
+  auto new_entries = std::vector<ApexListEntry>{
+      {"image2_1", "apex2"},
+      {"image3", "apex3"},
+  };
+  auto updated = std::vector<ApexListEntry>{
+      {"image1", "apex1"},
+      {"image2_1", "apex2"},
+      {"image3", "apex3"},
+  };
+  ASSERT_EQ(UpdateApexListWithNewEntries(list, new_entries), updated);
+}
+
+TEST(UpdateApexListWithNewEntries, ReplaceAll) {
+  auto list = std::vector<ApexListEntry>{
+      {"image1", "apex1"},
+      {"image2", "apex2"},
+  };
+  auto new_entries = std::vector<ApexListEntry>{
+      {"image1_1", "apex1"},
+      {"image2_1", "apex2"},
+  };
+  auto updated = std::vector<ApexListEntry>{
+      {"image1_1", "apex1"},
+      {"image2_1", "apex2"},
+  };
+  ASSERT_EQ(UpdateApexListWithNewEntries(list, new_entries), updated);
+}
+
 }  // namespace android::apex

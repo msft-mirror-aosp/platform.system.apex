@@ -134,6 +134,24 @@ Result<std::vector<ApexListEntry>> ReadImageList(const std::string& filename) {
 
 }  // namespace
 
+std::vector<ApexListEntry> UpdateApexListWithNewEntries(
+    std::vector<ApexListEntry> list,
+    const std::vector<ApexListEntry>& new_entries) {
+  // Collect updated apex names
+  std::vector<std::string> updated_names;
+  updated_names.reserve(new_entries.size());
+  for (const auto& entry : new_entries) {
+    updated_names.push_back(entry.apex_name);
+  }
+  // Remove updated apexes from existing list first.
+  std::erase_if(list, [&](const auto& entry) {
+    return std::ranges::contains(updated_names, entry.apex_name);
+  });
+  // Add new entries to the list
+  list.append_range(new_entries);
+  return list;
+}
+
 ApexImageManager::ApexImageManager(const std::string& metadata_dir,
                                    const std::string& data_dir)
     : metadata_dir_(metadata_dir),

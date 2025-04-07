@@ -1969,19 +1969,17 @@ Result<std::vector<std::string>> TryActivateStagedSession(
       apex_names_in_session.push_back(apex_file.GetManifest().name());
     }
 
+    std::vector<ApexListEntry> new_entries;
+    new_entries.reserve(images.size());
+    for (size_t i = 0; i < images.size(); i++) {
+      new_entries.emplace_back(images[i], apex_names_in_session[i]);
+    }
     // Now, update "active" list
     auto active_list =
         OR_RETURN(image_manager->GetApexList(ApexListType::ACTIVE));
-    // First, remove previously active apexes of newly activated packages
-    std::erase_if(active_list, [&](const auto& entry) {
-      return std::ranges::contains(apex_names_in_session, entry.apex_name);
-    });
-    // Then, add new apexes to the list
-    for (size_t i = 0; i < images.size(); i++) {
-      active_list.emplace_back(images[i], apex_names_in_session[i]);
-    }
-    // Finally, save it in the /metadata partition
-    OR_RETURN(image_manager->UpdateApexList(ApexListType::ACTIVE, active_list));
+    OR_RETURN(image_manager->UpdateApexList(
+        ApexListType::ACTIVE,
+        UpdateApexListWithNewEntries(std::move(active_list), new_entries)));
 
     // Let's keep mapped devices because they needs to be mapped as "active" in
     // ScanDataApexFiles().
@@ -3687,22 +3685,16 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     }
   });
 
-  // 2. Unmount currently active APEX.
-  if (auto res =
-          UnmountPackage(*cur_apex, /* allow_latest= */ true,
-                         /* deferred= */ true, /* detach_mount_point= */ force);
-      !res.ok()) {
-    return res.error();
-  }
+  // We need a few ScopeGuards to recover the current state when something goes
+  // wrong. Note that std::vector destroys elements from the end.
+  std::vector<base::ScopeGuard<std::function<void()>>> guards;
 
-  // 3. Hard link to final destination.
-  std::string target_file =
-      StringPrintf("%s/%s.apex", gConfig->active_apex_data_dir, new_id.c_str());
-
-  auto guard = android::base::make_scope_guard([&]() {
-    if (unlink(target_file.c_str()) != 0 && errno != ENOENT) {
-      PLOG(ERROR) << "Failed to unlink " << target_file;
-    }
+  // 3. Unmount currently active APEX.
+  OR_RETURN(UnmountPackage(*cur_apex, /* allow_latest= */ true,
+                           /* deferred= */ true,
+                           /* detach_mount_point= */ force));
+  // Re-activate the current apex on error.
+  guards.emplace_back(base::make_scope_guard([&]() {
     // We can't really rely on the fact that dm-verity device backing up
     // previously active APEX is still around. We need to create a new one.
     std::string old_new_id = GetPackageId(temp_apex->GetManifest()) + "_" +
@@ -3713,8 +3705,11 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
       // At this point not much we can do... :(
       LOG(ERROR) << res.error();
     }
-  });
+  }));
 
+  // 4. Hard-link to final destination
+  std::string target_file =
+      StringPrintf("%s/%s.apex", gConfig->active_apex_data_dir, new_id.c_str());
   // At this point it should be safe to hard link |temp_apex| to
   // |params->target_file|. In case reboot happens during one of the stages
   // below, then on next boot apexd will pick up the new verified APEX.
@@ -3722,23 +3717,30 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     return ErrnoError() << "Failed to link " << package_path << " to "
                         << target_file;
   }
+  // Remove the target file on error
+  guards.emplace_back(base::make_scope_guard([=]() {
+    if (unlink(target_file.c_str()) != 0 && errno != ENOENT) {
+      PLOG(ERROR) << "Failed to unlink " << target_file;
+    }
+  }));
 
+  // Reopen ApexFile from the new location
   auto new_apex = ApexFile::Open(target_file);
   if (!new_apex.ok()) {
     return new_apex.error();
   }
 
-  // 4. And activate new one.
+  // 5. And activate new one.
   auto activate_status = ActivatePackageImpl(*new_apex, new_id,
                                              /* reuse_device= */ false);
   if (!activate_status.ok()) {
     return activate_status.error();
   }
 
-  // Accept the install.
-  guard.Disable();
+  // Accept the install. Disable all ScopeGuards.
+  for (auto& guard : guards) guard.Disable();
 
-  // 4. Now we can unlink old APEX if it's not pre-installed.
+  // 6. Now we can unlink old APEX if it's not pre-installed.
   if (!ApexFileRepository::GetInstance().IsPreInstalledApex(*cur_apex)) {
     if (unlink(cur_mounted_data->full_path.c_str()) != 0) {
       PLOG(ERROR) << "Failed to unlink " << cur_mounted_data->full_path;
