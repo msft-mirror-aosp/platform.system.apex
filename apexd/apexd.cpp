@@ -1898,7 +1898,7 @@ void DeleteDePreRestoreSnapshots(const ApexSession& session) {
   }
 }
 
-void OnBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
+void MarkBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
 
 // Moves all apexes in the session to "active" state in a transactional manner.
 // Returns the name list of the apexes in the session on success.
@@ -2820,9 +2820,6 @@ void OnStart() {
     ActivateApexesOnStart();
   }
 
-  // Clean up inactive APEXes on /data. We don't need them anyway.
-  RemoveInactiveDataApex();
-
   // Now that APEXes are mounted, snapshot or restore DE_sys data.
   SnapshotOrRestoreDeSysData();
 
@@ -3065,8 +3062,12 @@ void DeleteUnusedVerityDevices() {
   }
 }
 
-void BootCompletedCleanup() {
+void BootCompletedCleanup() REQUIRES(!gInstallLock) {
+  auto install_guard = std::scoped_lock{gInstallLock};
   gSessionManager->DeleteFinalizedSessions();
+
+  RemoveInactiveDataApex();
+
   DeleteUnusedVerityDevices();
 }
 

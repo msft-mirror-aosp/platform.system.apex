@@ -270,7 +270,7 @@ BinderStatus ApexService::markBootCompleted() {
     return check;
   }
 
-  ::android::apex::OnBootCompleted();
+  ::android::apex::MarkBootCompleted();
   return BinderStatus::ok();
 }
 
