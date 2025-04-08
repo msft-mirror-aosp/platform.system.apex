@@ -37,7 +37,6 @@
 #include <libdm/dm.h>
 #include <libdm/dm_table.h>
 #include <libdm/dm_target.h>
-#include <linux/f2fs.h>
 #include <linux/loop.h>
 #include <selinux/android.h>
 #include <stdlib.h>
@@ -212,31 +211,6 @@ bool IsBootstrapApex(const ApexFile& apex) {
                    apex.GetManifest().name()) != kBootstrapApexes.end() ||
          std::find(additional.begin(), additional.end(),
                    apex.GetManifest().name()) != additional.end();
-}
-
-void ReleaseF2fsCompressedBlocks(const std::string& file_path) {
-  unique_fd fd(
-      TEMP_FAILURE_RETRY(open(file_path.c_str(), O_RDONLY | O_CLOEXEC, 0)));
-  if (fd.get() == -1) {
-    PLOG(ERROR) << "Failed to open " << file_path;
-    return;
-  }
-  unsigned int flags;
-  if (ioctl(fd, FS_IOC_GETFLAGS, &flags) == -1) {
-    PLOG(ERROR) << "Failed to call FS_IOC_GETFLAGS on " << file_path;
-    return;
-  }
-  if ((flags & FS_COMPR_FL) == 0) {
-    // Doesn't support f2fs-compression.
-    return;
-  }
-  uint64_t blk_cnt;
-  if (ioctl(fd, F2FS_IOC_RELEASE_COMPRESS_BLOCKS, &blk_cnt) == -1) {
-    PLOG(ERROR) << "Failed to call F2FS_IOC_RELEASE_COMPRESS_BLOCKS on "
-                << file_path;
-  }
-  LOG(INFO) << "Released " << blk_cnt << " compressed blocks from "
-            << file_path;
 }
 
 std::unique_ptr<DmTable> CreateVerityTable(const ApexVerityData& verity_data,
@@ -465,8 +439,8 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   DmDevice linear_dev;
 
   if (IsMountBeforeDataEnabled() && GetImageManager()->IsPinnedApex(apex)) {
-    linear_dev =
-        OR_RETURN(CreateDmLinearForPayload(apex, device_name + ".payload"));
+    linear_dev = OR_RETURN(
+        CreateDmLinearForPayload(apex, device_name + kDmLinearPayloadSuffix));
     block_device = linear_dev.GetDevPath();
   } else {
     loop = OR_RETURN(CreateLoopForApex(apex));
@@ -2695,9 +2669,6 @@ Result<ApexFile> ProcessCompressedApex(const ApexFile& capex,
   }
 
   gChangedActiveApexes.insert(return_apex->GetManifest().name());
-  /// Release compressed blocks in case decompression_dest is on f2fs-compressed
-  // filesystem.
-  ReleaseF2fsCompressedBlocks(decompression_dest);
 
   scope_guard.Disable();
   return return_apex;
@@ -2757,37 +2728,7 @@ Result<void> ValidateDecompressedApex(const ApexFile& capex,
   return {};
 }
 
-void OnStart() {
-  ATRACE_NAME("OnStart");
-  LOG(INFO) << "Marking APEXd as starting";
-  auto time_started = boot_clock::now();
-  if (!SetProperty(gConfig->apex_status_sysprop, kApexStatusStarting)) {
-    PLOG(ERROR) << "Failed to set " << gConfig->apex_status_sysprop << " to "
-                << kApexStatusStarting;
-  }
-
-  // Ask whether we should revert any active sessions; this can happen if
-  // we've exceeded the retry count on a device that supports filesystem
-  // checkpointing.
-  if (gSupportsFsCheckpoints) {
-    Result<bool> needs_revert = gVoldService->NeedsRollback();
-    if (!needs_revert.ok()) {
-      LOG(ERROR) << "Failed to check if we need a revert: "
-                 << needs_revert.error();
-    } else if (*needs_revert) {
-      LOG(INFO) << "Exceeded number of session retries ("
-                << kNumRetriesWhenCheckpointingEnabled
-                << "). Starting a revert";
-      RevertActiveSessions("", "");
-    }
-  }
-
-  // Create directories for APEX shared libraries.
-  auto sharedlibs_apex_dir = CreateSharedLibsApexDir();
-  if (!sharedlibs_apex_dir.ok()) {
-    LOG(ERROR) << sharedlibs_apex_dir.error();
-  }
-
+void ActivateApexesOnStart() {
   // Process sessions before adding data apexes.
   // If there is any new apex to be installed on /data/app-staging, hardlink
   // them to /data/apex/active first.
@@ -2839,6 +2780,44 @@ void OnStart() {
     if (!retry_status.ok()) {
       LOG(ERROR) << retry_status.error();
     }
+  }
+}
+
+void OnStart() {
+  ATRACE_NAME("OnStart");
+  LOG(INFO) << "Marking APEXd as starting";
+  auto time_started = boot_clock::now();
+  if (!SetProperty(gConfig->apex_status_sysprop, kApexStatusStarting)) {
+    PLOG(ERROR) << "Failed to set " << gConfig->apex_status_sysprop << " to "
+                << kApexStatusStarting;
+  }
+
+  // Ask whether we should revert any active sessions; this can happen if
+  // we've exceeded the retry count on a device that supports filesystem
+  // checkpointing.
+  if (gSupportsFsCheckpoints) {
+    Result<bool> needs_revert = gVoldService->NeedsRollback();
+    if (!needs_revert.ok()) {
+      LOG(ERROR) << "Failed to check if we need a revert: "
+                 << needs_revert.error();
+    } else if (*needs_revert) {
+      LOG(INFO) << "Exceeded number of session retries ("
+                << kNumRetriesWhenCheckpointingEnabled
+                << "). Starting a revert";
+      RevertActiveSessions("", "");
+    }
+  }
+
+  // Create directories for APEX shared libraries.
+  auto sharedlibs_apex_dir = CreateSharedLibsApexDir();
+  if (!sharedlibs_apex_dir.ok()) {
+    LOG(ERROR) << sharedlibs_apex_dir.error();
+  }
+
+  // TODO(b/381175707) until migration is finished, OnStart should activate both
+  // locations: /data/apex/active + pinned apexes
+  if (!IsMountBeforeDataEnabled()) {
+    ActivateApexesOnStart();
   }
 
   // Clean up inactive APEXes on /data. We don't need them anyway.
@@ -2966,11 +2945,6 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
       (*session).UpdateStateAndCommit(SessionState::VERIFIED);
   if (!commit_status.ok()) {
     return commit_status.error();
-  }
-
-  for (const auto& apex : ret) {
-    // Release compressed blocks in case /data is f2fs-compressed filesystem.
-    ReleaseF2fsCompressedBlocks(apex.GetPath());
   }
 
   event.MarkSucceeded();
@@ -3565,6 +3539,11 @@ Result<size_t> ComputePackageIdMinor(const ApexFile& apex) {
   size_t next_minor = 1;
   for (const auto& dm_device : dm_devices) {
     std::string_view dm_name(dm_device.name());
+    // Skip .payload and .apex dm-linear devices
+    if (dm_name.ends_with(kDmLinearPayloadSuffix) ||
+        dm_name.ends_with(kDmLinearApexSuffix)) {
+      continue;
+    }
     // Format is <module_name>@<version_code>[_<minor>]
     if (!ConsumePrefix(&dm_name, apex.GetManifest().name())) {
       continue;
@@ -3707,22 +3686,58 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     }
   }));
 
-  // 4. Hard-link to final destination
-  std::string target_file =
-      StringPrintf("%s/%s.apex", gConfig->active_apex_data_dir, new_id.c_str());
-  // At this point it should be safe to hard link |temp_apex| to
-  // |params->target_file|. In case reboot happens during one of the stages
-  // below, then on next boot apexd will pick up the new verified APEX.
-  if (link(package_path.c_str(), target_file.c_str()) != 0) {
-    return ErrnoError() << "Failed to link " << package_path << " to "
-                        << target_file;
-  }
-  // Remove the target file on error
-  guards.emplace_back(base::make_scope_guard([=]() {
-    if (unlink(target_file.c_str()) != 0 && errno != ENOENT) {
-      PLOG(ERROR) << "Failed to unlink " << target_file;
+  // 4. Put the new file in "active" as |target_file|
+  std::string target_file;
+  if (IsMountBeforeDataEnabled()) {
+    auto image_manager = GetImageManager();
+    // Pin the new file first.
+    auto image = OR_RETURN(image_manager->PinApexFiles(Single(*temp_apex)))[0];
+    guards.emplace_back(base::make_scope_guard([=]() {
+      if (auto st = image_manager->DeleteImage(image); !st.ok()) {
+        LOG(ERROR) << st.error();
+      }
+    }));
+
+    // Update "active" list with the new image.
+    auto active_list =
+        OR_RETURN(image_manager->GetApexList(ApexListType::ACTIVE));
+    OR_RETURN(image_manager->UpdateApexList(
+        ApexListType::ACTIVE,
+        UpdateApexListWithNewEntries(
+            active_list, std::vector{ApexListEntry{image, module_name}})));
+    guards.emplace_back(base::make_scope_guard([=]() {
+      if (auto st =
+              image_manager->UpdateApexList(ApexListType::ACTIVE, active_list);
+          !st.ok()) {
+        LOG(ERROR) << st.error();
+      }
+    }));
+
+    // Map the image so that we can access the pinned APEX
+    target_file = OR_RETURN(image_manager->MapImage(image));
+    guards.emplace_back(base::make_scope_guard([=]() {
+      if (auto st = image_manager->UnmapImage(image); !st.ok()) {
+        LOG(ERROR) << st.error();
+      }
+    }));
+  } else {
+    // Hard-link to final destination
+    target_file = StringPrintf("%s/%s.apex", gConfig->active_apex_data_dir,
+                               new_id.c_str());
+    // At this point it should be safe to hard link |temp_apex| to
+    // |params->target_file|. In case reboot happens during one of the stages
+    // below, then on next boot apexd will pick up the new verified APEX.
+    if (link(package_path.c_str(), target_file.c_str()) != 0) {
+      return ErrnoError() << "Failed to link " << package_path << " to "
+                          << target_file;
     }
-  }));
+    // Remove the target file on error
+    guards.emplace_back(base::make_scope_guard([=]() {
+      if (unlink(target_file.c_str()) != 0 && errno != ENOENT) {
+        PLOG(ERROR) << "Failed to unlink " << target_file;
+      }
+    }));
+  }
 
   // Reopen ApexFile from the new location
   auto new_apex = ApexFile::Open(target_file);
@@ -3742,18 +3757,20 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
 
   // 6. Now we can unlink old APEX if it's not pre-installed.
   if (!ApexFileRepository::GetInstance().IsPreInstalledApex(*cur_apex)) {
-    if (unlink(cur_mounted_data->full_path.c_str()) != 0) {
-      PLOG(ERROR) << "Failed to unlink " << cur_mounted_data->full_path;
+    if (auto image = GetImageManager()->FindPinnedApex(*cur_apex); image) {
+      if (auto st = GetImageManager()->UnmapAndDeleteImage(*image); !st.ok()) {
+        LOG(ERROR) << st.error();
+      }
+    } else {
+      if (unlink(cur_mounted_data->full_path.c_str()) != 0) {
+        PLOG(ERROR) << "Failed to unlink " << cur_mounted_data->full_path;
+      }
     }
   }
 
   if (auto res = EmitApexInfoList(/*is_bootstrap*/ false); !res.ok()) {
     LOG(ERROR) << res.error();
   }
-
-  // Release compressed blocks in case target_file is on f2fs-compressed
-  // filesystem.
-  ReleaseF2fsCompressedBlocks(target_file);
 
   event.MarkSucceeded();
 

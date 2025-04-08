@@ -62,6 +62,7 @@ namespace fs = std::filesystem;
 
 using MountedApexData = MountedApexDatabase::MountedApexData;
 using android::apex::testing::ApexFileEq;
+using android::base::Error;
 using android::base::GetExecutableDirectory;
 using android::base::GetProperty;
 using android::base::Join;
@@ -94,6 +95,7 @@ using ::testing::Not;
 using ::testing::Optional;
 using ::testing::Pointwise;
 using ::testing::Property;
+using ::testing::SizeIs;
 using ::testing::StartsWith;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
@@ -5130,8 +5132,8 @@ class MountBeforeDataTest : public ApexdMountTest {
   void TearDown() override {
     ApexdMountTest::TearDown();
     // Unmap dm-linear devices mapped by ApexImageManager
-    for (const auto& image : GetImageManager()->GetAllImages()) {
-      GetImageManager()->UnmapImageIfExists(image);
+    for (const auto& image : image_manager_->GetAllImages()) {
+      image_manager_->UnmapImageIfExists(image);
     }
   }
 
@@ -5167,9 +5169,108 @@ TEST_F(MountBeforeDataTest, ActivatePinnedApex) {
   // Checks if PopulateFromMounts() works okay with dm-linear device
   MountedApexDatabase db;
   db.PopulateFromMounts({});
-  auto linear_name = GetPackageId(orig->GetManifest()) + ".payload";
+  auto linear_name = GetPackageId(orig->GetManifest()) + kDmLinearPayloadSuffix;
   ASSERT_THAT(db.GetLatestMountedApex(name),
               Optional(Field(&MountedApexData::linear_name, linear_name)));
+}
+
+TEST_F(MountBeforeDataTest, NonStagedInstall_SucceedAgainstPreinstalled) {
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Install succeeds.
+  const auto apex_name = "com.android.apex.test_package"s;
+  ASSERT_THAT(InstallPackage(GetTestFile("apex.apexd_test_v2.apex"),
+                             /* force= */ true),
+              Ok());
+
+  // Active list is updated with new install.
+  auto active_list = image_manager_->GetApexList(ApexListType::ACTIVE);
+  ASSERT_THAT(active_list, HasValue(SizeIs(1)));
+  auto entry = active_list->at(0);
+  ASSERT_EQ(entry.apex_name, apex_name);
+
+  // Active mount is backed by the mapped device.
+  auto mount_data = GetApexDatabaseForTesting().GetLatestMountedApex(apex_name);
+  ASSERT_TRUE(mount_data.has_value());
+  ASSERT_THAT(image_manager_->MapImage(entry.image_name),
+              HasValue(mount_data->full_path));
+}
+
+TEST_F(MountBeforeDataTest, NonStagedInstall_SucceedAgainstData) {
+  ASSERT_EQ(0, OnBootstrap());
+
+  const auto apex_name = "com.android.apex.test_package"s;
+  ASSERT_THAT(InstallPackage(GetTestFile("apex.apexd_test.apex"),
+                             /* force= */ true),
+              Ok());
+  // Keep the path of the newly installed apex
+  auto mount_data = GetApexDatabaseForTesting().GetLatestMountedApex(apex_name);
+  ASSERT_TRUE(mount_data.has_value());
+  auto data_apex = ApexFile::Open(mount_data->full_path);
+
+  // Second installation replaces the previous one.
+  ASSERT_THAT(InstallPackage(GetTestFile("apex.apexd_test_v2.apex"),
+                             /* force= */ true),
+              Ok());
+
+  // and the previous apex is removed.
+  ASSERT_THAT(PathExists(data_apex->GetPath()), HasValue(false));
+  ASSERT_THAT(GetImageManager()->FindPinnedApex(*data_apex), Eq(std::nullopt));
+}
+
+TEST_F(MountBeforeDataTest, NonStagedInstall_FailToCreateBackingImage) {
+  // Setup failing image manager
+  struct MockApexImageManager : public ApexImageManager {
+    MockApexImageManager(std::string metadata_dir, std::string data_dir)
+        : ApexImageManager(metadata_dir, data_dir) {}
+    Result<std::vector<std::string>> PinApexFiles(
+        std::span<const ApexFile>) override {
+      return Error() << "Can't pin apex";
+    }
+  } test_im{metadata_images_dir_, data_images_dir_};
+  InitializeImageManager(&test_im);
+  auto guard =
+      make_scope_guard([&] { InitializeImageManager(image_manager_.get()); });
+
+  ASSERT_EQ(0, OnBootstrap());
+  auto mounts = GetApexMounts();
+  auto active_list = GetImageManager()->GetApexList(ApexListType::ACTIVE);
+
+  ASSERT_THAT(InstallPackage(GetTestFile("apex.apexd_test_v2.apex"),
+                             /* force= */ true),
+              HasError(WithMessage("Can't pin apex")));
+
+  // Others remain the same
+  ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
+  ASSERT_EQ(GetImageManager()->GetApexList(ApexListType::ACTIVE), active_list);
+}
+
+TEST_F(MountBeforeDataTest, NonStagedInstall_FailToMapImage) {
+  // Setup failing image manager
+  struct MockApexImageManager : public ApexImageManager {
+    MockApexImageManager(std::string metadata_dir, std::string data_dir)
+        : ApexImageManager(metadata_dir, data_dir) {}
+    Result<std::string> MapImage(const std::string&) override {
+      return Error() << "Can't map image";
+    }
+  } test_im{metadata_images_dir_, data_images_dir_};
+  InitializeImageManager(&test_im);
+  auto guard =
+      make_scope_guard([&] { InitializeImageManager(image_manager_.get()); });
+
+  ASSERT_EQ(0, OnBootstrap());
+  auto mounts = GetApexMounts();
+  auto active_list = GetImageManager()->GetApexList(ApexListType::ACTIVE);
+
+  ASSERT_THAT(InstallPackage(GetTestFile("apex.apexd_test_v2.apex"),
+                             /* force= */ true),
+              HasError(WithMessage("Can't map image")));
+
+  // Others remain the same
+  ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
+  ASSERT_EQ(GetImageManager()->GetApexList(ApexListType::ACTIVE), active_list);
+  // Pinned apex is deleted on error.
+  ASSERT_THAT(GetImageManager()->GetAllImages(), IsEmpty());
 }
 
 TEST_F(MountBeforeDataTest, StagingCreatesBackingImages) {
@@ -5263,6 +5364,20 @@ TEST_F(MountBeforeDataTest, OnBootstrapActivatesStagedSessions) {
   std::ranges::replace(mounts, "/apex/com.android.apex.test_package@1"s,
                        "/apex/com.android.apex.test_package@2"s);
   ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
+}
+
+TEST_F(MountBeforeDataTest, OnStartSkipsActivation) {
+  ASSERT_EQ(0, OnBootstrap());
+  auto mounts = GetApexMounts();
+
+  // Apexes in /data/apex/active should be ignored.
+  auto data_apex = AddDataApex("apex.apexd_test_v2.apex");
+  OnStart();
+
+  // Mounts remain unchanged.
+  ASSERT_THAT(GetApexMounts(), Eq(mounts));
+  // Data apex is removed.
+  ASSERT_FALSE(*PathExists(data_apex));
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
