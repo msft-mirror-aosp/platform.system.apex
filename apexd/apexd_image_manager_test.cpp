@@ -85,6 +85,28 @@ TEST(ApexImageManagerTest, FindPinnedApex) {
               Optional(image));
 }
 
+TEST(ApexImageManagerTest, GetMappedPath) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(apex, Ok());
+  auto images = image_manager->PinApexFiles(std::vector{*apex});
+  ASSERT_THAT(images, HasValue(SizeIs(1)));
+  auto image = images->at(0);
+
+  ASSERT_THAT(image_manager->GetMappedPath(image), Eq(std::nullopt));
+
+  auto dev = image_manager->MapImage(image);
+  ASSERT_THAT(dev, Ok());
+  auto guard = make_scope_guard(
+      [&]() { ASSERT_THAT(image_manager->UnmapImage(image), Ok()); });
+
+  ASSERT_THAT(image_manager->GetMappedPath(image), Optional(dev.value()));
+}
+
 TEST(ApexImageManagerTest, ManageApexList) {
   TemporaryDir metadata_dir;
   TemporaryDir data_dir;

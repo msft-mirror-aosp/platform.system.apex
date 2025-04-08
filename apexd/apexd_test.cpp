@@ -5397,6 +5397,30 @@ TEST_F(MountBeforeDataTest, OnStartSkipsActivation) {
   ASSERT_THAT(GetApexMounts(), Eq(mounts));
 }
 
+TEST_F(MountBeforeDataTest, BootCompletedCleanup_RemovesInactiveDataApexes) {
+  // apex0 is valid and apex1 is unknown.
+  auto apex0 = ApexFile::Open(GetTestFile("apex.apexd_test_v2.apex"));
+  auto apex1 = ApexFile::Open(GetTestFile("test.rebootless_apex_v1.apex"));
+  auto pinned = image_manager_->PinApexFiles(std::vector{*apex0, *apex1});
+  ASSERT_THAT(pinned, HasValue(SizeIs(2)));
+  std::vector<ApexListEntry> active_list{
+      {pinned->at(0), apex0->GetManifest().name()},
+      {pinned->at(1), apex1->GetManifest().name()},
+  };
+  ASSERT_THAT(image_manager_->UpdateApexList(ApexListType::ACTIVE, active_list),
+              Ok());
+
+  // APEX files in /data/apex/active should be skipped and removed.
+  auto data_apex = AddDataApex("apex.apexd_test_v2.apex");
+
+  ASSERT_EQ(0, OnBootstrap());
+  BootCompletedCleanup();
+
+  ASSERT_THAT(PathExists(data_apex), HasValue(false));
+  ASSERT_THAT(image_manager_->GetAllImages(),
+              UnorderedElementsAre(pinned->at(0)));
+}
+
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
   void OnTestStart(const ::testing::TestInfo& test_info) override {
 #ifdef __ANDROID__
