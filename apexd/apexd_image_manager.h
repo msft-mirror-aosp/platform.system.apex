@@ -75,6 +75,10 @@ class ApexImageManager {
   // by ApexImageManager
   std::optional<std::string> FindPinnedApex(const ApexFile& file) const;
 
+  // Returns the path of the block device if mapped. Similar to MapImage(), but
+  // this doesn't create a block device if not mapped already.
+  std::optional<std::string> GetMappedPath(const std::string& image);
+
   // Creates a dm-linear block device for a pinned apex and returns the path of
   // the created block device.
   virtual base::Result<std::string> MapImage(const std::string& image);

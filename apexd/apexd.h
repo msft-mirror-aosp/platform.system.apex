@@ -165,7 +165,7 @@ void OnAllPackagesActivated(bool is_bootstrap);
 // Must only be called during boot (i.e. apexd.status is not "ready" or
 // "activated").
 void OnAllPackagesReady();
-void OnBootCompleted();
+void MarkBootCompleted();
 
 // Removes inactivate apexes on /data after activation.
 // This can happen when prebuilt APEXes are newer than /data apexes with OTA.

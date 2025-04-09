@@ -258,6 +258,15 @@ std::optional<std::string> ApexImageManager::FindPinnedApex(
   return std::nullopt;
 }
 
+std::optional<std::string> ApexImageManager::GetMappedPath(
+    const std::string& image) {
+  std::string path;
+  if (fsmgr_->GetMappedImageDevice(image, &path)) {
+    return path;
+  }
+  return std::nullopt;
+}
+
 Result<std::string> ApexImageManager::MapImage(const std::string& image) {
   std::string path;
   if (fsmgr_->GetMappedImageDevice(image, &path)) {

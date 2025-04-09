@@ -1898,7 +1898,7 @@ void DeleteDePreRestoreSnapshots(const ApexSession& session) {
   }
 }
 
-void OnBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
+void MarkBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
 
 // Moves all apexes in the session to "active" state in a transactional manner.
 // Returns the name list of the apexes in the session on success.
@@ -2820,9 +2820,6 @@ void OnStart() {
     ActivateApexesOnStart();
   }
 
-  // Clean up inactive APEXes on /data. We don't need them anyway.
-  RemoveInactiveDataApex();
-
   // Now that APEXes are mounted, snapshot or restore DE_sys data.
   SnapshotOrRestoreDeSysData();
 
@@ -3033,6 +3030,56 @@ void RemoveInactiveDataApex() {
       }
     }
   }
+
+  // Update the active list first and remove unused pinned images. Note that
+  // not every apex in active list is activated in case the preinstalled
+  // APEXes may have changed due to OTA.
+
+  auto image_manager = GetImageManager();
+  std::vector<ApexListEntry> active_list;
+  if (auto st = image_manager->GetApexList(ApexListType::ACTIVE); st.ok()) {
+    active_list = std::move(*st);
+  } else {
+    LOG(ERROR) << "Failed to get active apex list: " << st.error();
+    return;
+  }
+  // Remove skipped entries from ACTIVE list.
+  std::erase_if(active_list, [&](const auto& entry) {
+    auto path = image_manager->GetMappedPath(entry.image_name);
+    return !path || !apexd_private::IsMounted(path.value());
+  });
+  // Then, update the list
+  if (auto st =
+          image_manager->UpdateApexList(ApexListType::ACTIVE, active_list);
+      !st.ok()) {
+    LOG(ERROR) << "Failed to update active apex list: " << st.error();
+  }
+
+  // Now, remove unused pinned images.
+
+  // We've already checked that active_list contains what's actually activated.
+  std::unordered_set<std::string> images_in_use;
+  for (const auto& entry : active_list) {
+    images_in_use.insert(entry.image_name);
+  }
+
+  // If there are sessions not yet deleted, apex images referenced by them are
+  // also considered as being in use.
+  // TODO(b/409309264) clarify if there IS non-finalized session at this point.
+  for (const auto& session : gSessionManager->GetSessions()) {
+    images_in_use.insert_range(session.GetApexImages());
+  }
+
+  for (const auto& image : image_manager->GetAllImages()) {
+    if (images_in_use.contains(image)) {
+      continue;
+    }
+    LOG(INFO) << "Removing inactive pinned APEX image: " << image;
+    if (auto st = image_manager->UnmapAndDeleteImage(image); !st.ok()) {
+      LOG(ERROR) << "Failed to remove pinned APEX image: " << image << ": "
+                 << st.error();
+    }
+  }
 }
 
 bool IsApexDevice(const std::string& dev_name) {
@@ -3065,8 +3112,12 @@ void DeleteUnusedVerityDevices() {
   }
 }
 
-void BootCompletedCleanup() {
+void BootCompletedCleanup() REQUIRES(!gInstallLock) {
+  auto install_guard = std::scoped_lock{gInstallLock};
   gSessionManager->DeleteFinalizedSessions();
+
+  RemoveInactiveDataApex();
+
   DeleteUnusedVerityDevices();
 }
 

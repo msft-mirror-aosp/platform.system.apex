@@ -4937,6 +4937,25 @@ TEST_F(ApexdMountTest, NonStagedUpdateFailVerifiedBrandNewApex) {
   file_repository.Reset();
 }
 
+TEST_F(ApexdMountTest, BootCompletedCleanup_CleanupInactiveApexes) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  auto selected = AddDataApex("apex.apexd_test_v2.apex");
+  auto ignored1 = AddDataApex("apex.apexd_test.apex");
+  auto ignored2 = AddDataApex("apex.apexd_test_different_app.apex");
+
+  auto& instance = ApexFileRepository::GetInstance();
+  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
+              Ok());
+  OnStart();
+  ASSERT_THAT(FindFilesBySuffix(data_dir_, {kApexPackageSuffix}),
+              HasValue(UnorderedElementsAre(selected, ignored1, ignored2)));
+
+  // Inactive data apexes are removed on boot completion.
+  BootCompletedCleanup();
+  ASSERT_THAT(FindFilesBySuffix(data_dir_, {kApexPackageSuffix}),
+              HasValue(UnorderedElementsAre(selected)));
+}
+
 class SubmitStagedSessionTest : public ApexdMountTest {
  protected:
   void SetUp() override {
@@ -5371,13 +5390,35 @@ TEST_F(MountBeforeDataTest, OnStartSkipsActivation) {
   auto mounts = GetApexMounts();
 
   // Apexes in /data/apex/active should be ignored.
-  auto data_apex = AddDataApex("apex.apexd_test_v2.apex");
+  AddDataApex("apex.apexd_test_v2.apex");
   OnStart();
 
   // Mounts remain unchanged.
   ASSERT_THAT(GetApexMounts(), Eq(mounts));
-  // Data apex is removed.
-  ASSERT_FALSE(*PathExists(data_apex));
+}
+
+TEST_F(MountBeforeDataTest, BootCompletedCleanup_RemovesInactiveDataApexes) {
+  // apex0 is valid and apex1 is unknown.
+  auto apex0 = ApexFile::Open(GetTestFile("apex.apexd_test_v2.apex"));
+  auto apex1 = ApexFile::Open(GetTestFile("test.rebootless_apex_v1.apex"));
+  auto pinned = image_manager_->PinApexFiles(std::vector{*apex0, *apex1});
+  ASSERT_THAT(pinned, HasValue(SizeIs(2)));
+  std::vector<ApexListEntry> active_list{
+      {pinned->at(0), apex0->GetManifest().name()},
+      {pinned->at(1), apex1->GetManifest().name()},
+  };
+  ASSERT_THAT(image_manager_->UpdateApexList(ApexListType::ACTIVE, active_list),
+              Ok());
+
+  // APEX files in /data/apex/active should be skipped and removed.
+  auto data_apex = AddDataApex("apex.apexd_test_v2.apex");
+
+  ASSERT_EQ(0, OnBootstrap());
+  BootCompletedCleanup();
+
+  ASSERT_THAT(PathExists(data_apex), HasValue(false));
+  ASSERT_THAT(image_manager_->GetAllImages(),
+              UnorderedElementsAre(pinned->at(0)));
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
