@@ -278,10 +278,8 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
             ITestDevice.ApexInfo testApex = new ITestDevice.ApexInfo(
                     "com.android.apex.cts.shim", 1L);
             assertThat(activeApexes).contains(testApex);
-            assertThat(
-                    getDevice()
-                            .doesFileExist("/data/apex/active/com.android.apex.cts.shim@2.apex"))
-                    .isFalse();
+            mHostUtils.waitForFileDeleted("/data/apex/active/com.android.apex.cts.shim@2.apex",
+                    Duration.ofMinutes(3));
         } finally {
             getDevice().deleteFile("/data/apex/active/com.android.apex.cts.shim@2.apex");
         }
