@@ -95,7 +95,7 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
                     "com.android.apex.test_package", 2L);
             assertThat(activeApexes).doesNotContain(testApex);
             mHostUtils.waitForFileDeleted("/data/apex/active/apexd_test_v2.apex",
-                    Duration.ofMinutes(3));
+                    Duration.ofMinutes(1));
         } finally {
             getDevice().executeShellV2Command("rm /data/apex/active/apexd_test_v2.apex");
         }
