@@ -71,12 +71,13 @@ std::string AllocateNewName(const std::vector<std::string>& known_names,
   });
   // Find free slot for the "base_name"
   for (auto i = 0; i < count; i++) {
-    std::string new_name = base_name + "_" + std::to_string(i) + ".apex";
+    std::string new_name =
+        base_name + "_" + std::to_string(i) + kDmLinearApexSuffix;
     if (std::ranges::find(known_names, new_name) == known_names.end()) {
       return new_name;
     }
   }
-  return base_name + "_" + std::to_string(count) + ".apex";
+  return base_name + "_" + std::to_string(count) + kDmLinearApexSuffix;
 }
 
 Result<void> WriteImageList(const std::vector<ApexListEntry>& list,
@@ -133,6 +134,24 @@ Result<std::vector<ApexListEntry>> ReadImageList(const std::string& filename) {
 }
 
 }  // namespace
+
+std::vector<ApexListEntry> UpdateApexListWithNewEntries(
+    std::vector<ApexListEntry> list,
+    const std::vector<ApexListEntry>& new_entries) {
+  // Collect updated apex names
+  std::vector<std::string> updated_names;
+  updated_names.reserve(new_entries.size());
+  for (const auto& entry : new_entries) {
+    updated_names.push_back(entry.apex_name);
+  }
+  // Remove updated apexes from existing list first.
+  std::erase_if(list, [&](const auto& entry) {
+    return std::ranges::contains(updated_names, entry.apex_name);
+  });
+  // Add new entries to the list
+  list.append_range(new_entries);
+  return list;
+}
 
 ApexImageManager::ApexImageManager(const std::string& metadata_dir,
                                    const std::string& data_dir)
@@ -213,21 +232,39 @@ Result<void> ApexImageManager::DeleteImage(const std::string& image) {
   return {};
 }
 
+Result<void> ApexImageManager::UnmapAndDeleteImage(const std::string& image) {
+  OR_RETURN(UnmapImageIfExists(image));
+  return DeleteImage(image);
+}
+
 std::vector<std::string> ApexImageManager::GetAllImages() {
   return fsmgr_->GetAllBackingImages();
 }
 
-bool ApexImageManager::IsPinnedApex(const ApexFile& apex) const {
+std::optional<std::string> ApexImageManager::FindPinnedApex(
+    const ApexFile& apex) const {
   DeviceMapper& dm = DeviceMapper::Instance();
   if (!dm.IsDmBlockDevice(apex.GetPath())) {
-    return false;
+    return std::nullopt;
   }
   auto name = dm.GetDmDeviceNameByPath(apex.GetPath());
   if (!name) {
-    return false;
+    return std::nullopt;
   }
   // TODO(405903373): Cache lp_metadata for faster lookup
-  return fsmgr_->BackingImageExists(name.value());
+  if (fsmgr_->BackingImageExists(name.value())) {
+    return name.value();
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> ApexImageManager::GetMappedPath(
+    const std::string& image) {
+  std::string path;
+  if (fsmgr_->GetMappedImageDevice(image, &path)) {
+    return path;
+  }
+  return std::nullopt;
 }
 
 Result<std::string> ApexImageManager::MapImage(const std::string& image) {

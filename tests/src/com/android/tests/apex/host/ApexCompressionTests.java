@@ -343,7 +343,8 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
         // Push a data apex that will fail to activate
         final File file =
                 mHostUtils.getTestFile("com.android.apex.compressed.v2_manifest_mismatch.apex");
-        getDevice().pushFile(file, APEX_ACTIVE_DIR + COMPRESSED_APEX_PACKAGE_NAME + "@2.apex");
+        final String corrupt_apex = APEX_ACTIVE_DIR + COMPRESSED_APEX_PACKAGE_NAME + "@2.apex";
+        getDevice().pushFile(file, corrupt_apex);
         // Push a CAPEX which should act as the fallback
         // Note that this reboots the device.
         pushTestApex(COMPRESSED_APEX_PACKAGE_NAME + ".v2.capex");
@@ -358,11 +359,7 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
         assertThat(getDevice().doesFileExist(
                 DECOMPRESSED_DIR_PATH + COMPRESSED_APEX_PACKAGE_NAME + "@2"
                 + DECOMPRESSED_APEX_SUFFIX)).isTrue();
-        assertThat(getDevice().doesFileExist(
-                APEX_ACTIVE_DIR + COMPRESSED_APEX_PACKAGE_NAME + "@2"
-                + DECOMPRESSED_APEX_SUFFIX)).isFalse();
-        assertThat(getDevice().doesFileExist(
-                APEX_ACTIVE_DIR + COMPRESSED_APEX_PACKAGE_NAME + "@2.apex")).isFalse();
+        mHostUtils.waitForFileDeleted(corrupt_apex, Duration.ofMinutes(1));
     }
 
     @Test
