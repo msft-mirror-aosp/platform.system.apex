@@ -1036,107 +1036,6 @@ Result<void> ResumeRevertIfNeeded() {
   return RevertActiveSessions("", "");
 }
 
-Result<void> ContributeToSharedLibs(const std::string& mount_point) {
-  for (const auto& lib_path : {"lib", "lib64"}) {
-    std::string apex_lib_path = mount_point + "/" + lib_path;
-    auto lib_dir = PathExists(apex_lib_path);
-    if (!lib_dir.ok() || !*lib_dir) {
-      continue;
-    }
-
-    auto iter = std::filesystem::directory_iterator(apex_lib_path);
-    std::error_code ec;
-
-    while (iter != std::filesystem::end(iter)) {
-      const auto& lib_entry = *iter;
-      if (!lib_entry.is_directory()) {
-        iter = iter.increment(ec);
-        if (ec) {
-          return Error() << "Failed to scan " << apex_lib_path << " : "
-                         << ec.message();
-        }
-        continue;
-      }
-
-      const auto library_name = lib_entry.path().filename();
-      const std::string library_symlink_dir =
-          StringPrintf("%s/%s/%s/%s", kApexRoot, kApexSharedLibsSubDir,
-                       lib_path, library_name.c_str());
-
-      auto symlink_dir = PathExists(library_symlink_dir);
-      if (!symlink_dir.ok() || !*symlink_dir) {
-        std::filesystem::create_directory(library_symlink_dir, ec);
-        if (ec) {
-          return Error() << "Failed to create directory " << library_symlink_dir
-                         << ": " << ec.message();
-        }
-      }
-
-      auto inner_iter =
-          std::filesystem::directory_iterator(lib_entry.path().string());
-
-      while (inner_iter != std::filesystem::end(inner_iter)) {
-        const auto& lib_items = *inner_iter;
-        const auto hash_value = lib_items.path().filename();
-        const std::string library_symlink_hash = StringPrintf(
-            "%s/%s", library_symlink_dir.c_str(), hash_value.c_str());
-
-        auto hash_dir = PathExists(library_symlink_hash);
-        if (hash_dir.ok() && *hash_dir) {
-          // Compare file size for two library files with same name and hash
-          // value
-          auto existing_file_path =
-              library_symlink_hash + "/" + library_name.string();
-          auto existing_file_size = GetFileSize(existing_file_path);
-          if (!existing_file_size.ok()) {
-            return existing_file_size.error();
-          }
-
-          auto new_file_path =
-              lib_items.path().string() + "/" + library_name.string();
-          auto new_file_size = GetFileSize(new_file_path);
-          if (!new_file_size.ok()) {
-            return new_file_size.error();
-          }
-
-          if (*existing_file_size != *new_file_size) {
-            return Error() << "There are two libraries with same hash and "
-                              "different file size : "
-                           << existing_file_path << " and " << new_file_path;
-          }
-
-          inner_iter = inner_iter.increment(ec);
-          if (ec) {
-            return Error() << "Failed to scan " << lib_entry.path().string()
-                           << " : " << ec.message();
-          }
-          continue;
-        }
-        std::filesystem::create_directory_symlink(lib_items.path(),
-                                                  library_symlink_hash, ec);
-        if (ec) {
-          return Error() << "Failed to create symlink from " << lib_items.path()
-                         << " to " << library_symlink_hash << ec.message();
-        }
-
-        inner_iter = inner_iter.increment(ec);
-        if (ec) {
-          return Error() << "Failed to scan " << lib_entry.path().string()
-                         << " : " << ec.message();
-        }
-      }
-
-      iter = iter.increment(ec);
-      if (ec) {
-        return Error() << "Failed to scan " << apex_lib_path << " : "
-                       << ec.message();
-      }
-    }
-  }
-
-  return {};
-}
-
 bool IsValidPackageName(const std::string& package_name) {
   return kBannedApexName.count(package_name) == 0;
 }
@@ -1151,12 +1050,7 @@ bool IsValidPackageName(const std::string& package_name) {
 //   4. Mount the dm-verity device on that mount point.
 //     4.1 In case APEX file comes from a partition that is already
 //       dm-verity protected (e.g. /system) then we mount the loop device.
-//
-//
-// Note: this function only does the job to activate this single APEX.
-// In case this APEX file contributes to the /apex/sharedlibs mount point, then
-// you must also call ContributeToSharedLibs after finishing activating all
-// APEXes. See ActivateApexPackages for more context.
+
 Result<void> ActivatePackageImpl(const ApexFile& apex_file,
                                  const std::string& device_name,
                                  bool reuse_device) {
@@ -1533,56 +1427,16 @@ Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
   size_t activated_cnt = 0;
   size_t failed_cnt = 0;
   std::string error_message;
-  std::vector<const ApexFile*> activated_sharedlibs_apexes;
   for (size_t i = 0; i < futures.size(); i++) {
     for (const auto& res : futures[i].get()) {
       if (res.ok()) {
         ++activated_cnt;
-        if (res.value()->GetManifest().providesharedapexlibs()) {
-          activated_sharedlibs_apexes.push_back(res.value());
-        }
       } else {
         ++failed_cnt;
         LOG(ERROR) << res.error();
         if (failed_cnt == 1) {
           error_message = res.error().message();
         }
-      }
-    }
-  }
-
-  // We finished activation of APEX packages and now are ready to populate the
-  // /apex/sharedlibs mount point. Since there can be multiple different APEXes
-  // contributing to shared libs (at the point of writing this comment there can
-  // be up 2 APEXes: pre-installed sharedlibs APEX and its updated counterpart)
-  // we need to call ContributeToSharedLibs sequentially to avoid potential race
-  // conditions. See b/240291921
-  const auto& apex_repo = ApexFileRepository::GetInstance();
-  // To make things simpler we also provide an order in which APEXes contribute
-  // to sharedlibs.
-  auto cmp = [&apex_repo](const auto& apex_a, const auto& apex_b) {
-    // An APEX with higher version should contribute first
-    if (apex_a->GetManifest().version() != apex_b->GetManifest().version()) {
-      return apex_a->GetManifest().version() > apex_b->GetManifest().version();
-    }
-    // If they have the same version, then we pick the updated APEX first.
-    return !apex_repo.IsPreInstalledApex(*apex_a);
-  };
-  std::sort(activated_sharedlibs_apexes.begin(),
-            activated_sharedlibs_apexes.end(), cmp);
-  for (const auto& sharedlibs_apex : activated_sharedlibs_apexes) {
-    LOG(DEBUG) << "Populating sharedlibs with APEX "
-               << sharedlibs_apex->GetPath() << " ( "
-               << sharedlibs_apex->GetManifest().name()
-               << " ) version : " << sharedlibs_apex->GetManifest().version();
-    auto mount_point =
-        apexd_private::GetPackageMountPoint(sharedlibs_apex->GetManifest());
-    if (auto ret = ContributeToSharedLibs(mount_point); !ret.ok()) {
-      LOG(ERROR) << "Failed to populate sharedlibs with APEX package "
-                 << sharedlibs_apex->GetPath() << " : " << ret.error();
-      ++failed_cnt;
-      if (failed_cnt == 1) {
-        error_message = ret.error().message();
       }
     }
   }
@@ -1606,11 +1460,6 @@ Result<void> ActivateMissingApexes(const std::vector<ApexFileRef>& apexes,
   std::vector<ApexFileRef> fallback_apexes;
   for (const auto& apex_ref : apexes) {
     const auto& apex = apex_ref.get();
-    if (apex.GetManifest().providesharedapexlibs()) {
-      // We must mount both versions of sharedlibs apex anyway. Not much we can
-      // do here.
-      continue;
-    }
     if (file_repository.IsPreInstalledApex(apex)) {
       // We tried to activate pre-installed apex in the first place. No need to
       // try again.
@@ -2035,7 +1884,8 @@ Result<std::vector<std::string>> StagePackagesImpl(
   }
   LOG(DEBUG) << "StagePackagesImpl() for " << Join(tmp_paths, ',');
 
-  // Note: this function is temporary. As such the code is not optimized, e.g.,
+  // Note: this function is temporary. As such the code is not optimized,
+  // e.g.,
   //       it will open ApexFiles multiple times.
 
   // 1) Verify all packages.
@@ -2134,10 +1984,10 @@ Result<void> UnstagePackages(const std::vector<std::string>& paths) {
 }
 
 /**
- * During apex installation, staged sessions located in /metadata/apex/sessions
- * mutate the active sessions in /data/apex/active. If some error occurs during
- * installation of apex, we need to revert /data/apex/active to its original
- * state and reboot.
+ * During apex installation, staged sessions located in
+ * /metadata/apex/sessions mutate the active sessions in /data/apex/active. If
+ * some error occurs during installation of apex, we need to revert
+ * /data/apex/active to its original state and reboot.
  *
  * Also, we need to put staged sessions in /metadata/apex/sessions in
  * REVERTED state so that they do not get activated on next reboot.
@@ -2227,36 +2077,6 @@ Result<void> RevertActiveSessionsAndReboot(
   return {};
 }
 
-Result<void> CreateSharedLibsApexDir() {
-  // Creates /apex/sharedlibs/lib{,64} for SharedLibs APEXes.
-  std::string shared_libs_sub_dir =
-      StringPrintf("%s/%s", kApexRoot, kApexSharedLibsSubDir);
-  auto dir_exists = PathExists(shared_libs_sub_dir);
-  if (!dir_exists.ok() || !*dir_exists) {
-    std::error_code error_code;
-    std::filesystem::create_directory(shared_libs_sub_dir, error_code);
-    if (error_code) {
-      return Error() << "Failed to create directory " << shared_libs_sub_dir
-                     << ": " << error_code.message();
-    }
-  }
-  for (const auto& lib_path : {"lib", "lib64"}) {
-    std::string apex_lib_path =
-        StringPrintf("%s/%s", shared_libs_sub_dir.c_str(), lib_path);
-    auto lib_dir_exists = PathExists(apex_lib_path);
-    if (!lib_dir_exists.ok() || !*lib_dir_exists) {
-      std::error_code error_code;
-      std::filesystem::create_directory(apex_lib_path, error_code);
-      if (error_code) {
-        return Error() << "Failed to create directory " << apex_lib_path << ": "
-                       << error_code.message();
-      }
-    }
-  }
-
-  return {};
-}
-
 void PrepareResources(size_t loop_device_cnt,
                       const std::vector<std::string>& apex_names) {
   LOG(INFO) << "Need to pre-allocate " << loop_device_cnt << " loop devices";
@@ -2266,8 +2086,8 @@ void PrepareResources(size_t loop_device_cnt,
 
   DeviceMapper& dm = DeviceMapper::Instance();
   // Create empty dm device for each found APEX.
-  // This is a boot time optimization that makes use of the fact that user space
-  // paths will be created by ueventd before apexd is started, and hence
+  // This is a boot time optimization that makes use of the fact that user
+  // space paths will be created by ueventd before apexd is started, and hence
   // reducing the time to activate APEXEs on /data.
   // Note: since at this point we don't know which APEXes are updated, we are
   // optimistically creating a verity device for all of them. Once boot
@@ -2280,9 +2100,9 @@ void PrepareResources(size_t loop_device_cnt,
   }
 }
 
-// Note that this needs to be called before scanning data apexes because revert
-// or activation may change the active set of data apexes. For example, revert
-// restores the active apexes from the last backup.
+// Note that this needs to be called before scanning data apexes because
+// revert or activation may change the active set of data apexes. For example,
+// revert restores the active apexes from the last backup.
 void ProcessSessions() {
   // If there's any pending revert, revert active sessions.
   auto status = ResumeRevertIfNeeded();
@@ -2362,7 +2182,8 @@ int OnBootstrap() {
         LOG(INFO) << "Found sharedlibs APEX " << apex.get().GetPath();
         // Sharedlis APEX might be mounted 2 times:
         //   * Pre-installed sharedlibs APEX will be mounted in OnStart
-        //   * Updated sharedlibs APEX (if it exists) will be mounted in OnStart
+        //   * Updated sharedlibs APEX (if it exists) will be mounted in
+        //   OnStart
         //
         // We already counted a loop device for one of these 2 mounts, need to
         // add 1 more.
@@ -2442,15 +2263,12 @@ void Initialize(CheckpointInterface* checkpoint_service) {
 
 /**
  * For every package X, there can be at most two APEX, pre-installed vs
- * installed on data. We usually select only one of these APEX for each package
- * based on the following conditions:
+ * installed on data. We usually select only one of these APEX for each
+ * package based on the following conditions:
  *   - Package X must be pre-installed on one of the built-in directories.
  *   - If there are multiple APEX, we select the one with highest version.
  *   - If there are multiple with same version, we give priority to APEX on
  * /data partition.
- *
- * Typically, only one APEX is activated for each package, but APEX that provide
- * shared libs are exceptions. We have to activate both APEX for them.
  *
  * @return list of ApexFile that needs to be activated
  */
@@ -2495,34 +2313,8 @@ std::vector<ApexFileRef> SelectApexForActivation() {
           a.GetManifest().version() == version_b &&
           !instance.IsPreInstalledApex(a);
 
-      // APEX that provides shared library are special:
-      //  - if preinstalled version is lower than data version, both versions
-      //    are activated.
-      //  - if preinstalled version is equal to data version, data version only
-      //    is activated.
-      //  - if preinstalled version is higher than data version, preinstalled
-      //    version only is activated.
-      const bool provides_shared_apex_libs =
-          a.GetManifest().providesharedapexlibs();
       bool activate = false;
-      if (provides_shared_apex_libs) {
-        // preinstalled version gets activated in all cases except when same
-        // version as data.
-        if (instance.IsPreInstalledApex(a) &&
-            (a.GetManifest().version() != version_b)) {
-          LOG(DEBUG) << "Activating preinstalled shared libs APEX: "
-                     << a.GetManifest().name() << " " << a.GetPath();
-          activate = true;
-        }
-        // data version gets activated in all cases except when its version
-        // is lower than preinstalled version.
-        if (!instance.IsPreInstalledApex(a) &&
-            (a.GetManifest().version() >= version_b)) {
-          LOG(DEBUG) << "Activating shared libs APEX: "
-                     << a.GetManifest().name() << " " << a.GetPath();
-          activate = true;
-        }
-      } else if (higher_version || same_version_priority_to_data) {
+      if (higher_version || same_version_priority_to_data) {
         LOG(DEBUG) << "Selecting between two APEX: " << a.GetManifest().name()
                    << " " << a.GetPath();
         activate = true;
@@ -2808,12 +2600,6 @@ void OnStart() {
     }
   }
 
-  // Create directories for APEX shared libraries.
-  auto sharedlibs_apex_dir = CreateSharedLibsApexDir();
-  if (!sharedlibs_apex_dir.ok()) {
-    LOG(ERROR) << sharedlibs_apex_dir.error();
-  }
-
   // TODO(b/381175707) until migration is finished, OnStart should activate both
   // locations: /data/apex/active + pinned apexes
   if (!IsMountBeforeDataEnabled()) {
@@ -2865,8 +2651,8 @@ void OnAllPackagesReady() {
                 << kApexStatusReady;
   }
   // Since apexd.status property is a system property, we expose yet another
-  // property as system_restricted_prop so that, for example, vendor can rely on
-  // the "ready" event.
+  // property as system_restricted_prop so that, for example, vendor can rely
+  // on the "ready" event.
   if (!SetProperty(kApexAllReadyProp, "true")) {
     PLOG(ERROR) << "Failed to set " << kApexAllReadyProp << " to true";
   }
@@ -2907,8 +2693,8 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
     apex_images = OR_RETURN(GetImageManager()->PinApexFiles(ret));
   }
 
-  // The incoming session is now verified by apexd. From now on, apexd keeps its
-  // own session data. The session should be marked as "ready" so that it
+  // The incoming session is now verified by apexd. From now on, apexd keeps
+  // its own session data. The session should be marked as "ready" so that it
   // becomes STAGED. On next reboot, STAGED sessions become ACTIVATED, which
   // means the APEXes in those sessions are in "active" state and to be
   // activated.
@@ -2916,11 +2702,11 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   //    SubmitStagedSession     MarkStagedSessionReady
   //           |                          |
   //           V                          V
-  //         VERIFIED (created) ---------------> STAGED
-  //                                               |
-  //                                               | <-- ActivateStagedSessions
-  //                                               V
-  //                                             ACTIVATED
+  //         VERIFIED (created) ------------> STAGED
+  //                                            |
+  //                                            | <--ActivateStagedSessions
+  //                                            V
+  //                                        ACTIVATED
   //
 
   auto session = gSessionManager->CreateSession(session_id);
@@ -2975,8 +2761,8 @@ Result<void> MarkStagedSessionSuccessful(const int session_id) {
   if (!session.ok()) {
     return session.error();
   }
-  // Only SessionState::ACTIVATED or SessionState::SUCCESS states are accepted.
-  // In the SessionState::SUCCESS state, this function is a no-op.
+  // Only SessionState::ACTIVATED or SessionState::SUCCESS states are
+  // accepted. In the SessionState::SUCCESS state, this function is a no-op.
   if (session->GetState() == SessionState::SUCCESS) {
     return {};
   } else if (session->GetState() == SessionState::ACTIVATED) {
@@ -3115,9 +2901,7 @@ void DeleteUnusedVerityDevices() {
 void BootCompletedCleanup() REQUIRES(!gInstallLock) {
   auto install_guard = std::scoped_lock{gInstallLock};
   gSessionManager->DeleteFinalizedSessions();
-
   RemoveInactiveDataApex();
-
   DeleteUnusedVerityDevices();
 }
 
@@ -3149,7 +2933,7 @@ int UnmountAll(bool also_include_staged_apexes) {
       ret = 1;
       return;
     }
-    if (latest && !apex->GetManifest().providesharedapexlibs()) {
+    if (latest) {
       auto pos = data.mount_point.find('@');
       CHECK(pos != std::string::npos);
       std::string bind_mount = data.mount_point.substr(0, pos);
@@ -3361,7 +3145,6 @@ Result<int> AddBlockApex(ApexFileRepository& instance) {
 }
 
 // When running in the VM mode, we follow the minimal start-up operations.
-// - CreateSharedLibsApexDir
 // - AddPreInstalledApex: note that CAPEXes are not supported in the VM mode
 // - AddBlockApex
 // - ActivateApexPackages
@@ -3370,12 +3153,6 @@ int OnStartInVmMode() {
   Result<void> loop_ready = WaitForFile("/dev/loop-control", 20s);
   if (!loop_ready.ok()) {
     LOG(ERROR) << loop_ready.error();
-  }
-
-  // Create directories for APEX shared libraries.
-  if (auto status = CreateSharedLibsApexDir(); !status.ok()) {
-    LOG(ERROR) << "Failed to create /apex/sharedlibs : " << status.ok();
-    return 1;
   }
 
   auto& instance = ApexFileRepository::GetInstance();
@@ -3415,13 +3192,14 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
     return 1;
   }
   if (also_include_staged_apexes) {
-    // Scan staged dirs, and then scan the active dir. If a module is in both a
-    // staged dir and the active dir, the APEX with a higher version will be
-    // picked. If the versions are equal, the APEX in staged dir will be picked.
+    // Scan staged dirs, and then scan the active dir. If a module is in both
+    // a staged dir and the active dir, the APEX with a higher version will be
+    // picked. If the versions are equal, the APEX in staged dir will be
+    // picked.
     //
-    // The result is an approximation of what the active dir will actually have
-    // after the reboot. In case of a downgrade install, it differs from the
-    // actual, but this is not a supported case.
+    // The result is an approximation of what the active dir will actually
+    // have after the reboot. In case of a downgrade install, it differs from
+    // the actual, but this is not a supported case.
     for (const ApexSession& session :
          gSessionManager->GetSessionsInState(SessionState::STAGED)) {
       std::vector<std::string> dirs_to_scan =
@@ -3440,12 +3218,6 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
                << gConfig->active_apex_data_dir;
     // Fail early because we know we will be wasting cycles generating garbage
     // if we continue.
-    return 1;
-  }
-
-  // Create directories for APEX shared libraries.
-  if (auto status = CreateSharedLibsApexDir(); !status.ok()) {
-    LOG(ERROR) << "Failed to create /apex/sharedlibs : " << status.ok();
     return 1;
   }
 
@@ -3543,21 +3315,10 @@ Result<void> CheckSupportsNonStagedInstall(const ApexFile& new_apex,
 
     // Check if update will impact linkerconfig.
 
-    // Updates to shared libs APEXes must be done via staged install flow.
-    if (new_manifest.providesharedapexlibs()) {
-      return Error() << new_apex.GetPath() << " is a shared libs APEX";
-    }
-
     // This APEX provides native libs to other parts of the platform. It can
     // only be updated via staged install flow.
     if (new_manifest.providenativelibs_size() > 0) {
       return Error() << new_apex.GetPath() << " provides native libs";
-    }
-
-    // This APEX requires libs provided by dynamic common library APEX, hence it
-    // can only be installed using staged install flow.
-    if (new_manifest.requiresharedapexlibs_size() > 0) {
-      return Error() << new_apex.GetPath() << " requires shared apex libs";
     }
 
     // We don't allow non-staged updates of APEXES that have java libs inside.
@@ -3669,7 +3430,8 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   event.AddFiles(Single(*temp_apex));
 
   const std::string& module_name = temp_apex->GetManifest().name();
-  // Don't allow non-staged update if there are no active versions of this APEX.
+  // Don't allow non-staged update if there are no active versions of this
+  // APEX.
   auto cur_mounted_data = gMountedApexes.GetLatestMountedApex(module_name);
   if (!cur_mounted_data.has_value()) {
     return Error() << "No active version found for package " << module_name;
