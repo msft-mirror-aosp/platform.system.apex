@@ -147,7 +147,13 @@ int main(int argc, char** argv) {
 
   InstallSigtermSignalHandler();
 
-  android::apex::SetConfig(android::apex::kDefaultConfig);
+  auto config = android::apex::kDefaultConfig;
+  if constexpr (flags::mount_before_data()) {
+    if (android::base::GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+      config.mount_before_data = true;
+    }
+  }
+  android::apex::SetConfig(config);
 
   android::apex::ApexdLifecycle& lifecycle =
       android::apex::ApexdLifecycle::GetInstance();
