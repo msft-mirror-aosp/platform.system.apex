@@ -52,4 +52,5 @@ cc_binary_host {
         "libext2_e2p",
         "libext2_support",
     ],
+    stl: "c++_static",
 }
