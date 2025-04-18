@@ -91,6 +91,12 @@ cc_binary_host {
         "libapex",
         "libinit_host",
     ],
+    // Choose one protobuf library to avoid ODR:
+    // - libapex-deps brings "full" as shared
+    // - init_host_defaults brings "lite" as shared
+    exclude_shared_libs: [
+        "libprotobuf-cpp-lite",
+    ],
     required: [
         "deapexer",
     ],
