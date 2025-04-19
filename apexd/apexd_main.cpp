@@ -49,12 +49,6 @@ int HandleSubcommand(int argc, char** argv) {
     SetDefaultTag("apexd-unmount-all");
     bool also_include_staged_apexes =
         argc >= 3 && strcmp("--also-include-staged-apexes", argv[2]) == 0;
-    std::unique_ptr<android::apex::ApexSessionManager> session_manager;
-    if (also_include_staged_apexes) {
-      session_manager = android::apex::ApexSessionManager::Create(
-          android::apex::GetSessionsDir());
-      android::apex::InitializeSessionManager(session_manager.get());
-    }
     return android::apex::UnmountAll(also_include_staged_apexes);
   }
 
@@ -62,12 +56,6 @@ int HandleSubcommand(int argc, char** argv) {
     SetDefaultTag("apexd-otachroot");
     bool also_include_staged_apexes =
         argc >= 3 && strcmp("--also-include-staged-apexes", argv[2]) == 0;
-    std::unique_ptr<android::apex::ApexSessionManager> session_manager;
-    if (also_include_staged_apexes) {
-      session_manager = android::apex::ApexSessionManager::Create(
-          android::apex::GetSessionsDir());
-      android::apex::InitializeSessionManager(session_manager.get());
-    }
     return android::apex::OnOtaChrootBootstrap(also_include_staged_apexes);
   }
 
@@ -83,10 +71,6 @@ int HandleSubcommand(int argc, char** argv) {
     } else {
       android::apex::InitializeVold(&*vold_service_st);
     }
-
-    auto session_manager = android::apex::ApexSessionManager::Create(
-        android::apex::GetSessionsDir());
-    android::apex::InitializeSessionManager(session_manager.get());
 
     int result = android::apex::SnapshotOrRestoreDeUserData();
 
@@ -163,7 +147,13 @@ int main(int argc, char** argv) {
 
   InstallSigtermSignalHandler();
 
-  android::apex::SetConfig(android::apex::kDefaultConfig);
+  auto config = android::apex::kDefaultConfig;
+  if constexpr (flags::mount_before_data()) {
+    if (android::base::GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+      config.mount_before_data = true;
+    }
+  }
+  android::apex::SetConfig(config);
 
   android::apex::ApexdLifecycle& lifecycle =
       android::apex::ApexdLifecycle::GetInstance();
@@ -173,13 +163,13 @@ int main(int argc, char** argv) {
       android::apex::kMetadataImagesDir, android::apex::kDataImagesDir);
   android::apex::InitializeImageManager(image_manager.get());
 
-  if (has_subcommand) {
-    return HandleSubcommand(argc, argv);
-  }
-
   auto session_manager = android::apex::ApexSessionManager::Create(
       android::apex::GetSessionsDir());
   android::apex::InitializeSessionManager(session_manager.get());
+
+  if (has_subcommand) {
+    return HandleSubcommand(argc, argv);
+  }
 
   android::base::Result<android::apex::VoldCheckpointInterface>
       vold_service_st = android::apex::VoldCheckpointInterface::Create();
