@@ -98,6 +98,11 @@ Result<Entry> ReadEntry(struct erofs_sb_info* sbi, const fs::path& path) {
                    << erofs_strerror(err);
   }
 
+  // free memory allocated by erofs_getxattr
+  if (inode.xattr_shared_xattrs) {
+    free(inode.xattr_shared_xattrs);
+    inode.xattr_shared_xattrs = nullptr;
+  }
   return Entry{mode, entry_path, security_context};
 }
 

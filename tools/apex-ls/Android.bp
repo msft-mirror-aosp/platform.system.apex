@@ -19,7 +19,6 @@ package {
 cc_binary_host {
     name: "apex-ls",
     defaults: [
-        "libapex-deps",
         // we need this to get the feature flags
         // used to build liberofs.
         "erofs-utils_export_defaults",
@@ -30,11 +29,16 @@ cc_binary_host {
         "main.cpp",
     ],
     static_libs: [
+        // apex
+        "lib_apex_manifest_proto",
         "libapex",
+
+        "libavb",
         "libbase",
         "libcrypto",
         "libcutils",
         "liberofs",
+        "liblog",
         "liblz4",
         "libprotobuf-cpp-full",
         "libselinux",
@@ -52,4 +56,5 @@ cc_binary_host {
         "libext2_e2p",
         "libext2_support",
     ],
+    stl: "c++_static",
 }
