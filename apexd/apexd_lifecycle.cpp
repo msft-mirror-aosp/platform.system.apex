@@ -36,6 +36,11 @@ static const char* BOOT_TIMEOUT = "BootTimeout"; // NOLINT
 namespace android {
 namespace apex {
 
+ApexdLifecycle& ApexdLifecycle::GetInstance() {
+  static ApexdLifecycle instance;
+  return instance;
+}
+
 bool ApexdLifecycle::IsBooting() {
   auto status = GetProperty(kApexStatusSysprop, "");
   return status != kApexStatusReady && status != kApexStatusActivated;
