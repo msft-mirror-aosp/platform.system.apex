@@ -35,10 +35,7 @@ class ApexdLifecycle {
   void RevertActiveSessions(const std::string& process,
                             const std::string& error);
  public:
-  static ApexdLifecycle& GetInstance() {
-    static ApexdLifecycle instance;
-    return instance;
-  }
+  static ApexdLifecycle& GetInstance();
   bool IsBooting();
   void MarkBootCompleted();
   void WaitForBootStatus(const bool has_active_session);
