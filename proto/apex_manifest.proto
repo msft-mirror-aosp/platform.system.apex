@@ -58,18 +58,20 @@ message ApexManifest {
   // marked as "is_jni: true" from the list of "native_shared_libs".
   repeated string jniLibs = 9;
 
+  // Deprecated.
   // List of libs required that are located in a shared libraries APEX.  The
   // Android platform only checks whether this list is non-empty, and by default
   // the Android build system never sets this. This field can be used when
   // producing or processing an APEX using libraries in /apex/sharedlibs (see
   // `provideSharedApexLibs` field) to store some information about the
   // libraries.
-  repeated string requireSharedApexLibs = 10;
+  repeated string requireSharedApexLibs = 10 [ deprecated = true ];
 
+  // Deprecated.
   // Whether this APEX provides libraries to be shared with other APEXs. This
   // causes libraries contained in the APEX to be made available under
   // /apex/sharedlibs .
-  bool provideSharedApexLibs = 11;
+  bool provideSharedApexLibs = 11 [ deprecated = true ];
 
   message CompressedApexMetadata {
 
