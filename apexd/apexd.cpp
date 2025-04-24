@@ -335,7 +335,8 @@ Result<void> VerifyMountedImage(const ApexFile& apex,
   return {};
 }
 
-Result<loop::LoopbackDeviceUniqueFd> CreateLoopForApex(const ApexFile& apex) {
+Result<loop::LoopbackDeviceUniqueFd> CreateLoopForApex(const ApexFile& apex,
+                                                       int32_t loop_id) {
   if (!apex.GetImageOffset() || !apex.GetImageSize()) {
     return Error() << "Cannot create mount point without image offset and size";
   }
@@ -343,9 +344,9 @@ Result<loop::LoopbackDeviceUniqueFd> CreateLoopForApex(const ApexFile& apex) {
   loop::LoopbackDeviceUniqueFd loopback_device;
   for (size_t attempts = 1;; ++attempts) {
     Result<loop::LoopbackDeviceUniqueFd> ret =
-        loop::CreateAndConfigureLoopDevice(full_path,
-                                           apex.GetImageOffset().value(),
-                                           apex.GetImageSize().value());
+        loop::CreateAndConfigureLoopDevice(
+            full_path, apex.GetImageOffset().value(),
+            apex.GetImageSize().value(), loop_id);
     if (ret.ok()) {
       loopback_device = std::move(*ret);
       break;
@@ -383,6 +384,7 @@ Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex,
 
 Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                          const std::string& mount_point,
+                                         int32_t loop_id,
                                          const std::string& device_name,
                                          bool verify_image, bool reuse_device) {
   auto tag = "MountPackageImpl: " + apex.GetManifest().name();
@@ -443,7 +445,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
         CreateDmLinearForPayload(apex, device_name + kDmLinearPayloadSuffix));
     block_device = linear_dev.GetDevPath();
   } else {
-    loop = OR_RETURN(CreateLoopForApex(apex));
+    loop = OR_RETURN(CreateLoopForApex(apex, loop_id));
     block_device = loop.name;
   }
 
@@ -602,7 +604,8 @@ auto RunVerifyFnInsideTempMounts(std::span<const ApexFile> apex_files,
     auto device_name = package_id + ".tmp";
 
     LOG(DEBUG) << "Temp mounting " << package_id << " to " << mount_point;
-    auto data = OR_RETURN(MountPackageImpl(apex, mount_point, device_name,
+    auto data = OR_RETURN(MountPackageImpl(apex, mount_point, loop::kFreeLoopId,
+                                           device_name,
                                            /*verify_image=*/true,
                                            /*reuse_device=*/false));
     mount_points.push_back(mount_point);
@@ -967,8 +970,9 @@ Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
 void SetConfig(const ApexdConfig& config) { gConfig = config; }
 
 Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
-                          const std::string& device_name, bool reuse_device) {
-  auto ret = MountPackageImpl(apex, mount_point, device_name,
+                          int32_t loop_id, const std::string& device_name,
+                          bool reuse_device) {
+  auto ret = MountPackageImpl(apex, mount_point, loop_id, device_name,
                               /* verify_image = */ false, reuse_device);
   if (!ret.ok()) {
     return ret.error();
@@ -1051,7 +1055,7 @@ bool IsValidPackageName(const std::string& package_name) {
 //     4.1 In case APEX file comes from a partition that is already
 //       dm-verity protected (e.g. /system) then we mount the loop device.
 
-Result<void> ActivatePackageImpl(const ApexFile& apex_file,
+Result<void> ActivatePackageImpl(const ApexFile& apex_file, int32_t loop_id,
                                  const std::string& device_name,
                                  bool reuse_device) {
   ATRACE_NAME("ActivatePackageImpl");
@@ -1103,8 +1107,8 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file,
       apexd_private::GetPackageMountPoint(manifest);
 
   if (!version_found_mounted) {
-    auto mount_status =
-        MountPackage(apex_file, mount_point, device_name, reuse_device);
+    auto mount_status = MountPackage(apex_file, mount_point, loop_id,
+                                     device_name, reuse_device);
     if (!mount_status.ok()) {
       return mount_status;
     }
@@ -1140,7 +1144,8 @@ Result<void> ActivatePackage(const std::string& full_path) {
   if (!apex_file.ok()) {
     return apex_file.error();
   }
-  return ActivatePackageImpl(*apex_file, GetPackageId(apex_file->GetManifest()),
+  return ActivatePackageImpl(*apex_file, loop::kFreeLoopId,
+                             GetPackageId(apex_file->GetManifest()),
                              /* reuse_device= */ false);
 }
 
@@ -1359,8 +1364,16 @@ namespace {
 
 enum ActivationMode { kBootstrapMode = 0, kBootMode, kOtaChrootMode, kVmMode };
 
-Result<void> ActivateApex(const ApexFile& apex, ActivationMode mode) {
+Result<void> ActivateApex(const ApexFile& apex, ActivationMode mode,
+                          size_t index) {
   ATRACE_NAME("ActivateApex");
+  int32_t loop_id = loop::kFreeLoopId;
+  if (mode == ActivationMode::kBootstrapMode) {
+    // Bootstrap mode needs to be very fast in a normal situation (no errors).
+    // Creating a loop device can be faster by specifying an ID. Since this is a
+    // bootstrap mode, we can assume that the range of indexes [0..) are free.
+    loop_id = static_cast<int32_t>(index);
+  }
   std::string device_name;
   if (mode == ActivationMode::kBootMode) {
     device_name = apex.GetManifest().name();
@@ -1371,7 +1384,7 @@ Result<void> ActivateApex(const ApexFile& apex, ActivationMode mode) {
     device_name += ".chroot";
   }
   bool reuse_device = mode == ActivationMode::kBootMode;
-  return ActivatePackageImpl(apex, device_name, reuse_device);
+  return ActivatePackageImpl(apex, loop_id, device_name, reuse_device);
 }
 
 Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
@@ -1390,7 +1403,7 @@ Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
 
   std::vector<Result<void>> results{apex_cnt};
   ForEachParallel(worker_num, 0uz, apex_cnt, [&](size_t index) {
-    results[index] = ActivateApex(apexes[index].get(), mode);
+    results[index] = ActivateApex(apexes[index].get(), mode, index);
   });
 
   size_t failed_cnt = 0;
@@ -3455,7 +3468,7 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     // previously active APEX is still around. We need to create a new one.
     std::string old_new_id = GetPackageId(temp_apex->GetManifest()) + "_" +
                              std::to_string(*new_id_minor + 1);
-    auto res = ActivatePackageImpl(*cur_apex, old_new_id,
+    auto res = ActivatePackageImpl(*cur_apex, loop::kFreeLoopId, old_new_id,
                                    /* reuse_device= */ false);
     if (!res.ok()) {
       // At this point not much we can do... :(
@@ -3523,8 +3536,9 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   }
 
   // 5. And activate new one.
-  auto activate_status = ActivatePackageImpl(*new_apex, new_id,
-                                             /* reuse_device= */ false);
+  auto activate_status =
+      ActivatePackageImpl(*new_apex, loop::kFreeLoopId, new_id,
+                          /* reuse_device= */ false);
   if (!activate_status.ok()) {
     return activate_status.error();
   }

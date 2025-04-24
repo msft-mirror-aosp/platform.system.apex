@@ -510,7 +510,8 @@ static Result<EmptyLoopDevice> WaitForLoopDevice(int num) {
 }
 
 static Result<LoopbackDeviceUniqueFd> CreateLoopDevice(
-    const std::string& target, uint32_t image_offset, size_t image_size) {
+    const std::string& target, uint32_t image_offset, size_t image_size,
+    int32_t loop_id) {
   ATRACE_NAME("CreateLoopDevice");
 
   unique_fd ctl_fd(open("/dev/loop-control", O_RDWR | O_CLOEXEC));
@@ -518,22 +519,42 @@ static Result<LoopbackDeviceUniqueFd> CreateLoopDevice(
     return ErrnoError() << "Failed to open loop-control";
   }
 
-  static std::mutex mtx;
-  std::lock_guard lock(mtx);
-  int num = ioctl(ctl_fd.get(), LOOP_CTL_GET_FREE);
-  if (num == -1) {
-    return ErrnoError() << "Failed LOOP_CTL_GET_FREE";
+  if (loop_id == kFreeLoopId) {
+    // Getting a new free slot and configuring it should be done together with a
+    // mutex. Otherwise, parallel activation will cause huge contention and
+    // unnecessary retries.
+    //
+    // However, using a mutex isn't enought because there'll
+    // be other processes that might try to get a free loop. Then either of
+    // processes will fail when it tries to configure it because it's already
+    // being in use by the other process. This is handled in
+    // CreateAndConfigureLoopDevice() by retrying for 1s.
+    static std::mutex mtx;
+    std::lock_guard lock(mtx);
+    int num = ioctl(ctl_fd.get(), LOOP_CTL_GET_FREE);
+    if (num == -1) {
+      return ErrnoError() << "Failed LOOP_CTL_GET_FREE";
+    }
+    auto loop_device = OR_RETURN(WaitForLoopDevice(num));
+    return ConfigureLoopDevice(std::move(loop_device), target, image_offset,
+                               image_size);
+  } else {
+    // When creating a loop with the id specified, no need to guard the scope
+    // with a mutex. If it fails to configure for some reasons (e.g. used by
+    // other threads or processes), just return error.
+    int num = ioctl(ctl_fd.get(), LOOP_CTL_ADD, loop_id);
+    if (num != loop_id && errno != EEXIST) {
+      return ErrnoError() << "Failed LOOP_CTL_ADD " << loop_id;
+    }
+    auto loop_device = OR_RETURN(WaitForLoopDevice(loop_id));
+    return ConfigureLoopDevice(std::move(loop_device), target, image_offset,
+                               image_size);
   }
-
-  auto loop_device = OR_RETURN(WaitForLoopDevice(num));
-  CHECK_NE(loop_device.fd.get(), -1);
-
-  return ConfigureLoopDevice(std::move(loop_device), target, image_offset,
-                             image_size);
 }
 
 Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
-    const std::string& target, uint32_t image_offset, size_t image_size) {
+    const std::string& target, uint32_t image_offset, size_t image_size,
+    int32_t loop_id) {
   ATRACE_NAME("CreateAndConfigureLoopDevice");
   // Do minimal amount of work while holding a mutex. We need it because
   // acquiring + configuring a loop device is not atomic. Ideally we should
@@ -544,16 +565,19 @@ Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
   // we just limit the scope that requires locking.
   android::base::Timer timer;
   Result<LoopbackDeviceUniqueFd> loop_device;
-  while (timer.duration() < 1s) {
-    loop_device = CreateLoopDevice(target, image_offset, image_size);
+  while (true) {
+    loop_device = CreateLoopDevice(target, image_offset, image_size, loop_id);
     if (loop_device.ok()) {
       break;
     }
+    if (timer.duration() >= 1s) {
+      return loop_device.error();
+    }
+    LOG(WARNING) << "Failed to create a new loop device. Retrying...: "
+                 << loop_device.error();
+    // The loop_id might be in use. Let's retry with -1 to get a new free slot.
+    loop_id = kFreeLoopId;
     std::this_thread::sleep_for(5ms);
-  }
-
-  if (!loop_device.ok()) {
-    return loop_device.error();
   }
 
   Result<void> sched_status = ConfigureScheduler(loop_device->name);
