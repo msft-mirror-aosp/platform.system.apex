@@ -346,8 +346,6 @@ class ApexdUnitTest : public ::testing::Test {
 TEST_F(ApexdUnitTest, SelectApexForActivationSuccess) {
   AddPreInstalledApex("apex.apexd_test.apex");
   AddPreInstalledApex("com.android.apex.cts.shim.apex");
-  auto shared_lib_1 = ApexFile::Open(AddPreInstalledApex(
-      "com.android.apex.test.sharedlibs_generated.v1.libvX.apex"));
   auto& instance = ApexFileRepository::GetInstance();
   // Pre-installed data needs to be present so that we can add data apex
   ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
@@ -355,17 +353,12 @@ TEST_F(ApexdUnitTest, SelectApexForActivationSuccess) {
 
   auto apexd_test_file = ApexFile::Open(AddDataApex("apex.apexd_test.apex"));
   auto shim_v1 = ApexFile::Open(AddDataApex("com.android.apex.cts.shim.apex"));
-  // Normally both pre-installed and data apex would be activated for a shared
-  // libs apex, but if they are the same version only the data apex will be.
-  auto shared_lib_2 = ApexFile::Open(
-      AddDataApex("com.android.apex.test.sharedlibs_generated.v1.libvX.apex"));
   ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
 
   auto result = SelectApexForActivation();
-  ASSERT_EQ(result.size(), 3u);
+  ASSERT_EQ(result.size(), 2u);
   ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*apexd_test_file)),
-                                           ApexFileEq(ByRef(*shim_v1)),
-                                           ApexFileEq(ByRef(*shared_lib_2))));
+                                           ApexFileEq(ByRef(*shim_v1))));
 }
 
 // Higher version gets priority when selecting for activation
@@ -1562,12 +1555,6 @@ TEST_F(ApexdMountTest, InstallPackageUpdatesApexInfoList) {
               UnorderedElementsAre(ApexInfoXmlEq(apex_info_xml_1),
                                    ApexInfoXmlEq(apex_info_xml_2),
                                    ApexInfoXmlEq(apex_info_xml_3)));
-}
-
-TEST_F(ApexdMountTest, ActivatePackageBannedName) {
-  auto status = ActivatePackage(GetTestFile("sharedlibs.apex"));
-  ASSERT_THAT(status,
-              HasError(WithMessage("Package name sharedlibs is not allowed.")));
 }
 
 TEST_F(ApexdMountTest, ActivatePackageNoCode) {
@@ -3679,37 +3666,6 @@ TEST_F(ApexdMountTest, OnStartInVmModeFailsWithDuplicateNames) {
 
   AddPreInstalledApex("apex.apexd_test.apex");
   AddBlockApex("apex.apexd_test_v2.apex");
-
-  ASSERT_EQ(1, OnStartInVmMode());
-}
-
-
-TEST_F(ApexdMountTest, OnStartInVmShouldRejectInDuplicateFactoryApexes) {
-  MockCheckpointInterface checkpoint_interface;
-  InitializeVold(&checkpoint_interface);
-  SetBlockApexEnabled(true);
-
-  auto path1 =
-      AddBlockApex("com.android.apex.test.sharedlibs_generated.v1.libvX.apex",
-                   /*public_key=*/"", /*root_digest=*/"", /*is_factory=*/true);
-  auto path2 =
-      AddBlockApex("com.android.apex.test.sharedlibs_generated.v2.libvY.apex",
-                   /*public_key=*/"", /*root_digest=*/"", /*is_factory=*/true);
-
-  ASSERT_EQ(1, OnStartInVmMode());
-}
-
-TEST_F(ApexdMountTest, OnStartInVmShouldRejectInDuplicateNonFactoryApexes) {
-  MockCheckpointInterface checkpoint_interface;
-  InitializeVold(&checkpoint_interface);
-  SetBlockApexEnabled(true);
-
-  auto path1 =
-      AddBlockApex("com.android.apex.test.sharedlibs_generated.v1.libvX.apex",
-                   /*public_key=*/"", /*root_digest=*/"", /*is_factory=*/false);
-  auto path2 =
-      AddBlockApex("com.android.apex.test.sharedlibs_generated.v2.libvY.apex",
-                   /*public_key=*/"", /*root_digest=*/"", /*is_factory=*/false);
 
   ASSERT_EQ(1, OnStartInVmMode());
 }
