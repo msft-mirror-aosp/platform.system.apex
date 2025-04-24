@@ -47,6 +47,7 @@
 #include "apexd_utils.h"
 
 using android::base::Basename;
+using android::base::borrowed_fd;
 using android::base::Dirname;
 using android::base::ErrnoError;
 using android::base::Error;
@@ -362,7 +363,7 @@ struct EmptyLoopDevice {
 };
 
 static Result<LoopbackDeviceUniqueFd> ConfigureLoopDevice(
-    EmptyLoopDevice&& inner, const std::string& target,
+    EmptyLoopDevice&& inner, borrowed_fd target_fd, bool use_buffered_io,
     const uint32_t image_offset, const size_t image_size) {
   static bool use_loop_configure;
   static std::once_flag once_flag;
@@ -381,35 +382,6 @@ static Result<LoopbackDeviceUniqueFd> ConfigureLoopDevice(
       use_loop_configure = true;
     }
   });
-
-  /*
-   * Using O_DIRECT will tell the kernel that we want to use Direct I/O
-   * on the underlying file, which we want to do to avoid double caching.
-   * Note that Direct I/O won't be enabled immediately, because the block
-   * size of the underlying block device may not match the default loop
-   * device block size (512); when we call LOOP_SET_BLOCK_SIZE below, the
-   * kernel driver will automatically enable Direct I/O when it sees that
-   * condition is now met.
-   */
-  bool use_buffered_io = false;
-  unique_fd target_fd(open(target.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECT));
-  if (target_fd.get() == -1) {
-    struct statfs stbuf;
-    int saved_errno = errno;
-    // let's give another try with buffered I/O for EROFS and squashfs
-    if (statfs(target.c_str(), &stbuf) != 0 ||
-        (stbuf.f_type != EROFS_SUPER_MAGIC_V1 &&
-         stbuf.f_type != SQUASHFS_MAGIC &&
-         stbuf.f_type != OVERLAYFS_SUPER_MAGIC)) {
-      return Error(saved_errno) << "Failed to open " << target;
-    }
-    LOG(WARNING) << "Fallback to buffered I/O for " << target;
-    use_buffered_io = true;
-    target_fd.reset(open(target.c_str(), O_RDONLY | O_CLOEXEC));
-    if (target_fd.get() == -1) {
-      return ErrnoError() << "Failed to open " << target;
-    }
-  }
 
   struct loop_info64 li;
   memset(&li, 0, sizeof(li));
@@ -509,9 +481,11 @@ static Result<EmptyLoopDevice> WaitForLoopDevice(int num) {
   return Error() << "Failed to open loop device " << num;
 }
 
-static Result<LoopbackDeviceUniqueFd> CreateLoopDevice(
-    const std::string& target, uint32_t image_offset, size_t image_size,
-    int32_t loop_id) {
+static Result<LoopbackDeviceUniqueFd> CreateLoopDevice(borrowed_fd target_fd,
+                                                       bool use_buffered_io,
+                                                       uint32_t image_offset,
+                                                       size_t image_size,
+                                                       int32_t loop_id) {
   ATRACE_NAME("CreateLoopDevice");
 
   unique_fd ctl_fd(open("/dev/loop-control", O_RDWR | O_CLOEXEC));
@@ -536,8 +510,8 @@ static Result<LoopbackDeviceUniqueFd> CreateLoopDevice(
       return ErrnoError() << "Failed LOOP_CTL_GET_FREE";
     }
     auto loop_device = OR_RETURN(WaitForLoopDevice(num));
-    return ConfigureLoopDevice(std::move(loop_device), target, image_offset,
-                               image_size);
+    return ConfigureLoopDevice(std::move(loop_device), target_fd,
+                               use_buffered_io, image_offset, image_size);
   } else {
     // When creating a loop with the id specified, no need to guard the scope
     // with a mutex. If it fails to configure for some reasons (e.g. used by
@@ -547,8 +521,8 @@ static Result<LoopbackDeviceUniqueFd> CreateLoopDevice(
       return ErrnoError() << "Failed LOOP_CTL_ADD " << loop_id;
     }
     auto loop_device = OR_RETURN(WaitForLoopDevice(loop_id));
-    return ConfigureLoopDevice(std::move(loop_device), target, image_offset,
-                               image_size);
+    return ConfigureLoopDevice(std::move(loop_device), target_fd,
+                               use_buffered_io, image_offset, image_size);
   }
 }
 
@@ -556,6 +530,36 @@ Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
     const std::string& target, uint32_t image_offset, size_t image_size,
     int32_t loop_id) {
   ATRACE_NAME("CreateAndConfigureLoopDevice");
+
+  /*
+   * Using O_DIRECT will tell the kernel that we want to use Direct I/O
+   * on the underlying file, which we want to do to avoid double caching.
+   * Note that Direct I/O won't be enabled immediately, because the block
+   * size of the underlying block device may not match the default loop
+   * device block size (512); when we call LOOP_SET_BLOCK_SIZE below, the
+   * kernel driver will automatically enable Direct I/O when it sees that
+   * condition is now met.
+   */
+  bool use_buffered_io = false;
+  unique_fd target_fd(open(target.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECT));
+  if (target_fd.get() == -1) {
+    struct statfs stbuf;
+    int saved_errno = errno;
+    // let's give another try with buffered I/O for EROFS and squashfs
+    if (statfs(target.c_str(), &stbuf) != 0 ||
+        (stbuf.f_type != EROFS_SUPER_MAGIC_V1 &&
+         stbuf.f_type != SQUASHFS_MAGIC &&
+         stbuf.f_type != OVERLAYFS_SUPER_MAGIC)) {
+      return Error(saved_errno) << "Failed to open " << target;
+    }
+    LOG(WARNING) << "Fallback to buffered I/O for " << target;
+    use_buffered_io = true;
+    target_fd.reset(open(target.c_str(), O_RDONLY | O_CLOEXEC));
+    if (target_fd.get() == -1) {
+      return ErrnoError() << "Failed to open " << target;
+    }
+  }
+
   // Do minimal amount of work while holding a mutex. We need it because
   // acquiring + configuring a loop device is not atomic. Ideally we should
   // pre-acquire all the loop devices in advance, so that when we run APEX
@@ -566,7 +570,8 @@ Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
   android::base::Timer timer;
   Result<LoopbackDeviceUniqueFd> loop_device;
   while (true) {
-    loop_device = CreateLoopDevice(target, image_offset, image_size, loop_id);
+    loop_device = CreateLoopDevice(target_fd, use_buffered_io, image_offset,
+                                   image_size, loop_id);
     if (loop_device.ok()) {
       break;
     }
