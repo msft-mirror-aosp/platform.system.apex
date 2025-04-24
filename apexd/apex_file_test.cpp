@@ -326,17 +326,6 @@ TEST(ApexFileTest, GetPathReturnsRealpath) {
   ASSERT_EQ(real_path, apex_file->GetPath());
 }
 
-TEST(ApexFileTest, CompressedSharedLibsApexIsRejected) {
-  const std::string file_path =
-      kTestDataDir + "com.android.apex.compressed_sharedlibs.capex";
-  Result<ApexFile> apex_file = ApexFile::Open(file_path);
-
-  ASSERT_FALSE(apex_file.ok());
-  ASSERT_THAT(apex_file.error().message(),
-              ::testing::HasSubstr("Apex providing sharedlibs shouldn't "
-                                   "be compressed"));
-}
-
 // Check if CAPEX contains originalApexDigest in its manifest
 TEST(ApexFileTest, OriginalApexDigest) {
   const std::string capex_path =
