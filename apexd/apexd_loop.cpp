@@ -476,10 +476,7 @@ static Result<LoopbackDeviceUniqueFd> ConfigureLoopDevice(
 }
 
 static Result<EmptyLoopDevice> WaitForLoopDevice(int num) {
-  std::vector<std::string> candidate_devices = {
-      StringPrintf("/dev/block/loop%d", num),
-      StringPrintf("/dev/loop%d", num),
-  };
+  std::string device = StringPrintf("/dev/block/loop%d", num);
 
   // apexd-bootstrap runs in parallel with ueventd to optimize boot time. In
   // rare cases apexd would try attempt to mount an apex before ueventd created
@@ -491,27 +488,25 @@ static Result<EmptyLoopDevice> WaitForLoopDevice(int num) {
   // ueventd to run to actually create the device node in userspace. To solve
   // this properly we should listen on the netlink socket for uevents, or use
   // inotify. For now, this will have to do.
-  size_t attempts =
-      android::sysprop::ApexProperties::loop_wait_attempts().value_or(3u);
+  size_t attempts = sysprop::ApexProperties::loop_wait_attempts().value_or(0u);
+  if (attempts == 0) {
+    attempts = 3u;
+  }
   for (size_t i = 0; i != attempts; ++i) {
-    if (!cold_boot_done) {
-      cold_boot_done = GetBoolProperty("ro.cold_boot_done", false);
+    unique_fd sysfs_fd(open(device.c_str(), O_RDWR | O_CLOEXEC));
+    if (sysfs_fd.get() != -1) {
+      return EmptyLoopDevice{std::move(sysfs_fd), std::move(device)};
     }
-    for (const auto& device : candidate_devices) {
-      unique_fd sysfs_fd(open(device.c_str(), O_RDWR | O_CLOEXEC));
-      if (sysfs_fd.get() != -1) {
-        return EmptyLoopDevice{std::move(sysfs_fd), std::move(device)};
-      }
-    }
-    PLOG(WARNING) << "Loopback device " << num << " not ready. Waiting 50ms...";
+    PLOG(WARNING) << "Loop device " << num << " not ready. Waiting 50ms...";
     usleep(50000);
     if (!cold_boot_done) {
       // ueventd hasn't finished cold boot yet, keep trying.
       i = 0;
+      cold_boot_done = GetBoolProperty("ro.cold_boot_done", false);
     }
   }
 
-  return Error() << "Failed to open loopback device " << num;
+  return Error() << "Failed to open loop device " << num;
 }
 
 static Result<LoopbackDeviceUniqueFd> CreateLoopDevice(
