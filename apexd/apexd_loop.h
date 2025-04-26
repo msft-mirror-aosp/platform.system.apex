@@ -29,6 +29,8 @@ namespace loop {
 
 using android::base::unique_fd;
 
+constexpr int32_t kFreeLoopId = -1;
+
 struct LoopbackDeviceUniqueFd {
   unique_fd device_fd;
   std::string name;
@@ -63,7 +65,8 @@ android::base::Result<void> ConfigureReadAhead(const std::string& device_path);
 android::base::Result<void> PreAllocateLoopDevices(size_t num);
 
 android::base::Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
-    const std::string& target, uint32_t image_offset, size_t image_size);
+    const std::string& target, uint32_t image_offset, size_t image_size,
+    int32_t loop_id = kFreeLoopId);
 
 }  // namespace loop
 }  // namespace apex
