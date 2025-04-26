@@ -108,39 +108,6 @@ python_library_host {
 }
 
 python_binary_host {
-    name: "apexer_with_DCLA_preprocessing",
-    srcs: [
-        "apexer_with_DCLA_preprocessing.py",
-    ],
-    libs: [
-        "apexer_wrapper_utils",
-    ],
-}
-
-python_test_host {
-    name: "apexer_with_DCLA_preprocessing_test",
-    main: "apexer_with_DCLA_preprocessing_test.py",
-    srcs: [
-        "apexer_with_DCLA_preprocessing_test.py",
-    ],
-    // Need to add a pkg_path because importlib.resources
-    // cannot load resources from the root package.
-    pkg_path: "apexer_with_DCLA_preprocessing_test",
-    data: [
-        ":apexer_test_host_tools",
-        ":apexer_with_DCLA_preprocessing",
-        "testdata/com.android.example.apex.pem",
-    ],
-    device_common_data: [
-        ":com.android.example.apex",
-    ],
-    test_suites: ["general-tests"],
-    test_options: {
-        unit_test: true,
-    },
-}
-
-python_binary_host {
     name: "apexer_with_trim_preprocessing",
     srcs: [
         "apexer_with_trim_preprocessing.py",

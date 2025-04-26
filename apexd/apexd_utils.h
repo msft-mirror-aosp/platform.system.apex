@@ -331,6 +331,22 @@ std::span<const T> Single(const T& t) {
   return std::span{&t, 1};
 }
 
+template <typename Idx, typename Op>
+void ForEachParallel(size_t num_threads, Idx first, Idx last, Op op) {
+  std::atomic<Idx> shared_index{first};
+  std::vector<std::thread> threads;
+  threads.reserve(num_threads);
+  for (size_t i = 0; i < num_threads; i++) {
+    threads.emplace_back([&]() {
+      Idx index;
+      while ((index = shared_index++) < last) {
+        op(index);
+      }
+    });
+  }
+  for (auto& t : threads) t.join();
+}
+
 }  // namespace apex
 }  // namespace android
 
