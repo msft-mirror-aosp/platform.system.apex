@@ -937,9 +937,7 @@ Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
     return Error() << "Did not find " << apex.GetPath();
   }
 
-  // Concept of latest sharedlibs apex is somewhat blurred. Since this is only
-  // used in testing, it is ok to always allow unmounting sharedlibs apex.
-  if (latest && !manifest.providesharedapexlibs()) {
+  if (latest) {
     if (!allow_latest) {
       return Error() << "Package " << apex.GetPath() << " is active";
     }
@@ -1091,12 +1089,7 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file, int32_t loop_id,
             version_found_active = latest;
           }
         });
-    // If the package provides shared libraries to other APEXs, we need to
-    // activate all versions available (i.e. preloaded on /system/apex and
-    // available on /data/apex/active). The reason is that there might be some
-    // APEXs loaded from /system/apex that reference the libraries contained on
-    // the preloaded version of the apex providing shared libraries.
-    if (version_found_active && !manifest.providesharedapexlibs()) {
+    if (version_found_active) {
       LOG(DEBUG) << "Package " << manifest.name() << " with version "
                  << manifest.version() << " already active";
       return {};
@@ -1114,19 +1107,16 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file, int32_t loop_id,
     }
   }
 
-  // Bind mount the latest version to /apex/<package_name>, unless the
-  // package provides shared libraries to other APEXs.
-  if (!manifest.providesharedapexlibs()) {
-    auto st = gMountedApexes.DoIfLatest(
-        manifest.name(), apex_file.GetPath(), [&]() -> Result<void> {
-          return apexd_private::BindMount(
-              apexd_private::GetActiveMountPoint(manifest), mount_point);
-        });
-    if (!st.ok()) {
-      return Error() << "Failed to update package " << manifest.name()
-                     << " to version " << manifest.version() << " : "
-                     << st.error();
-    }
+  // Bind mount the latest version to /apex/<package_name>.
+  auto st = gMountedApexes.DoIfLatest(
+      manifest.name(), apex_file.GetPath(), [&]() -> Result<void> {
+        return apexd_private::BindMount(
+            apexd_private::GetActiveMountPoint(manifest), mount_point);
+      });
+  if (!st.ok()) {
+    return Error() << "Failed to update package " << manifest.name()
+                   << " to version " << manifest.version() << " : "
+                   << st.error();
   }
 
   LOG(DEBUG) << "Successfully activated " << apex_file.GetPath()
@@ -2153,17 +2143,6 @@ int OnBootstrap() {
       if (IsBootstrapApex(apex.get())) {
         LOG(INFO) << "Found bootstrap APEX " << apex.get().GetPath();
         activation_list.push_back(apex);
-        loop_device_cnt++;
-      }
-      if (apex.get().GetManifest().providesharedapexlibs()) {
-        LOG(INFO) << "Found sharedlibs APEX " << apex.get().GetPath();
-        // Sharedlis APEX might be mounted 2 times:
-        //   * Pre-installed sharedlibs APEX will be mounted in OnStart
-        //   * Updated sharedlibs APEX (if it exists) will be mounted in
-        //   OnStart
-        //
-        // We already counted a loop device for one of these 2 mounts, need to
-        // add 1 more.
         loop_device_cnt++;
       }
     }
