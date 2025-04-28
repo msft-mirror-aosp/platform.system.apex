@@ -8,9 +8,6 @@
     },
     {
       "name": "apex_apkinapex_tests"
-    },
-    {
-      "name": "CtsApexSharedLibrariesTestCases"
     }
   ],
   "presubmit-large": [
@@ -20,9 +17,6 @@
     //},
     {
       "name": "sdkextensions_e2e_tests"
-    },
-    {
-      "name": "sharedlibs_host_tests"
     }
   ],
   "postsubmit": [

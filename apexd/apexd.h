@@ -159,7 +159,7 @@ android::base::Result<void> ValidateDecompressedApex(const ApexFile& capex,
 // "activated".
 // Must only be called during boot (i.e. apexd.status is not "ready" or
 // "activated").
-void OnAllPackagesActivated(bool is_bootstrap);
+void OnAllPackagesActivated();
 // Notifies system that apexes are ready by setting apexd.status property to
 // "ready".
 // Must only be called during boot (i.e. apexd.status is not "ready" or
