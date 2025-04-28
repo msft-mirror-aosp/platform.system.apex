@@ -1245,7 +1245,7 @@ std::vector<ApexFile> CalculateInactivePackages(
   return inactive;
 }
 
-Result<void> EmitApexInfoList(bool is_bootstrap) {
+void EmitApexInfoList(bool is_bootstrap) {
   std::vector<ApexFile> active{GetActivePackages()};
 
   std::vector<ApexFile> inactive;
@@ -1261,14 +1261,18 @@ Result<void> EmitApexInfoList(bool is_bootstrap) {
   unique_fd fd(TEMP_FAILURE_RETRY(
       open(kApexInfoList, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)));
   if (fd.get() == -1) {
-    return ErrnoErrorf("Can't open {}", kApexInfoList);
+    PLOG(ERROR) << "Can't open " << kApexInfoList;
+    return;
   }
   if (!android::base::WriteStringToFd(xml.str(), fd)) {
-    return ErrnoErrorf("Can't write to {}", kApexInfoList);
+    PLOG(ERROR) << "Can't write to " << kApexInfoList;
   }
 
   fd.reset();
-  return RestoreconPath(kApexInfoList);
+  if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
+    LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "
+               << status.error();
+  }
 }
 
 namespace {
@@ -2155,8 +2159,8 @@ int OnBootstrap() {
     LOG(ERROR) << "Failed to activate apexes: " << ret.error();
     return 1;
   }
+  EmitApexInfoList(/*is_bootstrap=*/true);
 
-  OnAllPackagesActivated(/*is_bootstrap=*/true);
   auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                           boot_clock::now() - time_started)
                           .count();
@@ -2510,7 +2514,6 @@ void ActivateApexesOnStart() {
     }
   }
 
-  // TODO(b/179248390): activate parallelly if possible
   auto activate_status =
       ActivateApexPackages(activation_list, ActivationMode::kBootMode);
   if (!activate_status.ok()) {
@@ -2529,6 +2532,7 @@ void ActivateApexesOnStart() {
       LOG(ERROR) << retry_status.error();
     }
   }
+  EmitApexInfoList(/*is_bootstrap=*/false);
 }
 
 void OnStart() {
@@ -2571,18 +2575,7 @@ void OnStart() {
   LOG(INFO) << "OnStart done, duration=" << time_elapsed;
 }
 
-void OnAllPackagesActivated(bool is_bootstrap) {
-  auto result = EmitApexInfoList(is_bootstrap);
-  if (!result.ok()) {
-    LOG(ERROR) << "cannot emit apex info list: " << result.error();
-  }
-
-  // Because apexd in bootstrap mode runs in blocking mode
-  // we don't have to set as activated.
-  if (is_bootstrap) {
-    return;
-  }
-
+void OnAllPackagesActivated() {
   // Set a system property to let other components know that APEXs are
   // activated, but are not yet ready to be used. init is expected to wait
   // for this status before performing configuration based on activated
@@ -3131,8 +3124,9 @@ int OnStartInVmMode() {
     LOG(ERROR) << "Failed to activate apex packages : " << status.error();
     return 1;
   }
+  EmitApexInfoList(/*is_bootstrap=*/false);
 
-  OnAllPackagesActivated(false);
+  OnAllPackagesActivated();
   // In VM mode, we don't run a separate --snapshotde mode.
   // Instead, we mark apexd.status "ready" right now.
   OnAllPackagesReady();
@@ -3215,10 +3209,7 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
       LOG(ERROR) << retry_status.error();
     }
   }
-
-  if (auto status = EmitApexInfoList(/*is_bootstrap*/ false); !status.ok()) {
-    LOG(ERROR) << status.error();
-  }
+  EmitApexInfoList(/*is_bootstrap=*/false);
 
   return 0;
 }
@@ -3537,10 +3528,7 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
       }
     }
   }
-
-  if (auto res = EmitApexInfoList(/*is_bootstrap*/ false); !res.ok()) {
-    LOG(ERROR) << res.error();
-  }
+  EmitApexInfoList(/*is_bootstrap=*/false);
 
   event.MarkSucceeded();
 

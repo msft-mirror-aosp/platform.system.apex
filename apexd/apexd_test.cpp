@@ -1512,12 +1512,7 @@ TEST_F(ApexdMountTest, InstallPackageUpdatesApexInfoList) {
   ApexFileRepository::GetInstance().AddPreInstalledApex(
       {{GetPartition(), GetBuiltInDir()}});
 
-  ASSERT_THAT(ActivatePackage(apex_1), Ok());
-  ASSERT_THAT(ActivatePackage(apex_2), Ok());
-
-  // Call OnAllPackagesActivated to create /apex/apex-info-list.xml.
-  OnAllPackagesActivated(/* is_bootstrap= */ false);
-  // Check /apex/apex-info-list.xml was created.
+  OnStart();
   ASSERT_EQ(0, access("/apex/apex-info-list.xml", F_OK));
 
   auto ret = InstallPackage(GetTestFile("test.rebootless_apex_v2.apex"),
@@ -4311,9 +4306,6 @@ TEST_F(ApexdMountTest, SendEventOnSubmitStagedSession) {
       {{ApexPartition::Vendor, GetBuiltInDir()}}));
 
   OnStart();
-  // checkvintf needs apex-info-list.xml to identify vendor APEXes.
-  // OnAllPackagesActivated() generates it.
-  OnAllPackagesActivated(/*bootstrap*/ false);
 
   PrepareStagedSession("com.android.apex.vendor.foo.with_vintf.apex", 239);
   ASSERT_RESULT_OK(SubmitStagedSession(239, {}, false, false, -1));

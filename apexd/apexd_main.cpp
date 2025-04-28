@@ -198,7 +198,7 @@ int main(int argc, char** argv) {
     // themselves should wait for the ready status instead, which is set when
     // the "--snapshotde" subcommand is received and snapshot/restore is
     // complete.
-    android::apex::OnAllPackagesActivated(/*is_bootstrap=*/false);
+    android::apex::OnAllPackagesActivated();
     lifecycle.WaitForBootStatus(session_manager->HasActiveSession());
     // Run cleanup routine on boot complete.
     // This should run before AllowServiceShutdown() to prevent
