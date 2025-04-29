@@ -1269,13 +1269,9 @@ void EmitApexInfoList(bool is_bootstrap) {
   }
 
   fd.reset();
-  // we skip for restorecon in bootstrap mode in order to avoid boottime
-  // increase.
-  if (!is_bootstrap) {
-    if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
-      LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "
-                 << status.error();
-    }
+  if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
+    LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "
+               << status.error();
   }
 }
 
