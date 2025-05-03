@@ -78,6 +78,7 @@ public class ApkInApexTests extends BaseHostJUnit4Test {
 
     @After
     public void tearDown() throws Exception {
+        mPreparer.after();
         getDevice().disableAdbRoot();
     }
 

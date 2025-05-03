@@ -713,7 +713,6 @@ cc_defaults {
         "liblog",
     ],
     static_libs: [
-        "android.os.statsbootstrap_aidl-cpp",
         "libstatsbootstrap",
     ],
 }

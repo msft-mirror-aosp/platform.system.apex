@@ -937,9 +937,7 @@ Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
     return Error() << "Did not find " << apex.GetPath();
   }
 
-  // Concept of latest sharedlibs apex is somewhat blurred. Since this is only
-  // used in testing, it is ok to always allow unmounting sharedlibs apex.
-  if (latest && !manifest.providesharedapexlibs()) {
+  if (latest) {
     if (!allow_latest) {
       return Error() << "Package " << apex.GetPath() << " is active";
     }
@@ -1091,12 +1089,7 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file, int32_t loop_id,
             version_found_active = latest;
           }
         });
-    // If the package provides shared libraries to other APEXs, we need to
-    // activate all versions available (i.e. preloaded on /system/apex and
-    // available on /data/apex/active). The reason is that there might be some
-    // APEXs loaded from /system/apex that reference the libraries contained on
-    // the preloaded version of the apex providing shared libraries.
-    if (version_found_active && !manifest.providesharedapexlibs()) {
+    if (version_found_active) {
       LOG(DEBUG) << "Package " << manifest.name() << " with version "
                  << manifest.version() << " already active";
       return {};
@@ -1114,19 +1107,16 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file, int32_t loop_id,
     }
   }
 
-  // Bind mount the latest version to /apex/<package_name>, unless the
-  // package provides shared libraries to other APEXs.
-  if (!manifest.providesharedapexlibs()) {
-    auto st = gMountedApexes.DoIfLatest(
-        manifest.name(), apex_file.GetPath(), [&]() -> Result<void> {
-          return apexd_private::BindMount(
-              apexd_private::GetActiveMountPoint(manifest), mount_point);
-        });
-    if (!st.ok()) {
-      return Error() << "Failed to update package " << manifest.name()
-                     << " to version " << manifest.version() << " : "
-                     << st.error();
-    }
+  // Bind mount the latest version to /apex/<package_name>.
+  auto st = gMountedApexes.DoIfLatest(
+      manifest.name(), apex_file.GetPath(), [&]() -> Result<void> {
+        return apexd_private::BindMount(
+            apexd_private::GetActiveMountPoint(manifest), mount_point);
+      });
+  if (!st.ok()) {
+    return Error() << "Failed to update package " << manifest.name()
+                   << " to version " << manifest.version() << " : "
+                   << st.error();
   }
 
   LOG(DEBUG) << "Successfully activated " << apex_file.GetPath()
@@ -1255,7 +1245,7 @@ std::vector<ApexFile> CalculateInactivePackages(
   return inactive;
 }
 
-Result<void> EmitApexInfoList(bool is_bootstrap) {
+void EmitApexInfoList(bool is_bootstrap) {
   std::vector<ApexFile> active{GetActivePackages()};
 
   std::vector<ApexFile> inactive;
@@ -1271,14 +1261,18 @@ Result<void> EmitApexInfoList(bool is_bootstrap) {
   unique_fd fd(TEMP_FAILURE_RETRY(
       open(kApexInfoList, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)));
   if (fd.get() == -1) {
-    return ErrnoErrorf("Can't open {}", kApexInfoList);
+    PLOG(ERROR) << "Can't open " << kApexInfoList;
+    return;
   }
   if (!android::base::WriteStringToFd(xml.str(), fd)) {
-    return ErrnoErrorf("Can't write to {}", kApexInfoList);
+    PLOG(ERROR) << "Can't write to " << kApexInfoList;
   }
 
   fd.reset();
-  return RestoreconPath(kApexInfoList);
+  if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
+    LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "
+               << status.error();
+  }
 }
 
 namespace {
@@ -2155,17 +2149,6 @@ int OnBootstrap() {
         activation_list.push_back(apex);
         loop_device_cnt++;
       }
-      if (apex.get().GetManifest().providesharedapexlibs()) {
-        LOG(INFO) << "Found sharedlibs APEX " << apex.get().GetPath();
-        // Sharedlis APEX might be mounted 2 times:
-        //   * Pre-installed sharedlibs APEX will be mounted in OnStart
-        //   * Updated sharedlibs APEX (if it exists) will be mounted in
-        //   OnStart
-        //
-        // We already counted a loop device for one of these 2 mounts, need to
-        // add 1 more.
-        loop_device_cnt++;
-      }
     }
     PrepareResources(loop_device_cnt, apex_names);
   }
@@ -2176,8 +2159,8 @@ int OnBootstrap() {
     LOG(ERROR) << "Failed to activate apexes: " << ret.error();
     return 1;
   }
+  EmitApexInfoList(/*is_bootstrap=*/true);
 
-  OnAllPackagesActivated(/*is_bootstrap=*/true);
   auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                           boot_clock::now() - time_started)
                           .count();
@@ -2531,7 +2514,6 @@ void ActivateApexesOnStart() {
     }
   }
 
-  // TODO(b/179248390): activate parallelly if possible
   auto activate_status =
       ActivateApexPackages(activation_list, ActivationMode::kBootMode);
   if (!activate_status.ok()) {
@@ -2550,6 +2532,7 @@ void ActivateApexesOnStart() {
       LOG(ERROR) << retry_status.error();
     }
   }
+  EmitApexInfoList(/*is_bootstrap=*/false);
 }
 
 void OnStart() {
@@ -2592,18 +2575,7 @@ void OnStart() {
   LOG(INFO) << "OnStart done, duration=" << time_elapsed;
 }
 
-void OnAllPackagesActivated(bool is_bootstrap) {
-  auto result = EmitApexInfoList(is_bootstrap);
-  if (!result.ok()) {
-    LOG(ERROR) << "cannot emit apex info list: " << result.error();
-  }
-
-  // Because apexd in bootstrap mode runs in blocking mode
-  // we don't have to set as activated.
-  if (is_bootstrap) {
-    return;
-  }
-
+void OnAllPackagesActivated() {
   // Set a system property to let other components know that APEXs are
   // activated, but are not yet ready to be used. init is expected to wait
   // for this status before performing configuration based on activated
@@ -3152,8 +3124,9 @@ int OnStartInVmMode() {
     LOG(ERROR) << "Failed to activate apex packages : " << status.error();
     return 1;
   }
+  EmitApexInfoList(/*is_bootstrap=*/false);
 
-  OnAllPackagesActivated(false);
+  OnAllPackagesActivated();
   // In VM mode, we don't run a separate --snapshotde mode.
   // Instead, we mark apexd.status "ready" right now.
   OnAllPackagesReady();
@@ -3236,10 +3209,7 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
       LOG(ERROR) << retry_status.error();
     }
   }
-
-  if (auto status = EmitApexInfoList(/*is_bootstrap*/ false); !status.ok()) {
-    LOG(ERROR) << status.error();
-  }
+  EmitApexInfoList(/*is_bootstrap=*/false);
 
   return 0;
 }
@@ -3558,10 +3528,7 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
       }
     }
   }
-
-  if (auto res = EmitApexInfoList(/*is_bootstrap*/ false); !res.ok()) {
-    LOG(ERROR) << res.error();
-  }
+  EmitApexInfoList(/*is_bootstrap=*/false);
 
   event.MarkSucceeded();
 
