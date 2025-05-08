@@ -529,12 +529,6 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                    << status.error();
   }
 
-  auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          boot_clock::now() - time_started)
-                          .count();
-  LOG(INFO) << "Successfully mounted package " << full_path << " on "
-            << mount_point << " duration=" << time_elapsed;
-
   MountedApexData apex_data(apex.GetManifest().version(), loop.name,
                             apex.GetPath(), mount_point, verity_dev.GetName(),
                             linear_dev.GetName());
@@ -544,6 +538,12 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   verity_dev.Release();
   loop.CloseGood();
   scope_guard.Disable();
+
+  auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          boot_clock::now() - time_started)
+                          .count();
+  LOG(VERBOSE) << "Successfully mounted package " << full_path << " on "
+               << mount_point << " duration=" << time_elapsed;
   return apex_data;
 }
 
