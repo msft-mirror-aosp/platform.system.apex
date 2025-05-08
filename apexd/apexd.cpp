@@ -1038,10 +1038,6 @@ Result<void> ResumeRevertIfNeeded() {
   return RevertActiveSessions("", "");
 }
 
-bool IsValidPackageName(const std::string& package_name) {
-  return kBannedApexName.count(package_name) == 0;
-}
-
 // Activates given APEX file.
 //
 // In a nutshel activation of an APEX consist of the following steps:
@@ -1057,11 +1053,6 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file, int32_t loop_id,
                                  const std::string& device_name,
                                  bool reuse_device) {
   ATRACE_NAME("ActivatePackageImpl");
-  const ApexManifest& manifest = apex_file.GetManifest();
-
-  if (!IsValidPackageName(manifest.name())) {
-    return Errorf("Package name {} is not allowed.", manifest.name());
-  }
 
   // Validate upgraded shim apex
   if (shim::IsShimApex(apex_file) &&
@@ -1078,6 +1069,7 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file, int32_t loop_id,
   // See whether we think it's active, and do not allow to activate the same
   // version. Also detect whether this is the highest version.
   // We roll this into a single check.
+  const ApexManifest& manifest = apex_file.GetManifest();
   bool version_found_mounted = false;
   {
     int64_t new_version = manifest.version();
