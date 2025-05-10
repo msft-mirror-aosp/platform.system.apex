@@ -54,7 +54,6 @@ static constexpr const char* kApexRoot = "/apex";
 static constexpr const char* kStagedSessionsDir = "/data/app-staging";
 
 static constexpr const char* kApexDataSubDir = "apexdata";
-static constexpr const char* kApexSharedLibsSubDir = "sharedlibs";
 static constexpr const char* kApexSnapshotSubDir = "apexrollback";
 static constexpr const char* kPreRestoreSuffix = "-prerestore";
 
@@ -122,10 +121,5 @@ static const std::unordered_map<ApexPartition, std::string>
         {ApexPartition::Odm, kBrandNewApexConfigOdmDir},
 };
 
-// Banned APEX names
-static const std::unordered_set<std::string> kBannedApexName = {
-    kApexSharedLibsSubDir,  // To avoid conflicts with predefined
-                            // /apex/sharedlibs directory
-};
 }  // namespace apex
 }  // namespace android

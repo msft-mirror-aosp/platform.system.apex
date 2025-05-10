@@ -529,12 +529,6 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                    << status.error();
   }
 
-  auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          boot_clock::now() - time_started)
-                          .count();
-  LOG(INFO) << "Successfully mounted package " << full_path << " on "
-            << mount_point << " duration=" << time_elapsed;
-
   MountedApexData apex_data(apex.GetManifest().version(), loop.name,
                             apex.GetPath(), mount_point, verity_dev.GetName(),
                             linear_dev.GetName());
@@ -544,6 +538,12 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   verity_dev.Release();
   loop.CloseGood();
   scope_guard.Disable();
+
+  auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          boot_clock::now() - time_started)
+                          .count();
+  LOG(VERBOSE) << "Successfully mounted package " << full_path << " on "
+               << mount_point << " duration=" << time_elapsed;
   return apex_data;
 }
 
@@ -1038,10 +1038,6 @@ Result<void> ResumeRevertIfNeeded() {
   return RevertActiveSessions("", "");
 }
 
-bool IsValidPackageName(const std::string& package_name) {
-  return kBannedApexName.count(package_name) == 0;
-}
-
 // Activates given APEX file.
 //
 // In a nutshel activation of an APEX consist of the following steps:
@@ -1057,11 +1053,6 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file, int32_t loop_id,
                                  const std::string& device_name,
                                  bool reuse_device) {
   ATRACE_NAME("ActivatePackageImpl");
-  const ApexManifest& manifest = apex_file.GetManifest();
-
-  if (!IsValidPackageName(manifest.name())) {
-    return Errorf("Package name {} is not allowed.", manifest.name());
-  }
 
   // Validate upgraded shim apex
   if (shim::IsShimApex(apex_file) &&
@@ -1078,6 +1069,7 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file, int32_t loop_id,
   // See whether we think it's active, and do not allow to activate the same
   // version. Also detect whether this is the highest version.
   // We roll this into a single check.
+  const ApexManifest& manifest = apex_file.GetManifest();
   bool version_found_mounted = false;
   {
     int64_t new_version = manifest.version();
@@ -1269,9 +1261,13 @@ void EmitApexInfoList(bool is_bootstrap) {
   }
 
   fd.reset();
-  if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
-    LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "
-               << status.error();
+  // we skip for restorecon in bootstrap mode in order to avoid boottime
+  // increase.
+  if (!is_bootstrap) {
+    if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
+      LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "
+                 << status.error();
+    }
   }
 }
 
