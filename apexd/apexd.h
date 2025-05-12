@@ -150,8 +150,8 @@ void OnStart();
 // installed on data. We decide which ones should be activated and return them
 // as a list
 std::vector<ApexFileRef> SelectApexForActivation();
-std::vector<ApexFile> ProcessCompressedApex(
-    const std::vector<ApexFileRef>& compressed_apex, bool is_ota_chroot);
+android::base::Result<ApexFile> ProcessCompressedApex(const ApexFile& capex,
+                                                      bool is_ota_chroot);
 // Validate |apex| is same as |capex|
 android::base::Result<void> ValidateDecompressedApex(const ApexFile& capex,
                                                      const ApexFile& apex);

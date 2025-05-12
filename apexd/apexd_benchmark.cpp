@@ -54,4 +54,13 @@ static void BM_ApexFileRepository_AddPreInstalledApex(benchmark::State& state) {
 }
 BENCHMARK(BM_ApexFileRepository_AddPreInstalledApex);
 
+static void BM_ApexFileRepository_GetPreInstalledApex(benchmark::State& state) {
+  ApexFileRepository instance;
+  instance.AddPreInstalledApex(kBuiltinApexPackageDirs);
+  for (auto _ : state) {
+    instance.GetPreInstalledApexFiles();
+  }
+}
+BENCHMARK(BM_ApexFileRepository_GetPreInstalledApex);
+
 BENCHMARK_MAIN();
