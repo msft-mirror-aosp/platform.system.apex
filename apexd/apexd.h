@@ -189,9 +189,12 @@ int64_t CalculateSizeForCompressedApex(
     const std::vector<std::tuple<std::string, int64_t, int64_t>>&
         compressed_apexes);
 
+// Exposed for benchmark
+void EmitApexInfoList(const std::vector<ApexFileRef>& active,
+                      bool is_bootstrap);
 void CollectApexInfoList(std::ostream& os,
-                         const std::vector<ApexFile>& active_apexs,
-                         const std::vector<ApexFile>& inactive_apexs);
+                         const std::vector<ApexFileRef>& active_apexs,
+                         const std::vector<ApexFileRef>& inactive_apexs);
 
 // Reserve |size| bytes in |dest_dir| by creating a zero-filled file
 android::base::Result<void> ReserveSpaceForCompressedApex(
