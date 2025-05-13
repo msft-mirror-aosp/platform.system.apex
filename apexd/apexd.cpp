@@ -1259,16 +1259,6 @@ void EmitApexInfoList(bool is_bootstrap) {
   if (!android::base::WriteStringToFd(xml.str(), fd)) {
     PLOG(ERROR) << "Can't write to " << kApexInfoList;
   }
-
-  fd.reset();
-  // we skip for restorecon in bootstrap mode in order to avoid boottime
-  // increase.
-  if (!is_bootstrap) {
-    if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
-      LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "
-                 << status.error();
-    }
-  }
 }
 
 std::vector<ApexFile> GetFactoryPackages() {
@@ -3145,7 +3135,10 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
     }
   }
   EmitApexInfoList(/*is_bootstrap=*/false);
-
+  if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
+    LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "
+               << status.error();
+  }
   return 0;
 }
 
