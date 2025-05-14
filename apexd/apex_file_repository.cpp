@@ -110,6 +110,12 @@ void ApexFileRepository::StorePreInstalledApex(ApexFile&& apex_file,
       return;
     }
 
+    if (select_filename == "none") {
+      LOG(INFO) << "Skipping APEX at path " << apex_file.GetPath()
+                << " because it's disabled via sysprop.";
+      return;
+    }
+
     if (ConsumeApexPackageSuffix(android::base::Basename(path)) ==
         select_filename) {
       LOG(INFO) << "Found APEX at path " << path << " for multi-install APEX "
