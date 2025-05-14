@@ -150,8 +150,8 @@ void OnStart();
 // installed on data. We decide which ones should be activated and return them
 // as a list
 std::vector<ApexFileRef> SelectApexForActivation();
-std::vector<ApexFile> ProcessCompressedApex(
-    const std::vector<ApexFileRef>& compressed_apex, bool is_ota_chroot);
+android::base::Result<ApexFile> ProcessCompressedApex(const ApexFile& capex,
+                                                      bool is_ota_chroot);
 // Validate |apex| is same as |capex|
 android::base::Result<void> ValidateDecompressedApex(const ApexFile& capex,
                                                      const ApexFile& apex);
@@ -189,9 +189,12 @@ int64_t CalculateSizeForCompressedApex(
     const std::vector<std::tuple<std::string, int64_t, int64_t>>&
         compressed_apexes);
 
+// Exposed for benchmark
+void EmitApexInfoList(const std::vector<ApexFileRef>& active,
+                      bool is_bootstrap);
 void CollectApexInfoList(std::ostream& os,
-                         const std::vector<ApexFile>& active_apexs,
-                         const std::vector<ApexFile>& inactive_apexs);
+                         const std::vector<ApexFileRef>& active_apexs,
+                         const std::vector<ApexFileRef>& inactive_apexs);
 
 // Reserve |size| bytes in |dest_dir| by creating a zero-filled file
 android::base::Result<void> ReserveSpaceForCompressedApex(

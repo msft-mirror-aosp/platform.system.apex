@@ -83,7 +83,6 @@ using android::base::testing::WithMessage;
 using android::dm::DeviceMapper;
 using ::apex::proto::SessionState;
 using com::android::apex::testing::ApexInfoXmlEq;
-using ::testing::ByRef;
 using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::EndsWith;
@@ -261,12 +260,10 @@ class ApexdUnitTest : public ::testing::Test {
     auto compressed_file_path =
         StringPrintf("%s/%s", built_in_dir.c_str(), name.c_str());
     auto compressed_apex = ApexFile::Open(compressed_file_path);
-    std::vector<ApexFileRef> compressed_apex_list;
-    compressed_apex_list.emplace_back(std::cref(*compressed_apex));
     auto decompressed =
-        ProcessCompressedApex(compressed_apex_list, /*is_ota_chroot*/ false);
-    CHECK(decompressed.size() == 1);
-    return std::make_tuple(compressed_file_path, decompressed[0].GetPath());
+        ProcessCompressedApex(*compressed_apex, /*is_ota_chroot*/ false);
+    CHECK(decompressed.ok());
+    return std::make_tuple(compressed_file_path, decompressed->GetPath());
   }
 
   std::tuple<std::string, std::string> PrepareCompressedApex(
@@ -357,8 +354,8 @@ TEST_F(ApexdUnitTest, SelectApexForActivationSuccess) {
 
   auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 2u);
-  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*apexd_test_file)),
-                                           ApexFileEq(ByRef(*shim_v1))));
+  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(*apexd_test_file),
+                                           ApexFileEq(*shim_v1)));
 }
 
 // Higher version gets priority when selecting for activation
@@ -379,9 +376,8 @@ TEST_F(ApexdUnitTest, HigherVersionOfApexIsSelected) {
   auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 2u);
 
-  ASSERT_THAT(result,
-              UnorderedElementsAre(ApexFileEq(ByRef(*apexd_test_file_v2)),
-                                   ApexFileEq(ByRef(*shim_v2))));
+  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(*apexd_test_file_v2),
+                                           ApexFileEq(*shim_v2)));
 }
 
 // When versions are equal, non-pre-installed version gets priority
@@ -401,19 +397,15 @@ TEST_F(ApexdUnitTest, DataApexGetsPriorityForSameVersions) {
   auto result = SelectApexForActivation();
   ASSERT_EQ(result.size(), 2u);
 
-  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(ByRef(*apexd_test_file)),
-                                           ApexFileEq(ByRef(*shim_v1))));
+  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(*apexd_test_file),
+                                           ApexFileEq(*shim_v1)));
 }
-
 
 TEST_F(ApexdUnitTest, ProcessCompressedApex) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
 
-  std::vector<ApexFileRef> compressed_apex_list;
-  compressed_apex_list.emplace_back(std::cref(*compressed_apex));
-  auto return_value =
-      ProcessCompressedApex(compressed_apex_list, /* is_ota_chroot= */ false);
+  auto return_value = ProcessCompressedApex(*compressed_apex, false);
 
   std::string decompressed_file_path = StringPrintf(
       "%s/com.android.apex.compressed@1%s", GetDecompressionDir().c_str(),
@@ -424,8 +416,7 @@ TEST_F(ApexdUnitTest, ProcessCompressedApex) {
 
   // Assert that return value contains decompressed APEX
   auto decompressed_apex = ApexFile::Open(decompressed_file_path);
-  ASSERT_THAT(return_value,
-              UnorderedElementsAre(ApexFileEq(ByRef(*decompressed_apex))));
+  ASSERT_THAT(return_value, HasValue(ApexFileEq(*decompressed_apex)));
 }
 
 TEST_F(ApexdUnitTest, ProcessCompressedApexRunsVerification) {
@@ -433,14 +424,10 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexRunsVerification) {
       "com.android.apex.compressed_key_mismatch_with_original.capex"));
   auto compressed_apex_version_mismatch = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1_with_v2_apex.capex"));
-
-  std::vector<ApexFileRef> compressed_apex_list;
-  compressed_apex_list.emplace_back(std::cref(*compressed_apex_mismatch_key));
-  compressed_apex_list.emplace_back(
-      std::cref(*compressed_apex_version_mismatch));
-  auto return_value =
-      ProcessCompressedApex(compressed_apex_list, /* is_ota_chroot= */ false);
-  ASSERT_EQ(return_value.size(), 0u);
+  ASSERT_THAT(ProcessCompressedApex(*compressed_apex_mismatch_key, false),
+              Not(Ok()));
+  ASSERT_THAT(ProcessCompressedApex(*compressed_apex_version_mismatch, false),
+              Not(Ok()));
 }
 
 TEST_F(ApexdUnitTest, ValidateDecompressedApex) {
@@ -486,11 +473,9 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexCanBeCalledMultipleTimes) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
 
-  std::vector<ApexFileRef> compressed_apex_list;
-  compressed_apex_list.emplace_back(std::cref(*compressed_apex));
   auto return_value =
-      ProcessCompressedApex(compressed_apex_list, /* is_ota_chroot= */ false);
-  ASSERT_EQ(return_value.size(), 1u);
+      ProcessCompressedApex(*compressed_apex, /* is_ota_chroot= */ false);
+  ASSERT_THAT(return_value, Ok());
 
   // Capture the creation time of the decompressed APEX
   std::error_code ec;
@@ -503,8 +488,8 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexCanBeCalledMultipleTimes) {
 
   // Now try to decompress the same capex again. It should not fail.
   return_value =
-      ProcessCompressedApex(compressed_apex_list, /* is_ota_chroot= */ false);
-  ASSERT_EQ(return_value.size(), 1u);
+      ProcessCompressedApex(*compressed_apex, /* is_ota_chroot= */ false);
+  ASSERT_THAT(return_value, Ok());
 
   // Ensure the decompressed APEX file did not change
   auto last_write_time_2 = fs::last_write_time(decompressed_apex_path, ec);
@@ -518,11 +503,9 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexOnOtaChroot) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
 
-  std::vector<ApexFileRef> compressed_apex_list;
-  compressed_apex_list.emplace_back(std::cref(*compressed_apex));
   auto return_value =
-      ProcessCompressedApex(compressed_apex_list, /* is_ota_chroot= */ true);
-  ASSERT_EQ(return_value.size(), 1u);
+      ProcessCompressedApex(*compressed_apex, /* is_ota_chroot= */ true);
+  ASSERT_THAT(return_value, Ok());
 
   // Decompressed APEX should be located in decompression_dir
   std::string decompressed_file_path =
@@ -535,8 +518,7 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexOnOtaChroot) {
 
   // Assert that return value contains the decompressed APEX
   auto apex_file = ApexFile::Open(decompressed_file_path);
-  ASSERT_THAT(return_value,
-              UnorderedElementsAre(ApexFileEq(ByRef(*apex_file))));
+  ASSERT_THAT(return_value, HasValue(ApexFileEq(*apex_file)));
 }
 
 // When decompressing APEX, reuse existing OTA APEX
@@ -545,14 +527,11 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexReuseOtaApex) {
   auto compressed_apex = ApexFile::Open(AddPreInstalledApex(
       "com.android.apex.compressed.v1_not_decompressible.capex"));
 
-  std::vector<ApexFileRef> compressed_apex_list;
-  compressed_apex_list.emplace_back(std::cref(*compressed_apex));
-
   // If we try to decompress capex directly, it should fail since the capex
   // pushed is faulty and cannot be decompressed
   auto return_value =
-      ProcessCompressedApex(compressed_apex_list, /* is_ota_chroot= */ false);
-  ASSERT_EQ(return_value.size(), 0u);
+      ProcessCompressedApex(*compressed_apex, /* is_ota_chroot= */ false);
+  ASSERT_THAT(return_value, Not(Ok()));
 
   // But, if there is an ota_apex present for reuse, it should reuse that
   // and avoid decompressing the faulty capex
@@ -563,12 +542,12 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexReuseOtaApex) {
                    GetDecompressionDir().c_str(), kOtaApexPackageSuffix);
   fs::copy(GetTestFile("com.android.apex.compressed.v1.apex"), ota_apex_path);
   return_value =
-      ProcessCompressedApex(compressed_apex_list, /* is_ota_chroot= */ false);
-  ASSERT_EQ(return_value.size(), 1u);
+      ProcessCompressedApex(*compressed_apex, /* is_ota_chroot= */ false);
+  ASSERT_THAT(return_value, Ok());
 
   // Ota Apex should be cleaned up
   ASSERT_THAT(PathExists(ota_apex_path), HasValue(false));
-  ASSERT_EQ(return_value[0].GetPath(),
+  ASSERT_EQ(return_value->GetPath(),
             StringPrintf("%s/com.android.apex.compressed@1%s",
                          GetDecompressionDir().c_str(),
                          kDecompressedApexPackageSuffix));
@@ -799,8 +778,7 @@ TEST_F(ApexdUnitTest, GetStagedApexFilesNoChild) {
 
   auto apex_file = ApexFile::Open(
       StringPrintf("%s/apex.apexd_test.apex", GetStagedDir(123).c_str()));
-  ASSERT_THAT(result,
-              HasValue(UnorderedElementsAre(ApexFileEq(ByRef(*apex_file)))));
+  ASSERT_THAT(result, HasValue(UnorderedElementsAre(ApexFileEq(*apex_file))));
 }
 
 TEST_F(ApexdUnitTest, GetStagedApexFilesOnlyStaged) {
@@ -860,9 +838,8 @@ TEST_F(ApexdUnitTest, GetStagedApexFilesWithChildren) {
       StringPrintf("%s/apex.apexd_test.apex", GetStagedDir(124).c_str()));
   auto child_apex_file_2 = ApexFile::Open(
       StringPrintf("%s/apex.apexd_test.apex", GetStagedDir(125).c_str()));
-  ASSERT_THAT(*result,
-              UnorderedElementsAre(ApexFileEq(ByRef(*child_apex_file_1)),
-                                   ApexFileEq(ByRef(*child_apex_file_2))));
+  ASSERT_THAT(*result, UnorderedElementsAre(ApexFileEq(*child_apex_file_1),
+                                            ApexFileEq(*child_apex_file_2)));
 }
 
 // A test fixture to use for tests that mount/unmount apexes.
@@ -4089,11 +4066,9 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexWrongSELinuxContext) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));
 
-  std::vector<ApexFileRef> compressed_apex_list;
-  compressed_apex_list.emplace_back(std::cref(*compressed_apex));
   auto return_value =
-      ProcessCompressedApex(compressed_apex_list, /* is_ota_chroot= */ false);
-  ASSERT_EQ(return_value.size(), 1u);
+      ProcessCompressedApex(*compressed_apex, /* is_ota_chroot= */ false);
+  ASSERT_THAT(return_value, Ok());
 
   auto decompressed_apex_path = StringPrintf(
       "%s/com.android.apex.compressed@1%s", GetDecompressionDir().c_str(),
@@ -4109,8 +4084,8 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexWrongSELinuxContext) {
             GetSelinuxContext(decompressed_apex_path));
 
   auto attempt_2 =
-      ProcessCompressedApex(compressed_apex_list, /* is_ota_chroot= */ false);
-  ASSERT_EQ(attempt_2.size(), 1u);
+      ProcessCompressedApex(*compressed_apex, /* is_ota_chroot= */ false);
+  ASSERT_THAT(attempt_2, Ok());
   // Verify that it again has correct context.
   ASSERT_EQ(kTestActiveApexSelinuxCtx,
             GetSelinuxContext(decompressed_apex_path));
