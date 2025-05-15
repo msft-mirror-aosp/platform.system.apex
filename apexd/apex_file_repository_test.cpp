@@ -53,6 +53,7 @@ using android::base::testing::Ok;
 using ::testing::_;
 using ::testing::ContainerEq;
 using ::testing::Contains;
+using ::testing::Eq;
 using ::testing::IsEmpty;
 using ::testing::Not;
 using ::testing::Optional;
@@ -225,6 +226,35 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSuccess) {
 
   android::base::SetProperty(persist_prefix + apex_name, "");
   android::base::SetProperty(bootconfig_prefix + apex_name, "");
+}
+
+TEST(ApexFileRepositoryTest, IgnoreNoneForApexSelect) {
+  // Prepare test data.
+  TemporaryDir td;
+  fs::copy(GetTestFile("apex.apexd_test.apex"), td.path);
+  auto apex_name =
+      ApexFile::Open(GetTestFile("apex.apexd_test.apex"))->GetManifest().name();
+
+  auto apex_select_prop_prefix = "debug.apexd.select."s;
+
+  {
+    ApexFileRepository instance(
+        /*enforce_multi_install_partition=*/true,
+        /*multi_install_select_prop_prefixes=*/{apex_select_prop_prefix});
+    ASSERT_THAT(
+        instance.AddPreInstalledApex({{ApexPartition::Vendor, td.path}}), Ok());
+    ASSERT_THAT(instance.GetPreInstalledApex(apex_name), Optional(_));
+  }
+  // With select prop is set to "none", the apex is skipped.
+  {
+    android::base::SetProperty(apex_select_prop_prefix + apex_name, "none");
+    ApexFileRepository instance(
+        /*enforce_multi_install_partition=*/true,
+        /*multi_install_select_prop_prefixes=*/{apex_select_prop_prefix});
+    ASSERT_THAT(
+        instance.AddPreInstalledApex({{ApexPartition::Vendor, td.path}}), Ok());
+    ASSERT_THAT(instance.GetPreInstalledApex(apex_name), Eq(std::nullopt));
+  }
 }
 
 TEST(ApexFileRepositoryTest, InitializeMultiInstalledSkipsForDifferingKeys) {
