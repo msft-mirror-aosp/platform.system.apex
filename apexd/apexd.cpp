@@ -1827,25 +1827,29 @@ Result<std::vector<std::string>> TryActivateStagedSession(
 // Note that this doesn't abort with failed sessions. Apexd just marks them as
 // failed and continues activation process. It's higher level component (e.g.
 // system_server) that needs to handle the failures.
-void ActivateStagedSessions() {
-  LOG(INFO) << "Scanning " << GetSessionsDir()
-            << " looking for sessions to be activated.";
-
-  auto sessions_to_activate =
-      gSessionManager->GetSessionsInState(SessionState::STAGED);
+void ActivateStagedSessions(std::vector<ApexSession>&& sessions) {
+  std::vector<std::reference_wrapper<ApexSession>> sessions_to_activate;
+  for (auto& session : sessions) {
+    if (session.GetState() == SessionState::STAGED) {
+      sessions_to_activate.push_back(std::ref(session));
+    }
+  }
   if (gSupportsFsCheckpoints) {
     // A session that is in the ACTIVATED state should still be re-activated if
     // fs checkpointing is supported. In this case, a session may be in the
     // ACTIVATED state yet the data/apex/active directory may have been
     // reverted. The session should be reverted in this scenario.
-    auto activated_sessions =
-        gSessionManager->GetSessionsInState(SessionState::ACTIVATED);
-    sessions_to_activate.insert(sessions_to_activate.end(),
-                                activated_sessions.begin(),
-                                activated_sessions.end());
+    for (auto& session : sessions) {
+      if (session.GetState() == SessionState::ACTIVATED) {
+        sessions_to_activate.push_back(std::ref(session));
+      }
+    }
   }
 
-  for (auto& session : sessions_to_activate) {
+  LOG(INFO) << "Found " << sessions_to_activate.size()
+            << " sessions to activate";
+
+  for (ApexSession& session : sessions_to_activate) {
     auto session_id = session.GetId();
     auto packages = TryActivateStagedSession(session);
     if (!packages.ok()) {
@@ -1860,6 +1864,8 @@ void ActivateStagedSessions() {
       continue;
     }
 
+    LOG(INFO) << "Session(" << session_id
+              << ") is successfully activated: " << base::Join(*packages, ", ");
     gChangedActiveApexes.insert_range(*packages);
 
     auto st = session.UpdateStateAndCommit(SessionState::ACTIVATED);
@@ -2106,15 +2112,24 @@ void PrepareResources(size_t loop_device_cnt,
 // revert or activation may change the active set of data apexes. For example,
 // revert restores the active apexes from the last backup.
 void ProcessSessions() {
-  // If there's any pending revert, revert active sessions.
-  auto status = ResumeRevertIfNeeded();
-  if (!status.ok()) {
-    LOG(ERROR) << "Failed to resume revert : " << status.error();
+  auto sessions = gSessionManager->GetSessions();
+
+  if (sessions.empty()) {
+    LOG(INFO) << "No sessions to revert/activate.";
+    return;
   }
-  // Then, activate STAGED sessions. Note that if ResumeRevertIfNeeded() had
-  // reverted active sessions, any STAGED sessions are all aborted and there's
-  // nothing to activate.
-  ActivateStagedSessions();
+
+  // If there's any pending revert, revert active sessions.
+  if (std::ranges::any_of(sessions, [](const auto& session) {
+        return session.GetState() == SessionState::REVERT_IN_PROGRESS;
+      })) {
+    if (auto status = RevertActiveSessions("", ""); !status.ok()) {
+      LOG(ERROR) << "Failed to resume revert : " << status.error();
+    }
+  } else {
+    // Otherwise, activate STAGED sessions.
+    ActivateStagedSessions(std::move(sessions));
+  }
 }
 
 std::vector<ApexFile> ScanDataApexFiles(ApexImageManager* manager) {
