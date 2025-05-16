@@ -190,7 +190,7 @@ TEST(ApexFileRepositoryTest, InitializeSameNameDifferentPathAborts) {
       "");
 }
 
-TEST(ApexFileRepositoryTest, InitializeMultiInstalledSuccess) {
+TEST(ApexFileRepositoryTest, ApexSelectWithMultiApexSuccess) {
   // Prepare test data.
   TemporaryDir td;
   std::string apex_file = GetTestFile("apex.apexd_test.apex");
@@ -201,13 +201,13 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSuccess) {
 
   std::string persist_prefix = "debug.apexd.test.persistprefix.";
   std::string bootconfig_prefix = "debug.apexd.test.bootconfigprefix.";
-  ApexFileRepository instance(/*enforce_multi_install_partition=*/false,
-                              /*multi_install_select_prop_prefixes=*/{
-                                  persist_prefix, bootconfig_prefix});
+  ApexFileRepository instance(
+      kApexDecompressedDir,
+      /*apex_select_prop_prefixes=*/{persist_prefix, bootconfig_prefix});
 
   auto test_fn = [&](const std::string& selected_filename) {
     ASSERT_RESULT_OK(
-        instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
+        instance.AddPreInstalledApex({{ApexPartition::Vendor, td.path}}));
     auto ret = instance.GetPreinstalledPath(apex->GetManifest().name());
     ASSERT_RESULT_OK(ret);
     ASSERT_EQ(StringPrintf("%s/%s", td.path, selected_filename.c_str()), *ret);
@@ -239,8 +239,8 @@ TEST(ApexFileRepositoryTest, IgnoreNoneForApexSelect) {
 
   {
     ApexFileRepository instance(
-        /*enforce_multi_install_partition=*/true,
-        /*multi_install_select_prop_prefixes=*/{apex_select_prop_prefix});
+        kApexDecompressedDir,
+        /*apex_select_prop_prefixes=*/{apex_select_prop_prefix});
     ASSERT_THAT(
         instance.AddPreInstalledApex({{ApexPartition::Vendor, td.path}}), Ok());
     ASSERT_THAT(instance.GetPreInstalledApex(apex_name), Optional(_));
@@ -249,15 +249,15 @@ TEST(ApexFileRepositoryTest, IgnoreNoneForApexSelect) {
   {
     android::base::SetProperty(apex_select_prop_prefix + apex_name, "none");
     ApexFileRepository instance(
-        /*enforce_multi_install_partition=*/true,
-        /*multi_install_select_prop_prefixes=*/{apex_select_prop_prefix});
+        kApexDecompressedDir,
+        /*apex_select_prop_prefixes=*/{apex_select_prop_prefix});
     ASSERT_THAT(
         instance.AddPreInstalledApex({{ApexPartition::Vendor, td.path}}), Ok());
     ASSERT_THAT(instance.GetPreInstalledApex(apex_name), Eq(std::nullopt));
   }
 }
 
-TEST(ApexFileRepositoryTest, InitializeMultiInstalledSkipsForDifferingKeys) {
+TEST(ApexFileRepositoryTest, ApexSelectSkipsForDifferingKeys) {
   // Prepare test data.
   TemporaryDir td;
   fs::copy(GetTestFile("apex.apexd_test.apex"),
@@ -270,11 +270,10 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSkipsForDifferingKeys) {
   std::string prop = prop_prefix + apex_name;
   android::base::SetProperty(prop, "version_a.apex");
 
-  ApexFileRepository instance(
-      /*enforce_multi_install_partition=*/false,
-      /*multi_install_select_prop_prefixes=*/{prop_prefix});
+  ApexFileRepository instance(kApexDecompressedDir,
+                              /*apex_select_prop_prefixes=*/{prop_prefix});
   ASSERT_RESULT_OK(
-      instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
+      instance.AddPreInstalledApex({{ApexPartition::Vendor, td.path}}));
   // Neither version should be have been installed.
   ASSERT_THAT(instance.GetPreinstalledPath(apex->GetManifest().name()),
               Not(Ok()));
@@ -282,7 +281,7 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSkipsForDifferingKeys) {
   android::base::SetProperty(prop, "");
 }
 
-TEST(ApexFileRepositoryTest, InitializeMultiInstalledSkipsForInvalidPartition) {
+TEST(ApexFileRepositoryTest, ApexSelectSkipsForInvalidPartition) {
   // Prepare test data.
   TemporaryDir td;
   // Note: These test files are on /data, which is not a valid partition for
@@ -297,9 +296,8 @@ TEST(ApexFileRepositoryTest, InitializeMultiInstalledSkipsForInvalidPartition) {
   std::string prop = prop_prefix + apex_name;
   android::base::SetProperty(prop, "version_a.apex");
 
-  ApexFileRepository instance(
-      /*enforce_multi_install_partition=*/true,
-      /*multi_install_select_prop_prefixes=*/{prop_prefix});
+  ApexFileRepository instance(kApexDecompressedDir,
+                              /*apex_select_prop_prefixes=*/{prop_prefix});
   ASSERT_RESULT_OK(
       instance.AddPreInstalledApex({{ApexPartition::System, td.path}}));
   // Neither version should be have been installed.

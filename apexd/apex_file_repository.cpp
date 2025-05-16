@@ -71,16 +71,16 @@ void ApexFileRepository::StorePreInstalledApex(ApexFile&& apex_file,
                                                ApexPartition partition) {
   const std::string& name = apex_file.GetManifest().name();
 
-  // Check if this APEX name is treated as a multi-install APEX.
+  // Check if this APEX name is selected or not.
   //
   // Note: apexd is a oneshot service which runs at boot, but can be
   // restarted when needed (such as staging an APEX update). If a
-  // multi-install select property changes between boot and when apexd
+  // APEX select property changes between boot and when apexd
   // restarts, the LOG messages below will report the version that will be
   // activated on next reboot, which may differ from the currently-active
   // version.
   std::string select_filename =
-      GetApexSelectFilenameFromProp(multi_install_select_prop_prefixes_, name);
+      GetApexSelectFilenameFromProp(apex_select_prop_prefixes_, name);
   if (!select_filename.empty()) {
     std::string path;
     if (!android::base::Realpath(apex_file.GetPath(), &path)) {
@@ -88,10 +88,9 @@ void ApexFileRepository::StorePreInstalledApex(ApexFile&& apex_file,
                  << apex_file.GetPath();
       return;
     }
-    if (enforce_multi_install_partition_ &&
-        partition != ApexPartition::Vendor && partition != ApexPartition::Odm) {
-      LOG(ERROR) << "Multi-install APEX " << path
-                 << " can only be preinstalled on /{odm,vendor}/apex/.";
+    if (partition != ApexPartition::Vendor && partition != ApexPartition::Odm) {
+      LOG(ERROR) << "APEX-select property is supported on /{odm,vendor}/apex/ :"
+                 << path;
       return;
     }
 
@@ -116,23 +115,13 @@ void ApexFileRepository::StorePreInstalledApex(ApexFile&& apex_file,
       return;
     }
 
-    if (ConsumeApexPackageSuffix(android::base::Basename(path)) ==
+    if (ConsumeApexPackageSuffix(android::base::Basename(path)) !=
         select_filename) {
-      LOG(INFO) << "Found APEX at path " << path << " for multi-install APEX "
-                << name;
-      // A copy is needed because apex_file is moved here
-      const std::string apex_name = name;
-      // Add the APEX file to the store if its filename matches the
-      // property.
-      pre_installed_store_.emplace(apex_name, std::move(apex_file));
-      partition_store_.emplace(apex_name, partition);
-    } else {
       LOG(INFO) << "Skipping APEX at path " << path
                 << " because it does not match expected multi-install"
                 << " APEX property for " << name;
+      return;
     }
-
-    return;
   }
 
   auto it = pre_installed_store_.find(name);
@@ -256,7 +245,6 @@ android::base::Result<void> ApexFileRepository::AddPreInstalledApex(
 
     StorePreInstalledApex(std::move(*apex_file), apex_path.partition);
   }
-  multi_install_public_keys_.clear();
   return {};
 }
 
@@ -271,7 +259,6 @@ android::base::Result<void> ApexFileRepository::AddPreInstalledApexParallel(
   for (auto&& [apex_file, partition] : apex_file_and_partition) {
     StorePreInstalledApex(std::move(apex_file), partition);
   }
-  multi_install_public_keys_.clear();
   return {};
 }
 
