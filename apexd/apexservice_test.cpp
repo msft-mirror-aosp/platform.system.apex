@@ -74,6 +74,7 @@ using android::apex::testing::IsOk;
 using android::apex::testing::SessionInfoEq;
 using android::base::EndsWith;
 using android::base::Error;
+using android::base::GetIntProperty;
 using android::base::Join;
 using android::base::Result;
 using android::base::SetProperty;
@@ -1473,6 +1474,9 @@ static const std::vector<std::string> kEarlyProcesses = {
 // This test case is part of the ApexServiceTest suite to ensure that apexd is
 // running when this test is executed.
 TEST_F(ApexServiceTest, EarlyProcessesAreInDifferentMountNamespace) {
+  if (GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+    GTEST_SKIP() << "A device is using a single mount namespace";
+  }
   std::string ns_apexd;
 
   ExecInMountNamespaceOf(GetPidOf("apexd"), [&](pid_t /*pid*/) {
@@ -1516,6 +1520,9 @@ static const std::vector<std::string> kEarlyApexes = {
 };
 
 TEST(ApexdTest, ApexesAreActivatedForEarlyProcesses) {
+  if (GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+    GTEST_SKIP() << "A device is using a single mount namespace";
+  }
   for (const auto& name : kEarlyProcesses) {
     pid_t pid = GetPidOf(name);
     const std::string path =

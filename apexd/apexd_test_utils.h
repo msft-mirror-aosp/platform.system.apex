@@ -105,17 +105,16 @@ MATCHER_P(ApexFileEq, other, "") {
   using ::testing::Property;
 
   return ExplainMatchResult(
-      AllOf(Property("path", &ApexFile::GetPath, Eq(other.get().GetPath())),
+      AllOf(Property("path", &ApexFile::GetPath, Eq(other.GetPath())),
             Property("image_offset", &ApexFile::GetImageOffset,
-                     Eq(other.get().GetImageOffset())),
+                     Eq(other.GetImageOffset())),
             Property("image_size", &ApexFile::GetImageSize,
-                     Eq(other.get().GetImageSize())),
-            Property("fs_type", &ApexFile::GetFsType,
-                     Eq(other.get().GetFsType())),
+                     Eq(other.GetImageSize())),
+            Property("fs_type", &ApexFile::GetFsType, Eq(other.GetFsType())),
             Property("public_key", &ApexFile::GetBundledPublicKey,
-                     Eq(other.get().GetBundledPublicKey())),
+                     Eq(other.GetBundledPublicKey())),
             Property("is_compressed", &ApexFile::IsCompressed,
-                     Eq(other.get().IsCompressed()))),
+                     Eq(other.IsCompressed()))),
       arg, result_listener);
 }
 

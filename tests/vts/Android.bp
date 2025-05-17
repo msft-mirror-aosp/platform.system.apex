@@ -30,7 +30,8 @@ cc_test {
     ],
     test_suites: [
         "general-tests",
-        "vts",
+        // TODO(b/418125620) re-enable this test
+        // "vts",
     ],
     require_root: true,
     auto_gen_config: true,

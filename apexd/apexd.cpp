@@ -1223,27 +1223,31 @@ std::vector<ApexFile> GetActivePackages() {
   return ret;
 }
 
-std::vector<ApexFile> CalculateInactivePackages(
-    const std::vector<ApexFile>& active) {
-  std::vector<ApexFile> inactive = GetFactoryPackages();
+std::vector<ApexFileRef> CalculateInactivePackages(
+    const std::vector<ApexFileRef>& active_apexes) {
+  std::set<std::string> active_preinstalled_names;
+  auto& repo = ApexFileRepository::GetInstance();
+  for (const auto& apex : active_apexes) {
+    if (repo.IsPreInstalledApex(apex)) {
+      active_preinstalled_names.insert(apex.get().GetManifest().name());
+    }
+  }
+
+  std::vector<ApexFileRef> inactive = repo.GetPreInstalledApexFiles();
   auto new_end = std::remove_if(
-      inactive.begin(), inactive.end(), [&active](const ApexFile& apex) {
-        return std::any_of(active.begin(), active.end(),
-                           [&apex](const ApexFile& active_apex) {
-                             return apex.GetPath() == active_apex.GetPath();
-                           });
+      inactive.begin(), inactive.end(), [&](const ApexFile& apex) {
+        return active_preinstalled_names.contains(apex.GetManifest().name());
       });
   inactive.erase(new_end, inactive.end());
   return inactive;
 }
 
-void EmitApexInfoList(bool is_bootstrap) {
-  std::vector<ApexFile> active{GetActivePackages()};
-
-  std::vector<ApexFile> inactive;
+void EmitApexInfoList(const std::vector<ApexFileRef>& active,
+                      bool is_bootstrap) {
+  std::vector<ApexFileRef> inactive;
   // we skip for non-activated built-in apexes in bootstrap mode
   // in order to avoid boottime increase
-  if (!is_bootstrap) {
+  if (IsMountBeforeDataEnabled() || !is_bootstrap) {
     inactive = CalculateInactivePackages(active);
   }
 
@@ -1259,30 +1263,7 @@ void EmitApexInfoList(bool is_bootstrap) {
   if (!android::base::WriteStringToFd(xml.str(), fd)) {
     PLOG(ERROR) << "Can't write to " << kApexInfoList;
   }
-
-  fd.reset();
-  // we skip for restorecon in bootstrap mode in order to avoid boottime
-  // increase.
-  if (!is_bootstrap) {
-    if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
-      LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "
-                 << status.error();
-    }
-  }
 }
-
-namespace {
-std::unordered_map<std::string, uint64_t> GetActivePackagesMap() {
-  std::vector<ApexFile> active_packages = GetActivePackages();
-  std::unordered_map<std::string, uint64_t> ret;
-  for (const auto& package : active_packages) {
-    const ApexManifest& manifest = package.GetManifest();
-    ret.insert({manifest.name(), manifest.version()});
-  }
-  return ret;
-}
-
-}  // namespace
 
 std::vector<ApexFile> GetFactoryPackages() {
   std::vector<ApexFile> ret;
@@ -1377,10 +1358,53 @@ Result<void> ActivateApex(const ApexFile& apex, ActivationMode mode,
   return ActivatePackageImpl(apex, loop_id, device_name, reuse_device);
 }
 
-Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
-                                  ActivationMode mode) {
+struct ActivationContext {
+  std::unordered_map<std::string, ApexFile> decompressed_apex_store;
+  // Wrapper to ProcessCompressedApex to keep the ApexFile object in the store
+  Result<ApexFileRef> DecompressApex(const ApexFile& capex,
+                                     bool is_ota_chroot) {
+    auto name = capex.GetManifest().name();
+    auto it = decompressed_apex_store.find(name);
+    if (it != decompressed_apex_store.end()) {
+      return std::cref(it->second);
+    }
+    auto decompressed = OR_RETURN(ProcessCompressedApex(capex, is_ota_chroot));
+    auto pair = decompressed_apex_store.emplace(name, std::move(decompressed));
+    return std::cref(pair.first->second);
+  }
+};
+
+// Custom result type for ActivateApexPackages()
+struct ActivationResult {
+  std::vector<ApexFileRef> activated;
+  std::vector<ApexFileRef> failed;
+  std::string error_message;
+
+  bool ok() const { return failed.empty(); }
+  const std::string& error() const { return error_message; }
+};
+
+ActivationResult ActivateApexPackages(ActivationContext& ctx,
+                                      const std::vector<ApexFileRef>& apexes,
+                                      ActivationMode mode) {
   ATRACE_NAME("ActivateApexPackages");
   size_t apex_cnt = apexes.size();
+  std::vector<Result<ApexFileRef>> results;
+  results.reserve(apex_cnt);
+
+  // Decompress compressed apexes, if any, only in supported modes.
+  // TODO(b/179248390) do this in parallel
+  bool compressed_apex_supported = mode == ActivationMode::kBootMode ||
+                                   mode == ActivationMode::kOtaChrootMode;
+  bool is_ota_chroot = mode == ActivationMode::kOtaChrootMode;
+  for (const auto& apex : apexes) {
+    if (apex.get().IsCompressed() && compressed_apex_supported) {
+      results.push_back(ctx.DecompressApex(apex, is_ota_chroot));
+    } else {
+      results.push_back(apex);
+    }
+  }
+
   size_t worker_num =
       android::sysprop::ApexProperties::boot_activation_threads().value_or(0);
   // Setting number of workers to the number of packages to load
@@ -1391,52 +1415,49 @@ Result<void> ActivateApexPackages(const std::vector<ApexFileRef>& apexes,
     worker_num = std::min(apex_cnt, worker_num);
   }
 
-  std::vector<Result<void>> results{apex_cnt};
   ForEachParallel(worker_num, 0uz, apex_cnt, [&](size_t index) {
-    results[index] = ActivateApex(apexes[index].get(), mode, index);
+    if (results[index].ok()) {
+      auto status = ActivateApex(*results[index], mode, index);
+      if (!status.ok()) {
+        results[index] = status.error();
+      }
+    }
   });
 
-  size_t failed_cnt = 0;
-  std::string error_message;
-  for (const auto& res : results) {
-    if (!res.ok()) {
-      ++failed_cnt;
+  ActivationResult activation_result;
+  for (size_t i = 0; i < apex_cnt; ++i) {
+    auto& res = results[i];
+    if (res.ok()) {
+      activation_result.activated.push_back(*res);
+    } else {
       LOG(ERROR) << res.error();
-      if (failed_cnt == 1) {
-        error_message = res.error().message();
+      activation_result.failed.push_back(apexes[i]);
+      if (activation_result.failed.size() == 1) {
+        activation_result.error_message = res.error().message();
       }
     }
   }
-
-  if (failed_cnt > 0) {
-    return Error() << "Failed to activate " << failed_cnt
-                   << " APEX packages. One of the errors: " << error_message;
-  }
-  LOG(INFO) << "Activated " << (apex_cnt - failed_cnt) << " packages.";
-  return {};
+  LOG(INFO) << "Activated " << activation_result.activated.size()
+            << " packages.";
+  return activation_result;
 }
 
 // A fallback function in case some of the apexes failed to activate. For all
 // such apexes that were coming from /data partition we will attempt to activate
 // their corresponding pre-installed copies.
-Result<void> ActivateMissingApexes(const std::vector<ApexFileRef>& apexes,
-                                   ActivationMode mode) {
+ActivationResult ActivateMissingApexes(ActivationContext& ctx,
+                                       const std::vector<ApexFileRef>& failed,
+                                       ActivationMode mode) {
   LOG(INFO) << "Trying to activate pre-installed versions of missing apexes";
   const auto& file_repository = ApexFileRepository::GetInstance();
-  const auto& activated_apexes = GetActivePackagesMap();
   std::vector<ApexFileRef> fallback_apexes;
-  for (const auto& apex_ref : apexes) {
-    const auto& apex = apex_ref.get();
+  for (const auto& apex : failed) {
     if (file_repository.IsPreInstalledApex(apex)) {
       // We tried to activate pre-installed apex in the first place. No need to
       // try again.
       continue;
     }
-    const std::string& name = apex.GetManifest().name();
-    if (activated_apexes.find(name) != activated_apexes.end()) {
-      // It's activated. No need to fallback.
-      continue;
-    }
+    const std::string& name = apex.get().GetManifest().name();
     auto preinstalled = file_repository.GetPreInstalledApex(name);
     if (!preinstalled.has_value()) {
       // Not every apex has preinstalled.
@@ -1448,25 +1469,6 @@ Result<void> ActivateMissingApexes(const std::vector<ApexFileRef>& apexes,
     fallback_apexes.push_back(preinstalled.value());
   }
 
-  // Process compressed APEX, if any
-  std::vector<ApexFileRef> compressed_apex;
-  for (auto it = fallback_apexes.begin(); it != fallback_apexes.end();) {
-    if (it->get().IsCompressed()) {
-      compressed_apex.emplace_back(*it);
-      it = fallback_apexes.erase(it);
-    } else {
-      it++;
-    }
-  }
-  std::vector<ApexFile> decompressed_apex;
-  if (!compressed_apex.empty()) {
-    decompressed_apex = ProcessCompressedApex(
-        compressed_apex,
-        /* is_ota_chroot= */ mode == ActivationMode::kOtaChrootMode);
-    for (const ApexFile& apex_file : decompressed_apex) {
-      fallback_apexes.emplace_back(std::cref(apex_file));
-    }
-  }
   if (mode == kBootMode) {
     // Treat fallback to pre-installed APEXes as a change of the acitve APEX,
     // since we are already in a pretty dire situation, so it's better if we
@@ -1475,7 +1477,7 @@ Result<void> ActivateMissingApexes(const std::vector<ApexFileRef>& apexes,
       gChangedActiveApexes.insert(apex.get().GetManifest().name());
     }
   }
-  return ActivateApexPackages(fallback_apexes, mode);
+  return ActivateApexPackages(ctx, fallback_apexes, mode);
 }
 
 }  // namespace
@@ -2149,13 +2151,14 @@ int OnBootstrap() {
     PrepareResources(loop_device_cnt, apex_names);
   }
 
-  auto ret =
-      ActivateApexPackages(activation_list, ActivationMode::kBootstrapMode);
-  if (!ret.ok()) {
-    LOG(ERROR) << "Failed to activate apexes: " << ret.error();
+  ActivationContext ctx;
+  auto result = ActivateApexPackages(ctx, activation_list,
+                                     ActivationMode::kBootstrapMode);
+  if (!result.ok()) {
+    LOG(ERROR) << "Failed to activate apexes: " << result.error();
     return 1;
   }
-  EmitApexInfoList(/*is_bootstrap=*/true);
+  EmitApexInfoList(result.activated, /*is_bootstrap=*/true);
 
   auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                           boot_clock::now() - time_started)
@@ -2309,6 +2312,8 @@ Result<ApexFile> OpenAndValidateDecompressedApex(const ApexFile& capex,
   return std::move(*apex);
 }
 
+}  // namespace
+
 // Process a single compressed APEX. Returns the decompressed APEX if
 // successful.
 Result<ApexFile> ProcessCompressedApex(const ApexFile& capex,
@@ -2421,34 +2426,6 @@ Result<ApexFile> ProcessCompressedApex(const ApexFile& capex,
   scope_guard.Disable();
   return return_apex;
 }
-}  // namespace
-
-/**
- * For each compressed APEX, decompress it to kApexDecompressedDir
- * and return the decompressed APEX.
- *
- * Returns list of decompressed APEX.
- */
-std::vector<ApexFile> ProcessCompressedApex(
-    const std::vector<ApexFileRef>& compressed_apex, bool is_ota_chroot) {
-  LOG(INFO) << "Processing compressed APEX";
-
-  std::vector<ApexFile> decompressed_apex_list;
-  for (const ApexFile& capex : compressed_apex) {
-    if (!capex.IsCompressed()) {
-      continue;
-    }
-
-    auto decompressed_apex = ProcessCompressedApex(capex, is_ota_chroot);
-    if (decompressed_apex.ok()) {
-      decompressed_apex_list.emplace_back(std::move(*decompressed_apex));
-      continue;
-    }
-    LOG(ERROR) << "Failed to process compressed APEX: "
-               << decompressed_apex.error();
-  }
-  return decompressed_apex_list;
-}
 
 Result<void> ValidateDecompressedApex(const ApexFile& capex,
                                       const ApexFile& apex) {
@@ -2489,46 +2466,28 @@ void ActivateApexesOnStart() {
   }
 
   // Group every ApexFile on device by name
+  ActivationContext ctx;
   auto activation_list = SelectApexForActivation();
-
-  // Process compressed APEX, if any
-  std::vector<ApexFileRef> compressed_apex;
-  for (auto it = activation_list.begin(); it != activation_list.end();) {
-    if (it->get().IsCompressed()) {
-      compressed_apex.emplace_back(*it);
-      it = activation_list.erase(it);
-    } else {
-      it++;
-    }
-  }
-  std::vector<ApexFile> decompressed_apex;
-  if (!compressed_apex.empty()) {
-    decompressed_apex =
-        ProcessCompressedApex(compressed_apex, /* is_ota_chroot= */ false);
-    for (const ApexFile& apex_file : decompressed_apex) {
-      activation_list.emplace_back(std::cref(apex_file));
-    }
-  }
-
   auto activate_status =
-      ActivateApexPackages(activation_list, ActivationMode::kBootMode);
+      ActivateApexPackages(ctx, activation_list, ActivationMode::kBootMode);
   if (!activate_status.ok()) {
-    std::string error_message =
-        StringPrintf("Failed to activate packages: %s",
-                     activate_status.error().message().c_str());
+    std::string error_message = StringPrintf("Failed to activate packages: %s",
+                                             activate_status.error().c_str());
     LOG(ERROR) << error_message;
     Result<void> revert_status =
         RevertActiveSessionsAndReboot("", error_message);
     if (!revert_status.ok()) {
       LOG(ERROR) << "Failed to revert : " << revert_status.error();
     }
-    auto retry_status =
-        ActivateMissingApexes(activation_list, ActivationMode::kBootMode);
+    auto retry_status = ActivateMissingApexes(ctx, activate_status.failed,
+                                              ActivationMode::kBootMode);
     if (!retry_status.ok()) {
       LOG(ERROR) << retry_status.error();
     }
+    // Collect activated apex files
+    activate_status.activated.append_range(retry_status.activated);
   }
-  EmitApexInfoList(/*is_bootstrap=*/false);
+  EmitApexInfoList(activate_status.activated, /*is_bootstrap=*/false);
 }
 
 void OnStart() {
@@ -2970,14 +2929,10 @@ std::string CastPartition(ApexPartition in) {
 }
 
 void CollectApexInfoList(std::ostream& os,
-                         const std::vector<ApexFile>& active_apexs,
-                         const std::vector<ApexFile>& inactive_apexs) {
-  std::vector<com::android::apex::ApexInfo> apex_infos;
-
-  auto convert_to_autogen = [&apex_infos](const ApexFile& apex,
-                                          bool is_active) {
-    auto& instance = ApexFileRepository::GetInstance();
-
+                         const std::vector<ApexFileRef>& active_apexs,
+                         const std::vector<ApexFileRef>& inactive_apexs) {
+  auto& instance = ApexFileRepository::GetInstance();
+  auto convert = [&](const ApexFile& apex, bool is_active) {
     auto preinstalled_path =
         instance.GetPreinstalledPath(apex.GetManifest().name());
     std::optional<std::string> preinstalled_module_path;
@@ -3002,16 +2957,21 @@ void CollectApexInfoList(std::ostream& os,
         apex.GetManifest().version(), apex.GetManifest().versionname(),
         instance.IsPreInstalledApex(apex), is_active, mtime,
         apex.GetManifest().providesharedapexlibs(), partition);
-    apex_infos.emplace_back(std::move(apex_info));
+    return apex_info;
   };
+  // Note: xsdc-generated writer needs to construct the object structure, which
+  // is a bit inefficient. Here the root element is manually handled for better
+  // performance. Tests will ensure the output is well-formed.
+  // TODO: extend xsdc for streaming writer
+  os << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
+  os << "<apex-info-list>\n";
   for (const auto& apex : active_apexs) {
-    convert_to_autogen(apex, /* is_active= */ true);
+    convert(apex, /* is_active= */ true).write(os, "apex-info");
   }
   for (const auto& apex : inactive_apexs) {
-    convert_to_autogen(apex, /* is_active= */ false);
+    convert(apex, /* is_active= */ false).write(os, "apex-info");
   }
-  com::android::apex::ApexInfoList apex_info_list(apex_infos);
-  com::android::apex::write(os, apex_info_list);
+  os << "</apex-info-list>";
 }
 
 // Reserve |size| bytes in |dest_dir| by creating a zero-filled file.
@@ -3114,13 +3074,14 @@ int OnStartInVmMode() {
     return 1;
   }
 
-  if (auto status = ActivateApexPackages(SelectApexForActivation(),
-                                         ActivationMode::kVmMode);
-      !status.ok()) {
-    LOG(ERROR) << "Failed to activate apex packages : " << status.error();
+  ActivationContext ctx;
+  auto result = ActivateApexPackages(ctx, SelectApexForActivation(),
+                                     ActivationMode::kVmMode);
+  if (!result.ok()) {
+    LOG(ERROR) << "Failed to activate apex packages : " << result.error();
     return 1;
   }
-  EmitApexInfoList(/*is_bootstrap=*/false);
+  EmitApexInfoList(result.activated, /*is_bootstrap=*/false);
 
   OnAllPackagesActivated();
   // In VM mode, we don't run a separate --snapshotde mode.
@@ -3167,46 +3128,26 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
     return 1;
   }
 
+  ActivationContext ctx;
   auto activation_list = SelectApexForActivation();
-
-  // TODO(b/179497746): This is the third time we are duplicating this code
-  // block. This will be easier to dedup once we start opening ApexFiles via
-  // ApexFileRepository. That way, ProcessCompressedApex can return list of
-  // ApexFileRef, instead of ApexFile.
-
-  // Process compressed APEX, if any
-  std::vector<ApexFileRef> compressed_apex;
-  for (auto it = activation_list.begin(); it != activation_list.end();) {
-    if (it->get().IsCompressed()) {
-      compressed_apex.emplace_back(*it);
-      it = activation_list.erase(it);
-    } else {
-      it++;
-    }
-  }
-  std::vector<ApexFile> decompressed_apex;
-  if (!compressed_apex.empty()) {
-    decompressed_apex =
-        ProcessCompressedApex(compressed_apex, /* is_ota_chroot= */ true);
-
-    for (const ApexFile& apex_file : decompressed_apex) {
-      activation_list.emplace_back(std::cref(apex_file));
-    }
-  }
-
-  auto activate_status =
-      ActivateApexPackages(activation_list, ActivationMode::kOtaChrootMode);
+  auto activate_status = ActivateApexPackages(ctx, activation_list,
+                                              ActivationMode::kOtaChrootMode);
   if (!activate_status.ok()) {
     LOG(ERROR) << "Failed to activate apex packages : "
                << activate_status.error();
-    auto retry_status =
-        ActivateMissingApexes(activation_list, ActivationMode::kOtaChrootMode);
+    auto retry_status = ActivateMissingApexes(ctx, activate_status.failed,
+                                              ActivationMode::kOtaChrootMode);
     if (!retry_status.ok()) {
       LOG(ERROR) << retry_status.error();
     }
+    // Collect activated apex files
+    activate_status.activated.append_range(retry_status.activated);
   }
-  EmitApexInfoList(/*is_bootstrap=*/false);
-
+  EmitApexInfoList(activate_status.activated, /*is_bootstrap=*/false);
+  if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
+    LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "
+               << status.error();
+  }
   return 0;
 }
 
@@ -3524,7 +3465,15 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
       }
     }
   }
-  EmitApexInfoList(/*is_bootstrap=*/false);
+
+  // 7. Update apex-info-list.xml
+  auto active = GetActivePackages();
+  std::vector<ApexFileRef> active_references;
+  active_references.reserve(active.size());
+  for (const auto& apex : active) {
+    active_references.push_back(std::cref(apex));
+  }
+  EmitApexInfoList(active_references, /*is_bootstrap=*/false);
 
   event.MarkSucceeded();
 

@@ -19,6 +19,7 @@
 
 #include "apex_file.h"
 #include "apex_file_repository.h"
+#include "apexd.h"
 
 using android::apex::ApexFile;
 using android::apex::ApexFileRepository;
@@ -53,5 +54,24 @@ static void BM_ApexFileRepository_AddPreInstalledApex(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_ApexFileRepository_AddPreInstalledApex);
+
+static void BM_ApexFileRepository_GetPreInstalledApex(benchmark::State& state) {
+  ApexFileRepository instance;
+  instance.AddPreInstalledApex(kBuiltinApexPackageDirs);
+  for (auto _ : state) {
+    instance.GetPreInstalledApexFiles();
+  }
+}
+BENCHMARK(BM_ApexFileRepository_GetPreInstalledApex);
+
+static void BM_EmitApexInfoList(benchmark::State& state) {
+  auto& instance = ApexFileRepository::GetInstance();
+  instance.AddPreInstalledApex(kBuiltinApexPackageDirs);
+  auto preinstalled = instance.GetPreInstalledApexFiles();
+  for (auto _ : state) {
+    android::apex::EmitApexInfoList(preinstalled, false);
+  }
+}
+BENCHMARK(BM_EmitApexInfoList);
 
 BENCHMARK_MAIN();
