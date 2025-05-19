@@ -343,6 +343,16 @@ apex {
     updatable: false,
 }
 
+apex_test {
+    name: "apex.apexd_test_v_long",
+    manifest: "manifest_v_long.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.apex.test_package.key",
+    installable: false,
+    updatable: false,
+}
+
 apex_key {
     name: "com.android.apex.test_package.no_inst_key.key",
     public_key: "com.android.apex.test_package.no_inst_key.avbpubkey",
