@@ -14,10 +14,9 @@
  * limitations under the License.
  */
 
+#include <android/apexsupport.h>
 #include <dlfcn.h>
 #include <gtest/gtest.h>
-
-#include <android/apexsupport.h>
 
 #ifdef __ANDROID_APEX__
 
@@ -34,14 +33,39 @@ TEST(LibApexSupportTest, AApexInfo) {
   AApexInfo_destroy(info);
 }
 
-#else // __ANDROID_APEX__
+TEST(LibApexSupportTest, AApexInfo_createWithName) {
+  if (__builtin_available(android 37, *)) {
+    AApexInfo *info;
+    EXPECT_EQ(
+        AApexInfo_createWithName("com.android.libapexsupport.tests", &info),
+        AAPEXINFO_OK);
+    ASSERT_NE(info, nullptr);
+
+    // Version should match with the values in manifest.json
+    EXPECT_EQ(42, AApexInfo_getVersion(info));
+
+    AApexInfo_destroy(info);
+  }
+}
+
+TEST(LibApexSupportTest, AApexInfo_createWithName_Failure) {
+  if (__builtin_available(android 37, *)) {
+    AApexInfo *info;
+    EXPECT_EQ(AApexInfo_createWithName(
+                  "com.android.libapexsupport.tests.non_existent", &info),
+              AAPEXINFO_INVALID_APEX);
+    ASSERT_EQ(info, nullptr);
+  }
+}
+
+#else  // __ANDROID_APEX__
 
 TEST(LibApexSupportTest, AApexInfo) {
   AApexInfo *info;
   EXPECT_EQ(AApexInfo_create(&info), AAPEXINFO_NO_APEX);
 }
 
-#endif // __ANDROID_APEX__
+#endif  // __ANDROID_APEX__
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

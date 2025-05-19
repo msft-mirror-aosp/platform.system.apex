@@ -20,6 +20,7 @@ LIBAPEXSUPPORT {
     AApexInfo_destroy; # llndk
     AApexInfo_getName; # llndk
     AApexInfo_getVersion; # llndk
+    AApexInfo_createWithName; # llndk introduced=37
   local:
     *;
 };
