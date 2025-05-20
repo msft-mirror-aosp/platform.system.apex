@@ -53,13 +53,11 @@ class ApexFileRepository final {
  public:
   // c-tors and d-tor are exposed for testing.
   explicit ApexFileRepository(
-      const std::string& decompression_dir = kApexDecompressedDir)
-      : decompression_dir_(decompression_dir) {}
-  explicit ApexFileRepository(
-      bool enforce_multi_install_partition,
-      const std::vector<std::string>& multi_install_select_prop_prefixes)
-      : multi_install_select_prop_prefixes_(multi_install_select_prop_prefixes),
-        enforce_multi_install_partition_(enforce_multi_install_partition) {}
+      const std::string& decompression_dir = kApexDecompressedDir,
+      const std::vector<std::string>& apex_select_prop_prefixes =
+          kApexSelectPrefix)
+      : decompression_dir_(decompression_dir),
+        apex_select_prop_prefixes_(apex_select_prop_prefixes) {}
 
   // Returns a singletone instance of this class.
   static ApexFileRepository& GetInstance();
@@ -236,19 +234,6 @@ class ApexFileRepository final {
   // Map from trusted public keys for brand-new APEX to their holding partition.
   std::unordered_map<std::string, ApexPartition> brand_new_apex_pubkeys_;
 
-  // Multi-installed APEX name -> all encountered public keys for this APEX.
-  std::unordered_map<std::string, std::unordered_set<std::string>>
-      multi_install_public_keys_;
-
-  // Prefixes used when looking for multi-installed APEX sysprops.
-  // Order matters: the first non-empty prop value is returned.
-  std::vector<std::string> multi_install_select_prop_prefixes_ =
-      kMultiApexSelectPrefix;
-
-  // Allows multi-install APEXes outside of expected partitions.
-  // Only set false in tests.
-  bool enforce_multi_install_partition_ = true;
-
   // Disallows installation of brand-new APEX by default.
   inline static bool enable_brand_new_apex_ = false;
 
@@ -272,6 +257,18 @@ class ApexFileRepository final {
   // Use "path" as key instead of APEX name because there can be multiple
   // versions of sharedlibs APEXes.
   std::unordered_map<std::string, BlockApexOverride> block_apex_overrides_;
+
+  // Prefixes used when looking for APEX select sysprops. APEX select sysprop
+  // can be used to install multiple instances of the same package, and select
+  // only one of them. Order matters: the first non-empty prop value is
+  // returned.
+  std::vector<std::string> apex_select_prop_prefixes_;
+
+  // When there are multiple instances of the same package, they should share
+  // the same public key. To ensure that, keep the map of package name to all
+  // encountered public keys for this APEX.
+  std::unordered_map<std::string, std::unordered_set<std::string>>
+      multi_install_public_keys_;
 
   // for tests to access ApexFileRepository's private data
   friend class ApexFileRepositoryAccessor;

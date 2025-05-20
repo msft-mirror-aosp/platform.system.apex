@@ -81,14 +81,13 @@ static constexpr const char* kApexStatusStarting = "starting";
 static constexpr const char* kApexStatusActivated = "activated";
 static constexpr const char* kApexStatusReady = "ready";
 
-static constexpr const char* kMultiApexSelectPersistPrefix =
-    "persist.vendor.apex.";
-static constexpr const char* kMultiApexSelectBootconfigPrefix =
+static constexpr const char* kApexSelectPersistPrefix = "persist.vendor.apex.";
+static constexpr const char* kApexSelectBootconfigPrefix =
     "ro.boot.vendor.apex.";
-static const std::vector<std::string> kMultiApexSelectPrefix = {
+static const std::vector<std::string> kApexSelectPrefix = {
     // Check persist props first, to allow users to override bootconfig.
-    kMultiApexSelectPersistPrefix,
-    kMultiApexSelectBootconfigPrefix,
+    kApexSelectPersistPrefix,
+    kApexSelectBootconfigPrefix,
 };
 
 static constexpr const char* kVmPayloadMetadataPartitionProp =
