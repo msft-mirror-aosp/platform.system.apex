@@ -33,6 +33,7 @@ static constexpr const char* kApexBackupDir = "/data/apex/backup";
 static constexpr const char* kApexDecompressedDir = "/data/apex/decompressed";
 static constexpr const char* kOtaReservedDir = "/data/apex/ota_reserved";
 static constexpr const char* kMetadataImagesDir = "/metadata/apex/images";
+static constexpr const char* kMetadataConfigDir = "/metadata/apex/config";
 static constexpr const char* kDataImagesDir = "/data/apex/images";
 static constexpr const char* kApexPackageSystemDir = "/system/apex";
 static constexpr const char* kApexPackageSystemExtDir = "/system_ext/apex";

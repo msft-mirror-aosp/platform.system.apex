@@ -92,6 +92,10 @@
 #include "apexd_vendor_apex.h"
 #include "apexd_verity.h"
 #include "com_android_apex.h"
+#include "com_android_apex_flags.h"
+
+namespace flags = com::android::apex::flags;
+namespace fs = std::filesystem;
 
 using android::base::boot_clock;
 using android::base::ConsumePrefix;
@@ -106,6 +110,7 @@ using android::base::SetProperty;
 using android::base::StartsWith;
 using android::base::StringPrintf;
 using android::base::unique_fd;
+using android::base::WriteStringToFile;
 using android::dm::DeviceMapper;
 using android::dm::DmDeviceState;
 using android::dm::DmTable;
@@ -361,6 +366,28 @@ Result<loop::LoopbackDeviceUniqueFd> CreateLoopForApex(const ApexFile& apex,
 }
 
 bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
+
+[[maybe_unused]] bool CanMountBeforeDataOnNextBoot() {
+  // If there's no data apex files in /data/apex/active and no capex files, then
+  // apexd-bootstrap can mount ALL apexes (preinstalled and pinned data apexes).
+  if (!IsEmptyDirectory(gConfig->active_apex_data_dir)) {
+    return false;
+  }
+  auto& repo = ApexFileRepository::GetInstance();
+  if (std::ranges::any_of(
+          repo.GetPreInstalledApexFiles(),
+          [](const ApexFile& apex) { return apex.IsCompressed(); })) {
+    return false;
+  }
+  return true;
+}
+
+[[maybe_unused]] void CreateMetadataConfigFile(const std::string& filename) {
+  auto config_file = fs::path(gConfig->metadata_config_dir) / filename;
+  if (!WriteStringToFile("", config_file)) {
+    PLOG(ERROR) << "Failed to create " << config_file;
+  }
+}
 
 Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex,
                                           const std::string& device_name) {
@@ -2807,6 +2834,13 @@ void BootCompletedCleanup() REQUIRES(!gInstallLock) {
   gSessionManager->DeleteFinalizedSessions();
   RemoveInactiveDataApex();
   DeleteUnusedVerityDevices();
+
+  if constexpr (flags::mount_before_data()) {
+    // Mark "migration done" by creating /metadata/apex/config/mount_before_data
+    if (IsMountBeforeDataEnabled() || CanMountBeforeDataOnNextBoot()) {
+      CreateMetadataConfigFile("mount_before_data");
+    }
+  }
 }
 
 int UnmountAll(bool also_include_staged_apexes) {
