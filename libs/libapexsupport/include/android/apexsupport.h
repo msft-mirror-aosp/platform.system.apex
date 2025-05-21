@@ -42,6 +42,8 @@ typedef enum AApexInfoError : int32_t {
    * See the log for details.
    */
   AAPEXINFO_INVALID_APEX,
+  /* The APEX name is invalid. */
+  AAPEXINFO_INVALID_APEX_NAME,
 } AApexInfoError;
 
 // Defining #llndk symbols
@@ -61,6 +63,20 @@ typedef enum AApexInfoError : int32_t {
  */
 __attribute__((warn_unused_result)) AApexInfoError AApexInfo_create(
     AApexInfo *_Nullable *_Nonnull info) __INTRODUCED_IN(__ANDROID_API_V__);
+
+/**
+ * Creates an AApexInfo object from the APEX name. The allocated AApexInfo
+ * object has to be deallocated using AApexInfo_destroy().
+ *
+ * \param name the APEX name
+ * \param info out parameter for an AApexInfo object for the APEX. Null
+ *    when failed to read the APEX manifest.
+ *
+ * \return AApexInfoError
+ */
+__attribute__((warn_unused_result)) AApexInfoError AApexInfo_createWithName(
+    const char *_Nonnull name, AApexInfo *_Nullable *_Nonnull info)
+    __INTRODUCED_IN(37);
 
 /**
  * Destroys an AApexInfo object created by AApexInfo_create().
