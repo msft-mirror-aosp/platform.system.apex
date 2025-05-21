@@ -52,6 +52,7 @@
 #include "apexd_test_utils.h"
 #include "apexd_utils.h"
 #include "com_android_apex.h"
+#include "com_android_apex_flags.h"
 #include "gmock/gmock-matchers.h"
 
 namespace android {
@@ -59,6 +60,7 @@ namespace apex {
 
 using namespace std::literals;
 namespace fs = std::filesystem;
+namespace flags = com::android::apex::flags;
 
 using MountedApexData = MountedApexDatabase::MountedApexData;
 using android::apex::testing::ApexFileEq;
@@ -184,6 +186,7 @@ class ApexdUnitTest : public ::testing::Test {
     data_images_dir_ = StringPrintf("%s/data-images", td_.path);
     image_manager_ =
         ApexImageManager::Create(metadata_images_dir_, data_images_dir_);
+    metadata_config_dir_ = StringPrintf("%s/metadata-config", td_.path);
 
     config_ = ApexdConfig{
         kTestApexdStatusSysprop,
@@ -195,6 +198,7 @@ class ApexdUnitTest : public ::testing::Test {
         kTestVmPayloadMetadataPartitionProp,
         kTestActiveApexSelinuxCtx,
         false, /*mount_before_data*/
+        metadata_config_dir_.c_str(),
     };
   }
 
@@ -301,6 +305,7 @@ class ApexdUnitTest : public ::testing::Test {
     ASSERT_EQ(mkdir(staged_session_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(sessions_metadata_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(metadata_images_dir_.c_str(), 0755), 0);
+    ASSERT_EQ(mkdir(metadata_config_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(data_images_dir_.c_str(), 0755), 0);
 
     // We don't really need for all the test cases, but until we refactor apexd
@@ -336,6 +341,8 @@ class ApexdUnitTest : public ::testing::Test {
   std::string metadata_images_dir_;
   std::string data_images_dir_;
   std::unique_ptr<ApexImageManager> image_manager_;
+
+  std::string metadata_config_dir_;
 
   ApexdConfig config_;
 };
@@ -4996,6 +5003,16 @@ TEST_F(MountBeforeDataTest, BootCompletedCleanup_RemovesInactiveDataApexes) {
   ASSERT_THAT(PathExists(data_apex), HasValue(false));
   ASSERT_THAT(image_manager_->GetAllImages(),
               UnorderedElementsAre(pinned->at(0)));
+}
+
+TEST_F(MountBeforeDataTest, BootCompletedCleanup_CreatesConfigFile) {
+  if (!flags::mount_before_data()) {
+    GTEST_SKIP() << "mount_before_data is off";
+  }
+  ASSERT_EQ(0, OnBootstrap());
+  BootCompletedCleanup();
+  auto config_file = metadata_config_dir_ + "/mount_before_data";
+  ASSERT_EQ(0, access(config_file.c_str(), F_OK));
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
