@@ -56,9 +56,19 @@ impl AApexInfo {
             version: manifest.version,
         })
     }
+
+    pub fn create_with_name(name: &str) -> Result<Self, AApexInfoError> {
+        let manifest_path = Path::new("/apex").join(name).join("apex_manifest.pb");
+        let manifest = parse_apex_manifest(manifest_path)?;
+        Ok(AApexInfo {
+            name: CString::new(manifest.name)
+                .map_err(|err| AApexInfoError::InvalidApex(format!("{err:?}")))?,
+            version: manifest.version,
+        })
+    }
 }
 
-/// Returns the apex_manifest.pb path when a given path belongs to an apex.
+/// Returns the APEX name when a given path belongs to an apex.
 fn get_apex_manifest_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, AApexInfoError> {
     let remain = path
         .as_ref()
@@ -74,7 +84,8 @@ fn get_apex_manifest_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, AApexInfoE
 /// Parses the apex_manifest.pb protobuf message from a given path.
 fn parse_apex_manifest<P: AsRef<Path>>(path: P) -> Result<ApexManifest, AApexInfoError> {
     let mut f = File::open(path).map_err(|err| AApexInfoError::InvalidApex(format!("{err:?}")))?;
-    Message::parse_from_reader(&mut f).map_err(|err| AApexInfoError::InvalidApex(format!("{err:?}")))
+    Message::parse_from_reader(&mut f)
+        .map_err(|err| AApexInfoError::InvalidApex(format!("{err:?}")))
 }
 
 #[cfg(test)]

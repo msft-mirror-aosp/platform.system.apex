@@ -19,19 +19,20 @@
 mod apexinfo;
 
 use apexinfo::{AApexInfo, AApexInfoError};
-use std::ffi::c_char;
+use std::ffi::{c_char, CStr};
 
 /// NOTE: Keep these constants in sync with apexsupport.h
 const AAPEXINFO_OK: i32 = 0;
 const AAPEXINFO_NO_APEX: i32 = 1;
 const AAPEXINFO_ERROR_GET_EXECUTABLE_PATH: i32 = 2;
-const AAPEXINFO_INALID_APEX: i32 = 3;
+const AAPEXINFO_INVALID_APEX: i32 = 3;
+const AAPEXINFO_INVALID_APEX_NAME: i32 = 4;
 
 fn as_error_code(err: &AApexInfoError) -> i32 {
     match err {
         AApexInfoError::PathNotFromApex(_) => AAPEXINFO_NO_APEX,
         AApexInfoError::ExePathUnavailable(_) => AAPEXINFO_ERROR_GET_EXECUTABLE_PATH,
-        AApexInfoError::InvalidApex(_) => AAPEXINFO_INALID_APEX,
+        AApexInfoError::InvalidApex(_) => AAPEXINFO_INVALID_APEX,
     }
 }
 
@@ -53,6 +54,37 @@ pub unsafe extern "C" fn AApexInfo_create(out: *mut *mut AApexInfo) -> i32 {
         Err(err) => {
             // TODO(b/271488212): Use Rust logger.
             eprintln!("AApexInfo_create(): {err:?}");
+            as_error_code(&err)
+        }
+    }
+}
+
+#[no_mangle]
+/// Creates AApexInfo object with the given APEX name
+///
+/// # Safety
+///
+/// The provided pointer must be valid and have no aliases for the duration of the call.
+pub unsafe extern "C" fn AApexInfo_createWithName(
+    name: *const c_char,
+    out: *mut *mut AApexInfo,
+) -> i32 {
+    // SAFETY: The pointer is not null, so the caller guarantees that it is valid.
+    let name = unsafe { CStr::from_ptr(name) }.to_str();
+    if name.is_err() {
+        return AAPEXINFO_INVALID_APEX_NAME;
+    }
+    match AApexInfo::create_with_name(name.unwrap()) {
+        Ok(info) => {
+            let ptr = Box::into_raw(Box::new(info));
+            // SAFETY: We have checked that `out` is not null, so the caller guarantees that it is
+            // valid and unaliased.
+            unsafe { *out = ptr };
+            AAPEXINFO_OK
+        }
+        Err(err) => {
+            // TODO(b/271488212): Use Rust logger.
+            eprintln!("AApexInfo_createWithName(): {err:?}");
             as_error_code(&err)
         }
     }

@@ -59,6 +59,7 @@ struct ApexdConfig {
   // - new device (ro.vendor.api_level >= 202504 (TBD))
   // - or, upgrading device with migration done (e.g. flag in /metadata/apex)
   bool mount_before_data;
+  const char* metadata_config_dir;
 };
 
 static const ApexdConfig kDefaultConfig = {
@@ -71,6 +72,7 @@ static const ApexdConfig kDefaultConfig = {
     kVmPayloadMetadataPartitionProp,
     "u:object_r:staging_data_file",
     false, /* mount_before_data */
+    kMetadataConfigDir,
 };
 
 class CheckpointInterface;
