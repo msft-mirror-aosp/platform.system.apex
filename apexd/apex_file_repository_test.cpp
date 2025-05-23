@@ -20,6 +20,7 @@
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android-base/result-gmock.h>
+#include <android-base/scopeguard.h>
 #include <android-base/stringprintf.h>
 #include <errno.h>
 #include <gmock/gmock.h>
@@ -236,6 +237,8 @@ TEST(ApexFileRepositoryTest, IgnoreNoneForApexSelect) {
       ApexFile::Open(GetTestFile("apex.apexd_test.apex"))->GetManifest().name();
 
   auto apex_select_prop_prefix = "debug.apexd.select."s;
+  auto reset_prop = base::make_scope_guard(
+      [&] { base::SetProperty(apex_select_prop_prefix + apex_name, ""); });
 
   {
     ApexFileRepository instance(
