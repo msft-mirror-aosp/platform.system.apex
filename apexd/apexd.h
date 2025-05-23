@@ -148,10 +148,7 @@ void Initialize(CheckpointInterface* checkpoint_service);
 // Must only be called during boot (i.e apexd.status is not "ready" or
 // "activated").
 void OnStart();
-// For every package X, there can be at most two APEX, pre-installed vs
-// installed on data. We decide which ones should be activated and return them
-// as a list
-std::vector<ApexFileRef> SelectApexForActivation();
+
 android::base::Result<ApexFile> ProcessCompressedApex(const ApexFile& capex,
                                                       bool is_ota_chroot);
 // Validate |apex| is same as |capex|
