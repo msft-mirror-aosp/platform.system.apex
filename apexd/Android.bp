@@ -91,6 +91,7 @@ cc_defaults {
         "lib_apex_image_list_proto",
         "lib_microdroid_metadata_proto",
         "libapex",
+        "libapexd_flags",
         "libavb",
         "libdm",
         "libext2_uuid",
@@ -143,7 +144,6 @@ cc_binary {
     static_libs: [
         "libapex",
         "libapexd_checkpoint_vold",
-        "libapexd_flags",
         "libapexd_metrics_stats",
         "libapexd",
         "libapexservice",

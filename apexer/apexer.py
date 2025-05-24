@@ -245,18 +245,35 @@ def RoundUp(size, unit):
   return (size + unit - 1) & (~(unit - 1))
 
 
+def FormatVersionCode(version):
+  version_str = str(version)
+  version_major_str = ''
+  if version >= 2**31:
+    version_str = hex(version & 0xFFFFFFFF)
+    version_major = version >> 32
+    if version_major > 0:
+      version_major_str = hex(version_major)
+  return version_str, version_major_str
+
+
 def PrepareAndroidManifest(package, version, test_only):
   template = """\
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-  package="{package}" android:versionCode="{version}">
+  package="{package}" android:versionCode="{version}"{version_major_attr}>
   <!-- APEX does not have classes.dex -->
   <application android:hasCode="false" {test_only_attribute}/>
 </manifest>
 """
+  version_str, version_major_str = FormatVersionCode(version)
+  version_major_attr = ''
+  if version_major_str != '':
+    version_major_attr = f' android:versionMajor="{version_major_str}"'
 
   test_only_attribute = 'android:testOnly="true"' if test_only else ''
-  return template.format(package=package, version=version,
+  return template.format(package=package,
+                         version=version_str,
+                         version_major_attr=version_major_attr,
                          test_only_attribute=test_only_attribute)
 
 
@@ -825,9 +842,14 @@ def CreateApex(args, work_dir):
   cmd.extend(['--manifest', android_manifest_file])
   if args.override_apk_package_name:
     cmd.extend(['--rename-manifest-package', args.override_apk_package_name])
+
   # This version from apex_manifest.json is used when versionCode isn't
   # specified in AndroidManifest.xml
-  cmd.extend(['--version-code', str(manifest_apex.version)])
+  version_str, version_major_str = FormatVersionCode(manifest_apex.version)
+  cmd.extend(['--version-code', version_str])
+  if version_major_str != '':
+    cmd.extend(['--version-code-major', version_major_str])
+
   if manifest_apex.versionName:
     cmd.extend(['--version-name', manifest_apex.versionName])
   if args.target_sdk_version:
