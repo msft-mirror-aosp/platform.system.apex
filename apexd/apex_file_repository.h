@@ -173,9 +173,8 @@ class ApexFileRepository final {
   std::optional<int64_t> GetBrandNewApexBlockedVersion(
       ApexPartition partition, const std::string& apex_name) const;
 
-  // Group all ApexFiles on device by their package name
-  std::unordered_map<std::string, std::vector<ApexFileRef>> AllApexFilesByName()
-      const;
+  // Select all apexes for activation
+  std::vector<ApexFileRef> SelectApexForActivation() const;
 
   // Returns a pre-installed version of apex with the given name.
   std::optional<ApexFileRef> GetPreInstalledApex(const std::string& name) const;

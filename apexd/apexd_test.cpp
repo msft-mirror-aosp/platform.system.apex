@@ -347,67 +347,6 @@ class ApexdUnitTest : public ::testing::Test {
   ApexdConfig config_;
 };
 
-TEST_F(ApexdUnitTest, SelectApexForActivationSuccess) {
-  AddPreInstalledApex("apex.apexd_test.apex");
-  AddPreInstalledApex("com.android.apex.cts.shim.apex");
-  auto& instance = ApexFileRepository::GetInstance();
-  // Pre-installed data needs to be present so that we can add data apex
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  auto apexd_test_file = ApexFile::Open(AddDataApex("apex.apexd_test.apex"));
-  auto shim_v1 = ApexFile::Open(AddDataApex("com.android.apex.cts.shim.apex"));
-  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
-
-  auto result = SelectApexForActivation();
-  ASSERT_EQ(result.size(), 2u);
-  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(*apexd_test_file),
-                                           ApexFileEq(*shim_v1)));
-}
-
-// Higher version gets priority when selecting for activation
-TEST_F(ApexdUnitTest, HigherVersionOfApexIsSelected) {
-  auto apexd_test_file_v2 =
-      ApexFile::Open(AddPreInstalledApex("apex.apexd_test_v2.apex"));
-  AddPreInstalledApex("com.android.apex.cts.shim.apex");
-  auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  TemporaryDir data_dir;
-  AddDataApex("apex.apexd_test.apex");
-  auto shim_v2 =
-      ApexFile::Open(AddDataApex("com.android.apex.cts.shim.v2.apex"));
-  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
-
-  auto result = SelectApexForActivation();
-  ASSERT_EQ(result.size(), 2u);
-
-  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(*apexd_test_file_v2),
-                                           ApexFileEq(*shim_v2)));
-}
-
-// When versions are equal, non-pre-installed version gets priority
-TEST_F(ApexdUnitTest, DataApexGetsPriorityForSameVersions) {
-  AddPreInstalledApex("apex.apexd_test.apex");
-  AddPreInstalledApex("com.android.apex.cts.shim.apex");
-  // Initialize pre-installed APEX information
-  auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  auto apexd_test_file = ApexFile::Open(AddDataApex("apex.apexd_test.apex"));
-  auto shim_v1 = ApexFile::Open(AddDataApex("com.android.apex.cts.shim.apex"));
-  // Initialize ApexFile repo
-  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
-
-  auto result = SelectApexForActivation();
-  ASSERT_EQ(result.size(), 2u);
-
-  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(*apexd_test_file),
-                                           ApexFileEq(*shim_v1)));
-}
-
 TEST_F(ApexdUnitTest, ProcessCompressedApex) {
   auto compressed_apex = ApexFile::Open(
       AddPreInstalledApex("com.android.apex.compressed.v1.capex"));

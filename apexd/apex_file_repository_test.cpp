@@ -20,6 +20,7 @@
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android-base/result-gmock.h>
+#include <android-base/scopeguard.h>
 #include <android-base/stringprintf.h>
 #include <errno.h>
 #include <gmock/gmock.h>
@@ -236,6 +237,8 @@ TEST(ApexFileRepositoryTest, IgnoreNoneForApexSelect) {
       ApexFile::Open(GetTestFile("apex.apexd_test.apex"))->GetManifest().name();
 
   auto apex_select_prop_prefix = "debug.apexd.select."s;
+  auto reset_prop = base::make_scope_guard(
+      [&] { base::SetProperty(apex_select_prop_prefix + apex_name, ""); });
 
   {
     ApexFileRepository instance(
@@ -575,39 +578,85 @@ TEST(ApexFileRepositoryTest, GetPreInstalledApexFiles) {
       UnorderedElementsAre(ApexFileEq(*pre_apex_1), ApexFileEq(*pre_apex_2)));
 }
 
-TEST(ApexFileRepositoryTest, AllApexFilesByName) {
-  TemporaryDir built_in_dir, decompression_dir;
-  fs::copy(GetTestFile("apex.apexd_test.apex"), built_in_dir.path);
-  fs::copy(GetTestFile("com.android.apex.cts.shim.apex"), built_in_dir.path);
-  fs::copy(GetTestFile("com.android.apex.compressed.v1.capex"),
-           built_in_dir.path);
+ApexFile CopyTestApex(const std::string& test_filename,
+                      const std::string& dest_dir) {
+  fs::copy(GetTestFile(test_filename), dest_dir);
+  auto apex_path = dest_dir + "/" + test_filename;
+  auto apex = ApexFile::Open(apex_path);
+  CHECK(apex.ok()) << apex.error();
+  return *apex;
+}
+
+TEST(ApexFileRepositoryTest, SelectApexForActivation_NoData) {
+  TemporaryDir built_in_dir;
+  auto test_apex = CopyTestApex("apex.apexd_test.apex", built_in_dir.path);
+  auto shim_v1 =
+      CopyTestApex("com.android.apex.cts.shim.apex", built_in_dir.path);
+
   ApexFileRepository instance;
   ASSERT_RESULT_OK(instance.AddPreInstalledApex(
       {{ApexPartition::System, built_in_dir.path}}));
+  auto result = instance.SelectApexForActivation();
 
-  TemporaryDir data_dir;
-  fs::copy(GetTestFile("com.android.apex.cts.shim.v2.apex"), data_dir.path);
+  ASSERT_THAT(result,
+              UnorderedElementsAre(ApexFileEq(test_apex), ApexFileEq(shim_v1)));
+}
+
+TEST(ApexFileRepositoryTest, SelectApexForActivation_HigherDataApex) {
+  TemporaryDir built_in_dir, data_dir;
+  auto test_apex = CopyTestApex("apex.apexd_test.apex", built_in_dir.path);
+  auto shim_v1 =
+      CopyTestApex("com.android.apex.cts.shim.apex", built_in_dir.path);
+  auto capex =
+      CopyTestApex("com.android.apex.compressed.v1.capex", built_in_dir.path);
+  auto shim_v2 =
+      CopyTestApex("com.android.apex.cts.shim.v2.apex", data_dir.path);
+
+  ApexFileRepository instance;
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
+  auto result = instance.SelectApexForActivation();
 
-  auto result = instance.AllApexFilesByName();
+  // shim_v2 is selected because it's higher
+  ASSERT_THAT(result,
+              UnorderedElementsAre(ApexFileEq(test_apex), ApexFileEq(capex),
+                                   ApexFileEq(shim_v2)));
+}
 
-  // Verify the contents of result
-  auto apexd_test_file = ApexFile::Open(
-      StringPrintf("%s/apex.apexd_test.apex", built_in_dir.path));
-  auto shim_v1 = ApexFile::Open(
-      StringPrintf("%s/com.android.apex.cts.shim.apex", built_in_dir.path));
-  auto compressed_apex = ApexFile::Open(StringPrintf(
-      "%s/com.android.apex.compressed.v1.capex", built_in_dir.path));
-  auto shim_v2 = ApexFile::Open(
-      StringPrintf("%s/com.android.apex.cts.shim.v2.apex", data_dir.path));
+// When versions are equal, non-pre-installed version gets priority
+TEST(ApexFileRepositoryTest, SelectApexForActivation_SameDataApex) {
+  TemporaryDir built_in_dir, data_dir;
+  auto test_apex = CopyTestApex("apex.apexd_test.apex", built_in_dir.path);
+  auto shim_v1 =
+      CopyTestApex("com.android.apex.cts.shim.apex", built_in_dir.path);
+  auto test_apex_in_data = CopyTestApex("apex.apexd_test.apex", data_dir.path);
+  auto shim_v1_in_data =
+      CopyTestApex("com.android.apex.cts.shim.apex", data_dir.path);
 
-  ASSERT_EQ(result.size(), 3u);
-  ASSERT_THAT(result[apexd_test_file->GetManifest().name()],
-              UnorderedElementsAre(ApexFileEq(*apexd_test_file)));
-  ASSERT_THAT(result[shim_v1->GetManifest().name()],
-              UnorderedElementsAre(ApexFileEq(*shim_v1), ApexFileEq(*shim_v2)));
-  ASSERT_THAT(result[compressed_apex->GetManifest().name()],
-              UnorderedElementsAre(ApexFileEq(*compressed_apex)));
+  ApexFileRepository instance;
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
+  ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
+  auto result = instance.SelectApexForActivation();
+
+  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(test_apex_in_data),
+                                           ApexFileEq(shim_v1_in_data)));
+}
+
+TEST(ApexFileRepositoryTest, SelectApexForActivation_LowerDataApex) {
+  TemporaryDir built_in_dir, data_dir;
+  auto shim_v2 =
+      CopyTestApex("com.android.apex.cts.shim.v2.apex", built_in_dir.path);
+  auto shim_v1 = CopyTestApex("com.android.apex.cts.shim.apex", data_dir.path);
+
+  ApexFileRepository instance;
+  ASSERT_RESULT_OK(instance.AddPreInstalledApex(
+      {{ApexPartition::System, built_in_dir.path}}));
+  ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
+  auto result = instance.SelectApexForActivation();
+
+  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(shim_v2)));
 }
 
 TEST(ApexFileRepositoryTest, GetPreInstalledApex) {
@@ -1084,7 +1133,7 @@ TEST(ApexFileRepositoryTestBrandNewApex,
   ApexFileRepository::EnableBrandNewApex();
   const auto partition = ApexPartition::System;
   TemporaryDir data_dir, trusted_key_dir;
-  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
+  auto apex = CopyTestApex("com.android.apex.brand.new.apex", data_dir.path);
   fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
            trusted_key_dir.path);
 
@@ -1093,23 +1142,19 @@ TEST(ApexFileRepositoryTestBrandNewApex,
       {{partition, trusted_key_dir.path}});
 
   // Now test that apexes were scanned correctly;
-  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
-  ASSERT_RESULT_OK(apex);
-
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
 
   {
-    auto ret = instance.GetPartition(*apex);
+    auto ret = instance.GetPartition(apex);
     ASSERT_RESULT_OK(ret);
     ASSERT_EQ(partition, *ret);
   }
 
-  ASSERT_THAT(instance.GetPreinstalledPath(apex->GetManifest().name()),
+  ASSERT_THAT(instance.GetPreinstalledPath(apex.GetManifest().name()),
               Not(Ok()));
-  ASSERT_FALSE(instance.HasPreInstalledVersion(apex->GetManifest().name()));
-  ASSERT_THAT(instance.AllApexFilesByName(),
-              Contains(Pair(apex->GetManifest().name(), _)));
-
+  ASSERT_FALSE(instance.HasPreInstalledVersion(apex.GetManifest().name()));
+  ASSERT_THAT(instance.SelectApexForActivation(),
+              UnorderedElementsAre(ApexFileEq(apex)));
   instance.Reset();
 }
 
@@ -1117,27 +1162,21 @@ TEST(ApexFileRepositoryTestBrandNewApex,
      AddDataApexFailUnverifiedBrandNewApex) {
   ApexFileRepository::EnableBrandNewApex();
   TemporaryDir data_dir;
-  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
+  auto apex = CopyTestApex("com.android.apex.brand.new.apex", data_dir.path);
 
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
-  ASSERT_RESULT_OK(apex);
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
-  ASSERT_THAT(instance.AllApexFilesByName(),
-              Not(Contains(Pair(apex->GetManifest().name(), _))));
+  ASSERT_THAT(instance.SelectApexForActivation(), IsEmpty());
   instance.Reset();
 }
 
 TEST(ApexFileRepositoryTestBrandNewApex, AddDataApexFailBrandNewApexDisabled) {
   TemporaryDir data_dir;
-  fs::copy(GetTestFile("com.android.apex.brand.new.apex"), data_dir.path);
+  auto apex = CopyTestApex("com.android.apex.brand.new.apex", data_dir.path);
 
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  auto apex = ApexFile::Open(GetTestFile("com.android.apex.brand.new.apex"));
-  ASSERT_RESULT_OK(apex);
   ASSERT_RESULT_OK(instance.AddDataApex(data_dir.path));
-  ASSERT_THAT(instance.AllApexFilesByName(),
-              Not(Contains(Pair(apex->GetManifest().name(), _))));
+  ASSERT_THAT(instance.SelectApexForActivation(), IsEmpty());
   instance.Reset();
 }
 
