@@ -2143,8 +2143,7 @@ int OnBootstrap() {
   auto time_started = boot_clock::now();
 
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  Result<void> status =
-      instance.AddPreInstalledApexParallel(gConfig->builtin_dirs);
+  Result<void> status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
   if (!status.ok()) {
     LOG(ERROR) << "Failed to collect APEX keys : " << status.error();
     return 1;
