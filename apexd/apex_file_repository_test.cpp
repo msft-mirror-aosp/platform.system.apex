@@ -39,7 +39,6 @@
 #include "apexd_metrics.h"
 #include "apexd_private.h"
 #include "apexd_test_utils.h"
-#include "apexd_verity.h"
 
 namespace android {
 namespace apex {

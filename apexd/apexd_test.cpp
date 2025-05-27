@@ -22,6 +22,7 @@
 #include <android-base/scopeguard.h>
 #include <android-base/stringprintf.h>
 #include <android-base/unique_fd.h>
+#include <gmock/gmock-matchers.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <libdm/dm.h>
@@ -51,9 +52,9 @@
 #include "apexd_session.h"
 #include "apexd_test_utils.h"
 #include "apexd_utils.h"
+#include "apexd_verity.h"
 #include "com_android_apex.h"
 #include "com_android_apex_flags.h"
-#include "gmock/gmock-matchers.h"
 
 namespace android {
 namespace apex {
@@ -346,6 +347,18 @@ class ApexdUnitTest : public ::testing::Test {
 
   ApexdConfig config_;
 };
+
+TEST_F(ApexdUnitTest, VerifyVerityRootDigest) {
+  auto apex_ok = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(apex_ok, Ok());
+  ASSERT_THAT(VerifyVerityRootDigest(*apex_ok), Ok());
+
+  auto apex_bad =
+      ApexFile::Open(GetTestFile("apex.apexd_test_corrupt_apex.apex"));
+  ASSERT_THAT(apex_bad, Ok());
+  ASSERT_THAT(VerifyVerityRootDigest(*apex_bad),
+              HasError(WithMessage(HasSubstr("root digest mismatch"))));
+}
 
 TEST_F(ApexdUnitTest, ProcessCompressedApex) {
   auto compressed_apex = ApexFile::Open(

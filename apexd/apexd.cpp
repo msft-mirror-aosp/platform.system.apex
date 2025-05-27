@@ -514,8 +514,11 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     Result<DmDevice> verity_dev_res =
         CreateDmDevice(device_name, *verity_table, reuse_device);
     if (!verity_dev_res.ok()) {
-      // TODO(b/417770478) verify root digest with block_device for better
-      // debugging
+      // verify root digest for better debugging
+      if (auto st = VerifyVerityRootDigest(apex); !st.ok()) {
+        LOG(ERROR) << "Failed to verify root digest with " << full_path << ": "
+                   << st.error();
+      }
       return Error() << "Failed to create dm-verity for path=" << full_path
                      << " block=" << block_device << ": "
                      << verity_dev_res.error();
