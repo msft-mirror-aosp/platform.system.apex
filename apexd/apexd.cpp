@@ -514,8 +514,11 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     Result<DmDevice> verity_dev_res =
         CreateDmDevice(device_name, *verity_table, reuse_device);
     if (!verity_dev_res.ok()) {
-      return Error() << "Failed to create Apex Verity device " << full_path
-                     << ": " << verity_dev_res.error();
+      // TODO(b/417770478) verify root digest with block_device for better
+      // debugging
+      return Error() << "Failed to create dm-verity for path=" << full_path
+                     << " block=" << block_device << ": "
+                     << verity_dev_res.error();
     }
     verity_dev = std::move(*verity_dev_res);
     OR_RETURN(loop::ConfigureReadAhead(verity_dev.GetDevPath()));
