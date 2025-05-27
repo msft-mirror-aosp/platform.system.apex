@@ -55,6 +55,8 @@ struct ApexdConfig {
   const char* vm_payload_metadata_partition_prop;
   const char* active_apex_selinux_ctx;
 
+  std::unordered_map<ApexPartition, std::string> brand_new_apex_config_dirs;
+
   // TODO(b/381173074) True in tests for now. Will be configured as true if
   // - new device (ro.vendor.api_level >= 202504 (TBD))
   // - or, upgrading device with migration done (e.g. flag in /metadata/apex)
@@ -71,6 +73,7 @@ static const ApexdConfig kDefaultConfig = {
     kStagedSessionsDir,
     kVmPayloadMetadataPartitionProp,
     "u:object_r:staging_data_file",
+    kBrandNewApexConfigDirs,
     false, /* mount_before_data */
     kMetadataConfigDir,
 };

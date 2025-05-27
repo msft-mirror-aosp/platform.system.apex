@@ -113,7 +113,7 @@ static constexpr const char* kBrandNewApexConfigVendorDir =
 static constexpr const char* kBrandNewApexConfigOdmDir =
     "/odm/etc/brand_new_apex";
 static const std::unordered_map<ApexPartition, std::string>
-    kPartitionToBrandNewApexConfigDirs = {
+    kBrandNewApexConfigDirs = {
         {ApexPartition::System, kBrandNewApexConfigSystemDir},
         {ApexPartition::SystemExt, kBrandNewApexConfigSystemExtDir},
         {ApexPartition::Product, kBrandNewApexConfigProductDir},

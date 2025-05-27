@@ -2138,14 +2138,32 @@ std::vector<ApexFile> ScanDataApexFiles(ApexImageManager* manager) {
   return apex_files;
 }
 
+Result<void> AddPreinstalledData(ApexFileRepository& instance) {
+  if (auto status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
+      !status.ok()) {
+    return Error() << "Failed to collect pre-installed APEX files: "
+                   << status.error();
+  }
+
+  if (ApexFileRepository::IsBrandNewApexEnabled()) {
+    if (auto status = instance.AddBrandNewApexCredentialAndBlocklist(
+            gConfig->brand_new_apex_config_dirs);
+        !status.ok()) {
+      return Error() << "Failed to collect pre-installed public keys and "
+                        "blocklists for brand-new APEX: "
+                     << status.error();
+    }
+  }
+  return {};
+}
+
 int OnBootstrap() {
   ATRACE_NAME("OnBootstrap");
   auto time_started = boot_clock::now();
 
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  Result<void> status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
-  if (!status.ok()) {
-    LOG(ERROR) << "Failed to collect APEX keys : " << status.error();
+  if (auto st = AddPreinstalledData(instance); !st.ok()) {
+    LOG(ERROR) << st.error();
     return 1;
   }
 
@@ -2227,19 +2245,11 @@ void InitializeSessionManager(ApexSessionManager* session_manager) {
 
 void Initialize(CheckpointInterface* checkpoint_service) {
   InitializeVold(checkpoint_service);
-  ApexFileRepository& instance = ApexFileRepository::GetInstance();
-  Result<void> status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
-  if (!status.ok()) {
-    LOG(ERROR) << "Failed to collect pre-installed APEX files : "
-               << status.error();
-    return;
-  }
 
-  if (ApexFileRepository::IsBrandNewApexEnabled()) {
-    Result<void> result = instance.AddBrandNewApexCredentialAndBlocklist(
-        kPartitionToBrandNewApexConfigDirs);
-    CHECK(result.ok()) << "Failed to collect pre-installed public keys and "
-                          "blocklists for brand-new APEX";
+  ApexFileRepository& instance = ApexFileRepository::GetInstance();
+  if (auto status = AddPreinstalledData(instance); !status.ok()) {
+    LOG(ERROR) << "Failed to collect preinstalled data: " << status.error();
+    return;
   }
 
   gMountedApexes.PopulateFromMounts(
@@ -3012,7 +3022,7 @@ Result<int> AddBlockApex(ApexFileRepository& instance) {
 }
 
 // When running in the VM mode, we follow the minimal start-up operations.
-// - AddPreInstalledApex: note that CAPEXes are not supported in the VM mode
+// - AddPreInstalledData: note that CAPEXes are not supported in the VM mode
 // - AddBlockApex
 // - ActivateApexPackages
 // - setprop apexd.status: activated/ready
@@ -3024,10 +3034,8 @@ int OnStartInVmMode() {
 
   auto& instance = ApexFileRepository::GetInstance();
 
-  // Scan pre-installed apexes
-  if (auto status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
-      !status.ok()) {
-    LOG(ERROR) << "Failed to scan pre-installed APEX files: " << status.error();
+  if (auto status = AddPreinstalledData(instance); !status.ok()) {
+    LOG(ERROR) << "Failed collect preinstalled data: " << status.error();
     return 1;
   }
 
@@ -3054,10 +3062,8 @@ int OnStartInVmMode() {
 
 int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
   auto& instance = ApexFileRepository::GetInstance();
-  if (auto status = instance.AddPreInstalledApex(gConfig->builtin_dirs);
-      !status.ok()) {
-    LOG(ERROR) << "Failed to scan pre-installed apexes from "
-               << std::format("{}", gConfig->builtin_dirs | std::views::values);
+  if (auto status = AddPreinstalledData(instance); !status.ok()) {
+    LOG(ERROR) << "Failed to scan preinstalled data: " << status.error();
     return 1;
   }
   if (also_include_staged_apexes) {
