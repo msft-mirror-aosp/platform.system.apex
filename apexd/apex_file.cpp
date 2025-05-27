@@ -34,7 +34,6 @@
 
 #include "apex_constants.h"
 #include "apexd_utils.h"
-#include "apexd_verity.h"
 
 using android::base::borrowed_fd;
 using android::base::ErrnoError;
@@ -448,6 +447,16 @@ Result<void> ApexFile::Decompress(const std::string& dest_path) const {
   LOG(VERBOSE) << "Decompressed " << src_path << " to " << dest_path;
 
   return {};
+}
+
+std::string BytesToHex(const uint8_t* bytes, size_t bytes_len) {
+  std::ostringstream s;
+
+  s << std::hex << std::setfill('0');
+  for (size_t i = 0; i < bytes_len; i++) {
+    s << std::setw(2) << static_cast<int>(bytes[i]);
+  }
+  return s.str();
 }
 
 }  // namespace apex

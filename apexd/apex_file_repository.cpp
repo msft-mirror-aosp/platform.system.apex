@@ -36,7 +36,6 @@
 #include "apexd_brand_new_verifier.h"
 #include "apexd_utils.h"
 #include "apexd_vendor_apex.h"
-#include "apexd_verity.h"
 
 using android::base::EndsWith;
 using android::base::Error;
