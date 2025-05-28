@@ -33,20 +33,6 @@ static void BM_ApexFile_Open(benchmark::State& state) {
 }
 BENCHMARK(BM_ApexFile_Open);
 
-static void BM_ApexFileRepository_AddPreInstalledApexParallel(
-    benchmark::State& state) {
-  auto num_threads = state.range(0);
-  SetProperty("apexd.config.apex_file_open.threads",
-              std::to_string(num_threads));
-  for (auto _ : state) {
-    ApexFileRepository instance;
-    instance.AddPreInstalledApexParallel(kBuiltinApexPackageDirs);
-  }
-}
-BENCHMARK(BM_ApexFileRepository_AddPreInstalledApexParallel)
-    ->RangeMultiplier(2)
-    ->Range(0, 32);
-
 static void BM_ApexFileRepository_AddPreInstalledApex(benchmark::State& state) {
   for (auto _ : state) {
     ApexFileRepository instance;

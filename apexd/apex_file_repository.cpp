@@ -235,24 +235,6 @@ android::base::Result<void> ApexFileRepository::AddPreInstalledApex(
   auto all_apex_paths =
       OR_RETURN(CollectPreInstalledApex(partition_to_prebuilt_dirs));
 
-  for (const auto& apex_path : all_apex_paths) {
-    Result<ApexFile> apex_file = ApexFile::Open(apex_path.path);
-    if (!apex_file.ok()) {
-      return Error() << "Failed to open " << apex_path.path << " : "
-                     << apex_file.error();
-    }
-
-    StorePreInstalledApex(std::move(*apex_file), apex_path.partition);
-  }
-  return {};
-}
-
-android::base::Result<void> ApexFileRepository::AddPreInstalledApexParallel(
-    const std::unordered_map<ApexPartition, std::string>&
-        partition_to_prebuilt_dirs) {
-  auto all_apex_paths =
-      OR_RETURN(CollectPreInstalledApex(partition_to_prebuilt_dirs));
-
   auto apex_file_and_partition = OR_RETURN(OpenApexFiles(all_apex_paths));
 
   for (auto&& [apex_file, partition] : apex_file_and_partition) {

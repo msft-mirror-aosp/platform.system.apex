@@ -71,17 +71,6 @@ class ApexFileRepository final {
       const std::unordered_map<ApexPartition, std::string>&
           partition_to_prebuilt_dirs);
 
-  // Populate instance by collecting pre-installed apex files from the given
-  // |partition_to_prebuilt_dirs|.
-  // The difference between this function and |AddPreInstalledApex| is that this
-  // function opens pre-installed apex files in parallel. Note: this call is
-  // **not thread safe** and is expected to be performed in a single thread
-  // during initialization of apexd. After initialization is finished, all
-  // queries to the instance are thread safe.
-  android::base::Result<void> AddPreInstalledApexParallel(
-      const std::unordered_map<ApexPartition, std::string>&
-          partition_to_prebuilt_dirs);
-
   // Populate instance by collecting host-provided apex files via
   // |metadata_partition|. Host can provide its apexes to a VM instance via the
   // virtual disk image which has partitions: (see
