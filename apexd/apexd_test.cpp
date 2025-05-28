@@ -188,6 +188,7 @@ class ApexdUnitTest : public ::testing::Test {
     image_manager_ =
         ApexImageManager::Create(metadata_images_dir_, data_images_dir_);
     metadata_config_dir_ = StringPrintf("%s/metadata-config", td_.path);
+    brand_new_config_dir_ = StringPrintf("%s/brand-new-config", td_.path);
 
     config_ = ApexdConfig{
         kTestApexdStatusSysprop,
@@ -198,7 +199,8 @@ class ApexdUnitTest : public ::testing::Test {
         staged_session_dir_.c_str(),
         kTestVmPayloadMetadataPartitionProp,
         kTestActiveApexSelinuxCtx,
-        false, /*mount_before_data*/
+        {{partition_, brand_new_config_dir_}}, /* brand_new_apex_config_dirs */
+        false,                                 /*mount_before_data*/
         metadata_config_dir_.c_str(),
     };
   }
@@ -308,6 +310,7 @@ class ApexdUnitTest : public ::testing::Test {
     ASSERT_EQ(mkdir(metadata_images_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(metadata_config_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(data_images_dir_.c_str(), 0755), 0);
+    ASSERT_EQ(mkdir(brand_new_config_dir_.c_str(), 0755), 0);
 
     // We don't really need for all the test cases, but until we refactor apexd
     // to use dependency injection instead of this SetConfig approach, it is not
@@ -344,6 +347,7 @@ class ApexdUnitTest : public ::testing::Test {
   std::unique_ptr<ApexImageManager> image_manager_;
 
   std::string metadata_config_dir_;
+  std::string brand_new_config_dir_;
 
   ApexdConfig config_;
 };
@@ -4965,6 +4969,29 @@ TEST_F(MountBeforeDataTest, BootCompletedCleanup_CreatesConfigFile) {
   BootCompletedCleanup();
   auto config_file = metadata_config_dir_ + "/mount_before_data";
   ASSERT_EQ(0, access(config_file.c_str(), F_OK));
+}
+
+TEST_F(MountBeforeDataTest, BrandNewApex) {
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           brand_new_config_dir_);
+  ApexFileRepository::EnableBrandNewApex();
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Prepare brand-new apex installation
+  auto session_id = 42;
+  PrepareStagedSession("com.android.apex.brand.new.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  SimulateReboot();
+  ApexFileRepository::EnableBrandNewApex();
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Staged session should be activated.
+  auto session = GetSessionManager()->GetSession(session_id);
+  ASSERT_THAT(session, Ok());
+  ASSERT_EQ(session->GetState(), SessionState::ACTIVATED);
+  ApexFileRepository::GetInstance().Reset();
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
