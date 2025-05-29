@@ -119,19 +119,6 @@ int main(int argc, char** argv) {
   // TODO(b/158468454): add a -v flag or an external setting to change severity.
   android::base::SetMinimumLogSeverity(android::base::INFO);
 
-  // Two flags are used here:
-  // CLI flag `--enable-brand-new-apex`: used to control the feature usage in
-  // individual targets
-  // AConfig flag `enable_brand_new_apex`: used to advance
-  // the feature to different release stages, and applies to all targets
-  if (flags::enable_brand_new_apex()) {
-    if (argv[1] != nullptr && strcmp("--enable-brand-new-apex", argv[1]) == 0) {
-      android::apex::ApexFileRepository::EnableBrandNewApex();
-      argc--;
-      argv++;
-    }
-  }
-
   const bool has_subcommand = argv[1] != nullptr;
   LOG(INFO) << "Started. subcommand = "
             << (has_subcommand ? argv[1] : "(null)");
@@ -154,6 +141,17 @@ int main(int argc, char** argv) {
     }
   }
   android::apex::SetConfig(config);
+
+  // Two flags are used here:
+  // * sysprop flag `apexd.config.brand_new_apex`: used to control the feature
+  //   usage in individual targets
+  // * AConfig flag `enable_brand_new_apex`: used to advance the feature to
+  //   different release stages, and applies to all targets.
+  if constexpr (flags::enable_brand_new_apex()) {
+    if (android::base::GetBoolProperty("apexd.config.brand_new_apex", false)) {
+      android::apex::ApexFileRepository::EnableBrandNewApex();
+    }
+  }
 
   android::apex::ApexdLifecycle& lifecycle =
       android::apex::ApexdLifecycle::GetInstance();

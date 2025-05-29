@@ -68,7 +68,7 @@ __attribute__((warn_unused_result)) AApexInfoError AApexInfo_create(
  * Creates an AApexInfo object from the APEX name. The allocated AApexInfo
  * object has to be deallocated using AApexInfo_destroy().
  *
- * \param name the APEX name
+ * \param name the APEX name (encoding: utf8)
  * \param info out parameter for an AApexInfo object for the APEX. Null
  *    when failed to read the APEX manifest.
  *
