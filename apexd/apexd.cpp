@@ -2191,6 +2191,17 @@ int OnBootstrap() {
   std::vector<ApexFileRef> activation_list;
 
   if (IsMountBeforeDataEnabled()) {
+    // Wait until coldboot is done. This is to avoid unnecessary polling when
+    // using/creating loop or device-mapper devices. Note that apexd relies on
+    // devices created by init process for faster activation. Their nodes are
+    // created by ueventd's coldboot. Hence, accessing them before coldboot is
+    // done causes polling, which can be much slower than waiting for coldboot.
+    // Similarly, before coldboot is done, ueventd can't handle a device
+    // creation. This will also cause polling the userspace node creation.
+    // Instead of racing with ueventd, let's wait until it finishes coldboot.
+    base::WaitForProperty("ro.cold_boot_done", "true",
+                          std::chrono::seconds(10));
+
     // Process sessions before scanning "active" data apexes because sessions
     // can change the list of active data apexes:
     // - if there's a pending revert, then reverts all active sessions.
