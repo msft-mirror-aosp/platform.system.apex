@@ -85,6 +85,8 @@ class ApexFile {
   bool is_compressed_;
 };
 
+std::string BytesToHex(const uint8_t* bytes, size_t len);
+
 }  // namespace apex
 }  // namespace android
 

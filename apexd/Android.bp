@@ -284,7 +284,6 @@ cc_library_static {
         "apex_manifest.cpp",
         "apex_sha.cpp",
         "apex_shim.cpp",
-        "apexd_verity.cpp",
     ],
     host_supported: true,
     target: {

@@ -22,6 +22,7 @@
 #include <android-base/scopeguard.h>
 #include <android-base/stringprintf.h>
 #include <android-base/unique_fd.h>
+#include <gmock/gmock-matchers.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <libdm/dm.h>
@@ -51,9 +52,9 @@
 #include "apexd_session.h"
 #include "apexd_test_utils.h"
 #include "apexd_utils.h"
+#include "apexd_verity.h"
 #include "com_android_apex.h"
 #include "com_android_apex_flags.h"
-#include "gmock/gmock-matchers.h"
 
 namespace android {
 namespace apex {
@@ -187,6 +188,7 @@ class ApexdUnitTest : public ::testing::Test {
     image_manager_ =
         ApexImageManager::Create(metadata_images_dir_, data_images_dir_);
     metadata_config_dir_ = StringPrintf("%s/metadata-config", td_.path);
+    brand_new_config_dir_ = StringPrintf("%s/brand-new-config", td_.path);
 
     config_ = ApexdConfig{
         kTestApexdStatusSysprop,
@@ -197,7 +199,8 @@ class ApexdUnitTest : public ::testing::Test {
         staged_session_dir_.c_str(),
         kTestVmPayloadMetadataPartitionProp,
         kTestActiveApexSelinuxCtx,
-        false, /*mount_before_data*/
+        {{partition_, brand_new_config_dir_}}, /* brand_new_apex_config_dirs */
+        false,                                 /*mount_before_data*/
         metadata_config_dir_.c_str(),
     };
   }
@@ -307,6 +310,7 @@ class ApexdUnitTest : public ::testing::Test {
     ASSERT_EQ(mkdir(metadata_images_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(metadata_config_dir_.c_str(), 0755), 0);
     ASSERT_EQ(mkdir(data_images_dir_.c_str(), 0755), 0);
+    ASSERT_EQ(mkdir(brand_new_config_dir_.c_str(), 0755), 0);
 
     // We don't really need for all the test cases, but until we refactor apexd
     // to use dependency injection instead of this SetConfig approach, it is not
@@ -343,69 +347,21 @@ class ApexdUnitTest : public ::testing::Test {
   std::unique_ptr<ApexImageManager> image_manager_;
 
   std::string metadata_config_dir_;
+  std::string brand_new_config_dir_;
 
   ApexdConfig config_;
 };
 
-TEST_F(ApexdUnitTest, SelectApexForActivationSuccess) {
-  AddPreInstalledApex("apex.apexd_test.apex");
-  AddPreInstalledApex("com.android.apex.cts.shim.apex");
-  auto& instance = ApexFileRepository::GetInstance();
-  // Pre-installed data needs to be present so that we can add data apex
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
+TEST_F(ApexdUnitTest, VerifyVerityRootDigest) {
+  auto apex_ok = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(apex_ok, Ok());
+  ASSERT_THAT(VerifyVerityRootDigest(*apex_ok), Ok());
 
-  auto apexd_test_file = ApexFile::Open(AddDataApex("apex.apexd_test.apex"));
-  auto shim_v1 = ApexFile::Open(AddDataApex("com.android.apex.cts.shim.apex"));
-  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
-
-  auto result = SelectApexForActivation();
-  ASSERT_EQ(result.size(), 2u);
-  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(*apexd_test_file),
-                                           ApexFileEq(*shim_v1)));
-}
-
-// Higher version gets priority when selecting for activation
-TEST_F(ApexdUnitTest, HigherVersionOfApexIsSelected) {
-  auto apexd_test_file_v2 =
-      ApexFile::Open(AddPreInstalledApex("apex.apexd_test_v2.apex"));
-  AddPreInstalledApex("com.android.apex.cts.shim.apex");
-  auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  TemporaryDir data_dir;
-  AddDataApex("apex.apexd_test.apex");
-  auto shim_v2 =
-      ApexFile::Open(AddDataApex("com.android.apex.cts.shim.v2.apex"));
-  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
-
-  auto result = SelectApexForActivation();
-  ASSERT_EQ(result.size(), 2u);
-
-  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(*apexd_test_file_v2),
-                                           ApexFileEq(*shim_v2)));
-}
-
-// When versions are equal, non-pre-installed version gets priority
-TEST_F(ApexdUnitTest, DataApexGetsPriorityForSameVersions) {
-  AddPreInstalledApex("apex.apexd_test.apex");
-  AddPreInstalledApex("com.android.apex.cts.shim.apex");
-  // Initialize pre-installed APEX information
-  auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  auto apexd_test_file = ApexFile::Open(AddDataApex("apex.apexd_test.apex"));
-  auto shim_v1 = ApexFile::Open(AddDataApex("com.android.apex.cts.shim.apex"));
-  // Initialize ApexFile repo
-  ASSERT_THAT(instance.AddDataApex(GetDataDir()), Ok());
-
-  auto result = SelectApexForActivation();
-  ASSERT_EQ(result.size(), 2u);
-
-  ASSERT_THAT(result, UnorderedElementsAre(ApexFileEq(*apexd_test_file),
-                                           ApexFileEq(*shim_v1)));
+  auto apex_bad =
+      ApexFile::Open(GetTestFile("apex.apexd_test_corrupt_apex.apex"));
+  ASSERT_THAT(apex_bad, Ok());
+  ASSERT_THAT(VerifyVerityRootDigest(*apex_bad),
+              HasError(WithMessage(HasSubstr("root digest mismatch"))));
 }
 
 TEST_F(ApexdUnitTest, ProcessCompressedApex) {
@@ -5013,6 +4969,29 @@ TEST_F(MountBeforeDataTest, BootCompletedCleanup_CreatesConfigFile) {
   BootCompletedCleanup();
   auto config_file = metadata_config_dir_ + "/mount_before_data";
   ASSERT_EQ(0, access(config_file.c_str(), F_OK));
+}
+
+TEST_F(MountBeforeDataTest, BrandNewApex) {
+  fs::copy(GetTestFile("apexd_testdata/com.android.apex.brand.new.avbpubkey"),
+           brand_new_config_dir_);
+  ApexFileRepository::EnableBrandNewApex();
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Prepare brand-new apex installation
+  auto session_id = 42;
+  PrepareStagedSession("com.android.apex.brand.new.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  SimulateReboot();
+  ApexFileRepository::EnableBrandNewApex();
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Staged session should be activated.
+  auto session = GetSessionManager()->GetSession(session_id);
+  ASSERT_THAT(session, Ok());
+  ASSERT_EQ(session->GetState(), SessionState::ACTIVATED);
+  ApexFileRepository::GetInstance().Reset();
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {

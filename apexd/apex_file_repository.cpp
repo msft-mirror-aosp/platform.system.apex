@@ -36,7 +36,6 @@
 #include "apexd_brand_new_verifier.h"
 #include "apexd_utils.h"
 #include "apexd_vendor_apex.h"
-#include "apexd_verity.h"
 
 using android::base::EndsWith;
 using android::base::Error;
@@ -231,24 +230,6 @@ ApexFileRepository& ApexFileRepository::GetInstance() {
 }
 
 android::base::Result<void> ApexFileRepository::AddPreInstalledApex(
-    const std::unordered_map<ApexPartition, std::string>&
-        partition_to_prebuilt_dirs) {
-  auto all_apex_paths =
-      OR_RETURN(CollectPreInstalledApex(partition_to_prebuilt_dirs));
-
-  for (const auto& apex_path : all_apex_paths) {
-    Result<ApexFile> apex_file = ApexFile::Open(apex_path.path);
-    if (!apex_file.ok()) {
-      return Error() << "Failed to open " << apex_path.path << " : "
-                     << apex_file.error();
-    }
-
-    StorePreInstalledApex(std::move(*apex_file), apex_path.partition);
-  }
-  return {};
-}
-
-android::base::Result<void> ApexFileRepository::AddPreInstalledApexParallel(
     const std::unordered_map<ApexPartition, std::string>&
         partition_to_prebuilt_dirs) {
   auto all_apex_paths =
@@ -636,15 +617,27 @@ std::optional<int64_t> ApexFileRepository::GetBrandNewApexBlockedVersion(
   return itt->second;
 }
 
-// Group pre-installed APEX and data APEX by name
-std::unordered_map<std::string, std::vector<ApexFileRef>>
-ApexFileRepository::AllApexFilesByName() const {
-  // Group them by name
-  std::unordered_map<std::string, std::vector<ApexFileRef>> result;
-  for (const auto* store : {&pre_installed_store_, &data_store_}) {
-    for (const auto& [name, apex] : *store) {
-      result[name].emplace_back(std::cref(apex));
+// For every package X, there can be at most two APEX, pre-installed vs
+// installed on data. Prefer data apexes and fallback to preinstalled. Note that
+// when adding data apexes, only same/higher version will be added to
+// data_store_.
+std::vector<ApexFileRef> ApexFileRepository::SelectApexForActivation() const {
+  std::vector<ApexFileRef> result;
+  result.reserve(partition_store_.size());
+  // partition_store_ has a collective set of apex names. Note that there can be
+  // data-only apexes without pre-installed: block apex or brand-new apex.
+  for (const auto& [apex_name, _] : partition_store_) {
+    if (auto it = data_store_.find(apex_name); it != data_store_.end()) {
+      result.emplace_back(std::cref(it->second));
+      continue;
     }
+    if (auto it = pre_installed_store_.find(apex_name);
+        it != pre_installed_store_.end()) {
+      result.emplace_back(std::cref(it->second));
+      continue;
+    }
+    LOG(FATAL) << "APEX " << apex_name << " found in partition_store_,"
+               << " but not found in pre_installed_store_ or data_store_";
   }
   return result;
 }

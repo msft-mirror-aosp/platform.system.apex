@@ -23,7 +23,7 @@
 namespace android {
 namespace apex {
 
-std::string BytesToHex(const uint8_t* bytes, size_t len);
+base::Result<void> VerifyVerityRootDigest(const ApexFile& apex);
 
 }  // namespace apex
 }  // namespace android

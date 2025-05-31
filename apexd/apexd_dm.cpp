@@ -43,7 +43,7 @@ static Result<DmDevice> CreateDmDeviceInternal(
     const std::chrono::milliseconds& timeout) {
   std::string dev_path;
   if (!dm.CreateDevice(name, table, &dev_path, timeout)) {
-    return Error() << "Couldn't create dm-device.";
+    return Error() << "Couldn't create dm-device for name=" << name;
   }
   return DmDevice(name, dev_path);
 }
