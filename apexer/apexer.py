@@ -235,7 +235,7 @@ def GetDirSize(dir_name):
 
 def GetFilesAndDirsCount(dir_name):
   count = 0
-  for root, dirs, files in os.walk(dir_name):
+  for _, dirs, files in os.walk(dir_name):
     count += (len(dirs) + len(files))
   return count
 
@@ -305,9 +305,9 @@ def ValidateArgs(args):
     if not os.path.exists(args.build_info):
       print("Build info file '" + args.build_info + "' does not exist")
       return False
-    with open(args.build_info, 'rb') as buildInfoFile:
+    with open(args.build_info, 'rb') as build_info_file:
       build_info = apex_build_info_pb2.ApexBuildInfo()
-      build_info.ParseFromString(buildInfoFile.read())
+      build_info.ParseFromString(build_info_file.read())
 
   if not os.path.exists(args.manifest):
     print("Manifest file '" + args.manifest + "' does not exist")
@@ -345,8 +345,8 @@ def ValidateArgs(args):
     return False
 
   if args.unsigned_payload_only:
-    args.payload_only = True;
-    args.unsigned_payload = True;
+    args.payload_only = True
+    args.unsigned_payload = True
 
   if not args.key and not args.unsigned_payload:
     print('Missing --key {keyfile} argument!')
@@ -406,7 +406,7 @@ def ValidateArgs(args):
 
 def GenerateBuildInfo(args):
   build_info = apex_build_info_pb2.ApexBuildInfo()
-  if (args.include_cmd_line_in_build_info):
+  if args.include_cmd_line_in_build_info:
     build_info.apexer_command_line = str(sys.argv)
 
   with open(args.file_contexts, 'rb') as f:
@@ -701,8 +701,8 @@ def SignImage(args, manifest_apex, img_file):
   # TODO(b/113320014) eliminate this step
   info, _ = RunCommand(['avbtool', 'info_image', '--image', img_file],
                        args.verbose)
-  vbmeta_offset = int(re.search('VBMeta\ offset:\ *([0-9]+)', info).group(1))
-  vbmeta_size = int(re.search('VBMeta\ size:\ *([0-9]+)', info).group(1))
+  vbmeta_offset = int(re.search('VBMeta offset: *([0-9]+)', info).group(1))
+  vbmeta_size = int(re.search('VBMeta size: *([0-9]+)', info).group(1))
   partition_size = RoundUp(vbmeta_offset + vbmeta_size,
                            BLOCK_SIZE) + BLOCK_SIZE
 
@@ -879,8 +879,8 @@ def CreateApexManifest(manifest_path):
     manifest_apex = ParseApexManifest(manifest_path)
     ValidateApexManifest(manifest_apex)
     return manifest_apex
-  except IOError:
-    raise ApexManifestError("Cannot read manifest file: '" + manifest_path + "'")
+  except IOError as exc:
+    raise ApexManifestError("Cannot read manifest file: '" + manifest_path + "'") from exc
 
 class TempDirectory(object):
 
