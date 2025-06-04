@@ -168,8 +168,9 @@ Result<ApexFile> ApexFile::Open(const std::string& path) {
     return ErrnoError() << "can't get realpath of " << path;
   }
 
-  return ApexFile(realpath, image_offset, image_size, std::move(*manifest),
-                  pubkey, fs_type, is_compressed);
+  return ApexFile(std::move(realpath), image_offset, image_size,
+                  std::move(*manifest), std::move(pubkey), std::move(fs_type),
+                  is_compressed);
 }
 
 // AVB-related code.

@@ -17,12 +17,12 @@
 #ifndef ANDROID_APEXD_APEX_FILE_H_
 #define ANDROID_APEXD_APEX_FILE_H_
 
+#include <android-base/result.h>
+#include <libavb/libavb.h>
+
 #include <memory>
 #include <string>
 #include <vector>
-
-#include <android-base/result.h>
-#include <libavb/libavb.h>
 
 #include "apex_manifest.h"
 
@@ -63,17 +63,16 @@ class ApexFile {
   android::base::Result<void> Decompress(const std::string& output_path) const;
 
  private:
-  ApexFile(const std::string& apex_path,
-           const std::optional<uint32_t>& image_offset,
+  ApexFile(std::string&& apex_path, const std::optional<uint32_t>& image_offset,
            const std::optional<size_t>& image_size,
-           ::apex::proto::ApexManifest manifest, const std::string& apex_pubkey,
-           const std::optional<std::string>& fs_type, bool is_compressed)
-      : apex_path_(apex_path),
+           ::apex::proto::ApexManifest&& manifest, std::string&& apex_pubkey,
+           std::optional<std::string>&& fs_type, bool is_compressed)
+      : apex_path_(std::move(apex_path)),
         image_offset_(image_offset),
         image_size_(image_size),
         manifest_(std::move(manifest)),
-        apex_pubkey_(apex_pubkey),
-        fs_type_(fs_type),
+        apex_pubkey_(std::move(apex_pubkey)),
+        fs_type_(std::move(fs_type)),
         is_compressed_(is_compressed) {}
 
   std::string apex_path_;
