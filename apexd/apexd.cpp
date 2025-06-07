@@ -2495,6 +2495,14 @@ void OnStart() {
     PLOG(ERROR) << "Failed to set " << gConfig->apex_status_sysprop << " to "
                 << kApexStatusStarting;
   }
+  if constexpr (flags::mount_before_data()) {
+    // When started with the feature(mount-before-data) enabled, make sure that
+    // the device never goes back to the migration state even if OnStart() fails
+    // to complete.
+    if (IsMountBeforeDataEnabled()) {
+      CreateMetadataConfigFile("mount_before_data");
+    }
+  }
 
   // Ask whether we should revert any active sessions; this can happen if
   // we've exceeded the retry count on a device that supports filesystem
