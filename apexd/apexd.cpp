@@ -1417,9 +1417,50 @@ struct ActivationResult {
   const std::string& error() const { return error_message; }
 };
 
+// In case some of the apexes failed to activate, we will attempt to activate
+// their corresponding pre-installed copies.
+std::vector<ApexFileRef> GetFallbackApexes(
+    const std::vector<ApexFileRef>& failed, ActivationMode mode) {
+  LOG(INFO) << "Trying to activate pre-installed versions of missing apexes";
+  const auto& file_repository = ApexFileRepository::GetInstance();
+  std::vector<ApexFileRef> fallback_apexes;
+  for (const auto& apex : failed) {
+    if (file_repository.IsPreInstalledApex(apex)) {
+      // We tried to activate pre-installed apex in the first place. No need
+      // to try again.
+      continue;
+    }
+    const std::string& name = apex.get().GetManifest().name();
+    auto preinstalled = file_repository.GetPreInstalledApex(name);
+    if (!preinstalled.has_value()) {
+      // Not every apex has preinstalled.
+      CHECK(ApexFileRepository::IsBrandNewApexEnabled() ||
+            file_repository.IsBlockApex(apex))
+          << "No preinstalled APEX found for " << name;
+      continue;
+    }
+    fallback_apexes.push_back(preinstalled.value());
+  }
+
+  if (mode == ActivationMode::kBootMode) {
+    // Treat fallback to pre-installed APEXes as a change of the active APEX,
+    // since we are already in a pretty dire situation, so it's better if we
+    // drop all the caches.
+    for (const auto& apex : fallback_apexes) {
+      gChangedActiveApexes.insert(apex.get().GetManifest().name());
+    }
+  }
+  return fallback_apexes;
+}
+
+// @param revert_on_error if true, will try to revert all active sessions
+//          and reboot the device in case of an error.
+// @param fallback_on_error if true, will try to activate pre-installed
+//          APEXes for failed activation and clean up the failed list.
 ActivationResult ActivateApexPackages(ActivationContext& ctx,
                                       const std::vector<ApexFileRef>& apexes,
-                                      ActivationMode mode) {
+                                      ActivationMode mode, bool revert_on_error,
+                                      bool fallback_on_error) {
   ATRACE_NAME("ActivateApexPackages");
   size_t apex_cnt = apexes.size();
   std::vector<Result<ApexFileRef>> results;
@@ -1472,45 +1513,31 @@ ActivationResult ActivateApexPackages(ActivationContext& ctx,
   }
   LOG(INFO) << "Activated " << activation_result.activated.size()
             << " packages.";
+
+  if (!activation_result.ok()) {
+    std::string error_message = StringPrintf("Failed to activate packages: %s",
+                                             activation_result.error().c_str());
+    LOG(ERROR) << error_message;
+    if (revert_on_error) {
+      if (auto st = RevertActiveSessionsAndReboot("", error_message);
+          !st.ok()) {
+        LOG(ERROR) << "Failed to revert : " << st.error();
+      }
+    }
+    if (fallback_on_error) {
+      auto fallback_apexes = GetFallbackApexes(activation_result.failed, mode);
+      auto st = ActivateApexPackages(ctx, fallback_apexes, mode,
+                                     /*revert_on_error=*/false,
+                                     /*fallback_on_error=*/false);
+      if (!st.ok()) {
+        LOG(ERROR) << st.error();
+      }
+      // Collect activated apex files and clear the failure.
+      activation_result.activated.append_range(std::move(st.activated));
+      activation_result.failed.clear();
+    }
+  }
   return activation_result;
-}
-
-// A fallback function in case some of the apexes failed to activate. For all
-// such apexes that were coming from /data partition we will attempt to activate
-// their corresponding pre-installed copies.
-ActivationResult ActivateMissingApexes(ActivationContext& ctx,
-                                       const std::vector<ApexFileRef>& failed,
-                                       ActivationMode mode) {
-  LOG(INFO) << "Trying to activate pre-installed versions of missing apexes";
-  const auto& file_repository = ApexFileRepository::GetInstance();
-  std::vector<ApexFileRef> fallback_apexes;
-  for (const auto& apex : failed) {
-    if (file_repository.IsPreInstalledApex(apex)) {
-      // We tried to activate pre-installed apex in the first place. No need to
-      // try again.
-      continue;
-    }
-    const std::string& name = apex.get().GetManifest().name();
-    auto preinstalled = file_repository.GetPreInstalledApex(name);
-    if (!preinstalled.has_value()) {
-      // Not every apex has preinstalled.
-      CHECK(ApexFileRepository::IsBrandNewApexEnabled() ||
-            file_repository.IsBlockApex(apex))
-          << "No preinstalled APEX found for " << name;
-      continue;
-    }
-    fallback_apexes.push_back(preinstalled.value());
-  }
-
-  if (mode == kBootMode) {
-    // Treat fallback to pre-installed APEXes as a change of the acitve APEX,
-    // since we are already in a pretty dire situation, so it's better if we
-    // drop all the caches.
-    for (const auto& apex : fallback_apexes) {
-      gChangedActiveApexes.insert(apex.get().GetManifest().name());
-    }
-  }
-  return ActivateApexPackages(ctx, fallback_apexes, mode);
 }
 
 }  // namespace
@@ -2189,6 +2216,8 @@ int OnBootstrap() {
   }
 
   std::vector<ApexFileRef> activation_list;
+  bool fallback_on_error = false;
+  bool revert_on_error = false;
 
   if (IsMountBeforeDataEnabled()) {
     // Wait until coldboot is done. This is to avoid unnecessary polling when
@@ -2210,6 +2239,17 @@ int OnBootstrap() {
     auto data_apexes = ScanDataApexFiles(GetImageManager());
     instance.AddDataApexFiles(std::move(data_apexes));
     activation_list = instance.SelectApexForActivation();
+
+    // When APEX activation fails with staged sessions, the device should abort
+    // the staged sessions by marking the sessions as failed and rebooting the
+    // device.
+    revert_on_error = true;
+    // When the revert fails, there's nothing much we can do. Hence, we fallback
+    // to activating the preinstalled APEXes so that the device can still
+    // boot. This is a last resort, and should be used only when the revert
+    // fails. This is not a common case, but can happen if the device is
+    // corrupted or the revert is not implemented correctly.
+    fallback_on_error = true;
   } else {
     const auto& pre_installed_apexes = instance.GetPreInstalledApexFiles();
     size_t loop_device_cnt = pre_installed_apexes.size();
@@ -2228,8 +2268,9 @@ int OnBootstrap() {
   }
 
   ActivationContext ctx;
-  auto result = ActivateApexPackages(ctx, activation_list,
-                                     ActivationMode::kBootstrapMode);
+  auto result =
+      ActivateApexPackages(ctx, activation_list, ActivationMode::kBootstrapMode,
+                           revert_on_error, fallback_on_error);
   if (!result.ok()) {
     LOG(ERROR) << "Failed to activate apexes: " << result.error();
     return 1;
@@ -2466,24 +2507,8 @@ void ActivateApexesOnStart() {
   // Group every ApexFile on device by name
   ActivationContext ctx;
   auto activate_status = ActivateApexPackages(
-      ctx, instance.SelectApexForActivation(), ActivationMode::kBootMode);
-  if (!activate_status.ok()) {
-    std::string error_message = StringPrintf("Failed to activate packages: %s",
-                                             activate_status.error().c_str());
-    LOG(ERROR) << error_message;
-    Result<void> revert_status =
-        RevertActiveSessionsAndReboot("", error_message);
-    if (!revert_status.ok()) {
-      LOG(ERROR) << "Failed to revert : " << revert_status.error();
-    }
-    auto retry_status = ActivateMissingApexes(ctx, activate_status.failed,
-                                              ActivationMode::kBootMode);
-    if (!retry_status.ok()) {
-      LOG(ERROR) << retry_status.error();
-    }
-    // Collect activated apex files
-    activate_status.activated.append_range(retry_status.activated);
-  }
+      ctx, instance.SelectApexForActivation(), ActivationMode::kBootMode,
+      /*revert_on_error=*/true, /*fallback_on_error=*/true);
   EmitApexInfoList(activate_status.activated, /*is_bootstrap=*/false);
 }
 
@@ -3085,8 +3110,9 @@ int OnStartInVmMode() {
   }
 
   ActivationContext ctx;
-  auto result = ActivateApexPackages(ctx, instance.SelectApexForActivation(),
-                                     ActivationMode::kVmMode);
+  auto result = ActivateApexPackages(
+      ctx, instance.SelectApexForActivation(), ActivationMode::kVmMode,
+      /*revert_on_error=*/false, /*fallback_on_error=*/false);
   if (!result.ok()) {
     LOG(ERROR) << "Failed to activate apex packages : " << result.error();
     return 1;
@@ -3138,18 +3164,8 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
 
   ActivationContext ctx;
   auto activate_status = ActivateApexPackages(
-      ctx, instance.SelectApexForActivation(), ActivationMode::kOtaChrootMode);
-  if (!activate_status.ok()) {
-    LOG(ERROR) << "Failed to activate apex packages : "
-               << activate_status.error();
-    auto retry_status = ActivateMissingApexes(ctx, activate_status.failed,
-                                              ActivationMode::kOtaChrootMode);
-    if (!retry_status.ok()) {
-      LOG(ERROR) << retry_status.error();
-    }
-    // Collect activated apex files
-    activate_status.activated.append_range(retry_status.activated);
-  }
+      ctx, instance.SelectApexForActivation(), ActivationMode::kOtaChrootMode,
+      /*revert_on_error=*/false, /*fallback_on_error=*/true);
   EmitApexInfoList(activate_status.activated, /*is_bootstrap=*/false);
   if (auto status = RestoreconPath(kApexInfoList); !status.ok()) {
     LOG(ERROR) << "Can't restorecon " << kApexInfoList << ": "

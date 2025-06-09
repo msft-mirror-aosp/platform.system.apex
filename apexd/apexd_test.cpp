@@ -4899,6 +4899,31 @@ TEST_F(MountBeforeDataTest, OnBootstrapActivatesAllApexes_IgnoreInvalidImage) {
               Contains("/apex/com.android.apex.test_package@2"));
 }
 
+TEST_F(MountBeforeDataTest,
+       OnBootstrapActivatesAllApexes_FallbackToPreinstalled) {
+  // Prepare pinned data apex before onBootstrap()
+  auto data_apex =
+      ApexFile::Open(GetTestFile("apex.apexd_test_manifest_mismatch.apex"));
+  ASSERT_THAT(data_apex, Ok());
+  auto pinned = image_manager_->PinApexFiles(Single(*data_apex));
+  ASSERT_THAT(pinned, Ok());
+  // Prepare the active list
+  std::vector<ApexListEntry> list;
+  list.emplace_back(pinned->at(0), data_apex->GetManifest().name());
+  ASSERT_THAT(image_manager_->UpdateApexList(ApexListType::ACTIVE, list), Ok());
+
+  // OnBootstrap() should succeed with preinstalled apexes (@1).
+  ASSERT_EQ(0, OnBootstrap());
+  ASSERT_THAT(GetApexMounts(),
+              Contains("/apex/com.android.apex.test_package@1"));
+
+  // On boot-completed, the problematic apex should be removed.
+  BootCompletedCleanup();
+  ASSERT_THAT(image_manager_->GetAllImages(), IsEmpty());
+  ASSERT_THAT(image_manager_->GetApexList(ApexListType::ACTIVE),
+              HasValue(IsEmpty()));
+}
+
 TEST_F(MountBeforeDataTest, OnBootstrapActivatesStagedSessions) {
   // Given that com.android.apex.test_package@1 is preinstalled
   ASSERT_EQ(0, OnBootstrap());
