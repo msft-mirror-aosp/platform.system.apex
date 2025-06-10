@@ -307,6 +307,7 @@ java_genrule {
     out: ["apex.apexd_test_manifest_mismatch.apex"],
     srcs: [":apex.apexd_test"],
     tools: [
+        "apex_fix",
         "soong_zip",
         "zipalign",
         "conv_apex_manifest",
@@ -316,8 +317,8 @@ java_genrule {
         "$(location soong_zip) -d -C $(genDir) -D $(genDir) " +
         "-s apex_manifest.pb -s apex_payload.img -s apex_pubkey " +
         "-o $(genDir)/unaligned.apex && " +
-        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex " +
-        "$(genDir)/apex.apexd_test_manifest_mismatch.apex",
+        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex $(out) && " +
+        "$(location apex_fix) $(out)",
 }
 
 java_genrule {
@@ -327,6 +328,7 @@ java_genrule {
     out: ["apex.apexd_test_corrupt_superblock_apex.apex"],
     srcs: [":apex.apexd_test"],
     tools: [
+        "apex_fix",
         "soong_zip",
         "zipalign",
     ],
@@ -335,8 +337,8 @@ java_genrule {
         "$(location soong_zip) -d -C $(genDir) -D $(genDir) " +
         "-s apex_manifest.pb -s apex_payload.img -s apex_pubkey " +
         "-o $(genDir)/unaligned.apex && " +
-        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex " +
-        "$(genDir)/apex.apexd_test_corrupt_superblock_apex.apex",
+        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex $(out) && " +
+        "$(location apex_fix) $(out)",
 }
 
 java_genrule {
@@ -346,6 +348,7 @@ java_genrule {
     out: ["apex.apexd_test_corrupt_apex.apex"],
     srcs: [":apex.apexd_test_for_corruption"],
     tools: [
+        "apex_fix",
         "soong_zip",
         "zipalign",
     ],
@@ -354,8 +357,8 @@ java_genrule {
         "$(location soong_zip) -d -C $(genDir) -D $(genDir) " +
         "-s apex_manifest.pb -s apex_payload.img -s apex_pubkey " +
         "-o $(genDir)/unaligned.apex && " +
-        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex " +
-        "$(genDir)/apex.apexd_test_corrupt_apex.apex",
+        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex $(out) && " +
+        "$(location apex_fix) $(out)",
 }
 
 java_genrule {
@@ -398,6 +401,7 @@ java_genrule {
     out: ["apex.apexd_test_different_key.apex"],
     srcs: [":apex.apexd_test_no_inst_key"],
     tools: [
+        "apex_fix",
         "soong_zip",
         "zipalign",
         "conv_apex_manifest",
@@ -407,8 +411,8 @@ java_genrule {
         "$(location soong_zip) -d -C $(genDir) -D $(genDir) " +
         "-s apex_manifest.pb -s apex_payload.img -s apex_pubkey " +
         "-o $(genDir)/unaligned.apex && " +
-        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex " +
-        "$(genDir)/apex.apexd_test_different_key.apex",
+        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex $(out) && " +
+        "$(location apex_fix) $(out)",
 }
 
 java_genrule {
@@ -418,6 +422,7 @@ java_genrule {
     out: ["apex.apexd_test_different_key_v2.apex"],
     srcs: [":apex.apexd_test_no_inst_key"],
     tools: [
+        "apex_fix",
         "soong_zip",
         "zipalign",
         "conv_apex_manifest",
@@ -428,8 +433,8 @@ java_genrule {
         "$(location soong_zip) -d -C $(genDir) -D $(genDir) " +
         "-s apex_manifest.pb -s apex_payload.img -s apex_pubkey " +
         "-o $(genDir)/unaligned.apex && " +
-        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex " +
-        "$(genDir)/apex.apexd_test_different_key_v2.apex",
+        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex $(out) && " +
+        "$(location apex_fix) $(out)",
 }
 
 java_genrule {
@@ -439,6 +444,7 @@ java_genrule {
     out: ["test.rebootless_apex_manifest_mismatch.apex"],
     srcs: [":test.rebootless_apex_v1"],
     tools: [
+        "apex_fix",
         "soong_zip",
         "zipalign",
         "conv_apex_manifest",
@@ -448,8 +454,8 @@ java_genrule {
         "$(location soong_zip) -d -C $(genDir) -D $(genDir) " +
         "-s apex_manifest.pb -s apex_payload.img -s apex_pubkey " +
         "-o $(genDir)/unaligned.apex && " +
-        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex " +
-        "$(genDir)/test.rebootless_apex_manifest_mismatch.apex",
+        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex $(out) && " +
+        "$(location apex_fix) $(out)",
 }
 
 java_genrule {
@@ -459,6 +465,7 @@ java_genrule {
     out: ["test.rebootless_apex_corrupted.apex"],
     srcs: [":test.rebootless_apex_v1"],
     tools: [
+        "apex_fix",
         "soong_zip",
         "zipalign",
     ],
@@ -467,8 +474,8 @@ java_genrule {
         "$(location soong_zip) -d -C $(genDir) -D $(genDir) " +
         "-s apex_manifest.pb -s apex_payload.img -s apex_pubkey " +
         "-o $(genDir)/unaligned.apex && " +
-        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex " +
-        "$(genDir)/test.rebootless_apex_corrupted.apex",
+        "$(location zipalign) -f 4096 $(genDir)/unaligned.apex $(out) && " +
+        "$(location apex_fix) $(out)",
 }
 
 cc_test {
