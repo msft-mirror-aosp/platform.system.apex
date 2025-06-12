@@ -19,6 +19,7 @@ package com.android.tests.apex;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 
+import static org.junit.Assume.assumeFalse;
 import static org.junit.Assume.assumeTrue;
 
 import android.cts.install.lib.host.InstallUtilsHost;
@@ -78,6 +79,10 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
     private boolean deviceHasActiveApex(String apexName) throws Exception {
         return getDevice().getActiveApexes().stream().anyMatch(
                 apex -> apex.name.equals(apexName));
+    }
+
+    private boolean isMountBeforeDataEnabled() throws Exception {
+        return getDevice().doesFileExist("/metadata/apex/config/mount_before_data");
     }
 
     @Test
@@ -262,6 +267,7 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
     public void testFailsToActivateApexOnDataFallbacksToPreInstalled() throws Exception {
         assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
         assumeTrue("Device requires root", getDevice().isAdbRoot());
+        assumeFalse("Device uses mount-before-data", isMountBeforeDataEnabled());
 
         try {
             final File file =

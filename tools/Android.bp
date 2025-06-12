@@ -17,6 +17,26 @@ package {
 }
 
 python_binary_host {
+    name: "apex_fix",
+    srcs: [
+        "apex_fix.py",
+    ],
+}
+
+python_test_host {
+    name: "apex_fix_test",
+    main: "apex_fix_test.py",
+    srcs: [
+        "apex_fix.py",
+        "apex_fix_test.py",
+    ],
+    test_suites: ["general-tests"],
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_binary_host {
     name: "deapexer",
     srcs: [
         "deapexer.py",
