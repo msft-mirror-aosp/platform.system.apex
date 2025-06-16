@@ -134,6 +134,51 @@ static Result<ApexFile> GetActivePackage(const std::string& packageName) {
          << "Cannot find matching package for: " << packageName;
 }
 
+static void UpdateZipComment(
+    const std::string& file,
+    std::function<std::string(const std::string&)> update_comment_fn) {
+  const uint64_t kEocdSize = 22u;
+  const uint64_t kMaxCommentSize = 65535u;
+  const std::string kZipEocdMagic = {0x50, 0x4B, 0x05, 0x06};
+
+  unique_fd fd(open(file.c_str(), O_RDWR | O_BINARY | O_CLOEXEC));
+  auto filesize = lseek64(fd.get(), 0, SEEK_END);
+  ASSERT_GT(filesize, 0);
+  ASSERT_GT(static_cast<uint64_t>(filesize), kEocdSize);
+
+  // Read some at the end of file to scan EOCD
+  const uint64_t read_amount =
+      std::min(static_cast<uint64_t>(filesize), kMaxCommentSize + kEocdSize);
+  ASSERT_GE(lseek64(fd.get(), -read_amount, SEEK_END), 0);
+  std::string content;
+  ASSERT_TRUE(base::ReadFdToString(fd, &content));
+
+  // Scan EOCD from the end
+  for (auto i = read_amount - kEocdSize; i >= 0; i--) {
+    if (content.substr(i, kZipEocdMagic.size()) == kZipEocdMagic) {
+      // Read comment: length (2-byte in LE) at 20, followed by comments
+      uint16_t comment_length =
+          le16toh(*reinterpret_cast<uint16_t*>(&content.at(i + 20)));
+      std::string comment = content.substr(i + 22);
+      ASSERT_EQ(comment_length, comment.size());
+
+      // Update comment
+      std::string new_comment = update_comment_fn(comment);
+      ASSERT_LE(new_comment.size(), kMaxCommentSize);
+
+      // Write new comment after truncating the file first
+      ASSERT_GE(lseek64(fd.get(), i - read_amount + 20, SEEK_END), 0);
+      ASSERT_EQ(ftruncate(fd.get(), filesize + i - read_amount + 20), 0);
+      uint16_t new_comment_length =
+          htole16(static_cast<uint16_t>(new_comment.size()));
+      ASSERT_EQ(write(fd.get(), &new_comment_length, 2), 2);
+      ASSERT_TRUE(base::WriteStringToFd(new_comment, fd));
+      return;
+    }
+  }
+  FAIL() << "Invalid zip: can't find EOCD in " << file;
+}
+
 // A very basic mock of CheckpointInterface.
 class MockCheckpointInterface : public CheckpointInterface {
  public:
@@ -1078,6 +1123,23 @@ TEST_F(ApexdMountTest, InstallPackageRejectsPrivAppInApex) {
                      /* force= */ false);
   ASSERT_THAT(ret,
               HasError(WithMessage(HasSubstr("contains priv-app inside"))));
+}
+
+TEST_F(ApexdMountTest, InstallPackageRejectsWrongSizeApex) {
+  std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+  ASSERT_THAT(ActivatePackage(file_path), Ok());
+
+  // Prepare wrong-size apex
+  TemporaryDir temp_dir;
+  auto test_apex = std::string(temp_dir.path) + "/test.apex";
+  fs::copy(GetTestFile("test.rebootless_apex_v1.apex"), test_apex);
+  UpdateZipComment(test_apex, [](auto comment) { return comment + "!"; });
+
+  ASSERT_THAT(InstallPackage(test_apex, /*force=*/false),
+              HasError(WithMessage(
+                  HasSubstr("APEX file size is not a multiple of 4096"))));
 }
 
 TEST_F(ApexdMountTest, InstallPackagePreInstallVersionActive) {
@@ -4674,6 +4736,18 @@ TEST_F(SubmitStagedSessionTest, SuccessWithMultiSession) {
   auto session = GetSessionManager()->GetSession(parent_session_id);
   ASSERT_THAT(session->GetChildSessionIds(),
               ElementsAre(child_session1_id, child_session2_id));
+}
+
+TEST_F(SubmitStagedSessionTest, FailWithWrongSize) {
+  auto session_id = 42;
+  auto file = PrepareStagedSession("apex.apexd_test.apex", session_id);
+  UpdateZipComment(file, [](auto comment) { return comment + "!"; });
+
+  ASSERT_THAT(SubmitStagedSession(session_id, /*child_session_ids=*/{},
+                                  /*has_rollback=*/false,
+                                  /*is_rollback=*/false, /*rollback_id=*/-1),
+              HasError(WithMessage(
+                  HasSubstr("APEX file size is not a multiple of 4096"))));
 }
 
 // Temporary test cases until the feature is fully enabled/implemented
