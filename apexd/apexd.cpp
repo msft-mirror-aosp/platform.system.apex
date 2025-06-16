@@ -769,17 +769,6 @@ Result<void> VerifyNoOverlapInSessions(std::span<const ApexFile> apex_files,
   return {};  // okay
 }
 
-Result<void> VerifyApexFileSize(std::span<const ApexFile> apex_files) {
-  for (const auto& apex : apex_files) {
-    auto filesize = OR_RETURN(GetFileSize(apex.GetPath()));
-    if (filesize % 4096 != 0) {
-      return Error() << "APEX file size is not a multiple of 4096 bytes: "
-                     << apex.GetPath();
-    }
-  }
-  return {};
-}
-
 struct VerificationResult {
   std::map<std::string, std::vector<std::string>> apex_hals;
 };
@@ -802,8 +791,6 @@ Result<VerificationResult> VerifyPackagesStagedInstall(
       OR_RETURN(VerifyBrandNewPackageAgainstActive(apex_file, gMountedApexes));
     }
   }
-
-  OR_RETURN(VerifyApexFileSize(apex_files));
 
   auto sessions = gSessionManager->GetSessions();
 
@@ -3196,8 +3183,6 @@ android::apex::MountedApexDatabase& GetApexDatabaseForTesting() {
 Result<VerificationResult> VerifyPackageNonStagedInstall(
     const ApexFile& apex_file, bool force) {
   OR_RETURN(VerifyPackageBoot(apex_file));
-
-  OR_RETURN(VerifyApexFileSize(Single(apex_file)));
 
   auto sessions = gSessionManager->GetSessions();
 
