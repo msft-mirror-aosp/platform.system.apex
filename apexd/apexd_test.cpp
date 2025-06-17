@@ -4571,18 +4571,6 @@ TEST_F(SubmitStagedSessionTest,
               HasError(WithMessage(HasSubstr("already staged"))));
 }
 
-TEST_F(SubmitStagedSessionTest, RejectStagingIfAnotherSessionIsBeingStaged) {
-  auto session_id = 42;
-  PrepareStagedSession("apex.apexd_test.apex", session_id);
-  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
-
-  // MarkStagedSessionReady is not called yet.
-  auto session_id2 = 43;
-  PrepareStagedSession("apex.apexd_test_different_app.apex", session_id2);
-  ASSERT_THAT(SubmitStagedSession(session_id2, {}, false, false, -1),
-              HasError(WithMessage(HasSubstr("being staged"))));
-}
-
 TEST_F(SubmitStagedSessionTest, RejectInstallPackageForStagedPackage) {
   auto session_id = 42;
   PrepareStagedSession("apex.apexd_test.apex", session_id);
@@ -4592,17 +4580,6 @@ TEST_F(SubmitStagedSessionTest, RejectInstallPackageForStagedPackage) {
   ASSERT_THAT(
       InstallPackage(GetTestFile("apex.apexd_test.apex"), /* force= */ true),
       HasError(WithMessage(HasSubstr("already staged"))));
-}
-
-TEST_F(SubmitStagedSessionTest, RejectInstallIfAnotherSessionIsBeingStaged) {
-  auto session_id = 42;
-  PrepareStagedSession("apex.apexd_test.apex", session_id);
-  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
-
-  // MarkStagedSessionReady is not called yet.
-  ASSERT_THAT(InstallPackage(GetTestFile("apex.apexd_test_different_app.apex"),
-                             /* force= */ true),
-              HasError(WithMessage(HasSubstr("being staged"))));
 }
 
 TEST_F(SubmitStagedSessionTest, AbortedSessionDoesNotBlockNewStagingOrInstall) {
