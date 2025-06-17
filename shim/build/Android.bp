@@ -435,7 +435,7 @@ java_genrule {
         targets: ["com.android.apex.cts.shim.v2_signed_bob"],
         dest: "com.android.apex.cts.shim.v2_signed_bob.apex",
     },
-    cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --out $(out) $(location :com.android.apex.cts.shim.v2)",
+    cmd: "$(location :apksigner) sign --align-file-size --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --out $(out) $(location :com.android.apex.cts.shim.v2)",
 }
 
 // v2 cts shim package signed by bob + lineage
@@ -453,7 +453,7 @@ java_genrule {
         targets: ["com.android.apex.cts.shim.v2_signed_bob_rot"],
         dest: "com.android.apex.cts.shim.v2_signed_bob_rot.apex",
     },
-    cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot) --rotation-min-sdk-version 28 --out $(out) $(location :com.android.apex.cts.shim.v2)",
+    cmd: "$(location :apksigner) sign --align-file-size --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot) --rotation-min-sdk-version 28 --out $(out) $(location :com.android.apex.cts.shim.v2)",
 }
 
 // v2 cts shim package signed by bob + lineage + rollback capability
@@ -471,7 +471,7 @@ java_genrule {
         targets: ["com.android.apex.cts.shim.v2_signed_bob_rot_rollback"],
         dest: "com.android.apex.cts.shim.v2_signed_bob_rot_rollback.apex",
     },
-    cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot.rollback) --rotation-min-sdk-version 28 --out $(out) $(location :com.android.apex.cts.shim.v2)",
+    cmd: "$(location :apksigner) sign --align-file-size --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot.rollback) --rotation-min-sdk-version 28 --out $(out) $(location :com.android.apex.cts.shim.v2)",
 }
 
 // v3 cts shim package signed by bob
@@ -488,7 +488,7 @@ java_genrule {
         targets: ["com.android.apex.cts.shim.v3_signed_bob"],
         dest: "com.android.apex.cts.shim.v3_signed_bob.apex",
     },
-    cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --out $(out) $(location :com.android.apex.cts.shim.v3)",
+    cmd: "$(location :apksigner) sign --align-file-size --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --out $(out) $(location :com.android.apex.cts.shim.v3)",
 }
 
 // v3 cts shim package signed by bob + lineage
@@ -506,7 +506,7 @@ java_genrule {
         targets: ["com.android.apex.cts.shim.v3_signed_bob_rot"],
         dest: "com.android.apex.cts.shim.v3_signed_bob_rot.apex",
     },
-    cmd: "$(location :apksigner) sign --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot) --rotation-min-sdk-version 28 --out $(out) $(location :com.android.apex.cts.shim.v3)",
+    cmd: "$(location :apksigner) sign --align-file-size --v1-signing-enabled false --v2-signing-enabled false --key $(location :com.android.apex.rotation.key.bob.pk8) --cert $(location :com.android.apex.rotation.key.bob.x509.pem) --lineage $(location :com.android.apex.rotation.key.bob.rot) --rotation-min-sdk-version 28 --out $(out) $(location :com.android.apex.cts.shim.v3)",
 }
 
 // This one is only used in ApexdHostTest and not meant to be installed
