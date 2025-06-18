@@ -38,6 +38,8 @@ using android::base::RemoveFileIfExists;
 using android::base::Result;
 using android::base::unique_fd;
 using android::dm::DeviceMapper;
+using apex::proto::ApexStorageMetadata;
+
 using namespace std::chrono_literals;
 
 namespace android::apex {
@@ -131,6 +133,46 @@ Result<std::vector<ApexListEntry>> ReadImageList(const std::string& filename) {
   }
 
   return list;
+}
+
+Result<ApexStorageMetadata> ApexStorageMetadata_Load(
+    const std::string& filename) {
+  unique_fd fd(open(filename.c_str(), O_RDONLY | O_CLOEXEC));
+  if (fd < 0) {
+    if (errno == ENOENT) {
+      return {};
+    }
+    return ErrnoError() << "Failed to open " << filename;
+  }
+
+  std::string content;
+  if (!base::ReadFdToString(fd.get(), &content)) {
+    return ErrnoError() << "Failed to read " << filename;
+  }
+
+  ApexStorageMetadata metadata;
+  if (!metadata.ParseFromString(content)) {
+    return Error() << "Failed to parse " << filename;
+  }
+  return metadata;
+}
+
+Result<void> ApexStorageMetadata_Save(const ApexStorageMetadata& metadata,
+                                      const std::string& filename) {
+  auto temp_filename = filename + ".tmp";
+
+  std::string content;
+  if (!metadata.SerializeToString(&content)) {
+    return Error() << "Failed to serialize ApexStorageMetadata";
+  }
+  if (!base::WriteStringToFile(content, temp_filename)) {
+    return ErrnoError() << "Failed to write " << temp_filename;
+  }
+  if (auto rc = rename(temp_filename.c_str(), filename.c_str()); rc == -1) {
+    return ErrnoError() << "Failed to rename " << temp_filename << " to "
+                        << filename;
+  }
+  return {};
 }
 
 }  // namespace
@@ -299,6 +341,10 @@ std::string ApexImageManager::GetApexListFile(ApexListType list_type) const {
     case ApexListType::BACKUP:
       return metadata_dir_ + "/backup";
   }
+}
+
+std::string ApexImageManager::GetApexStorageMetadataPath() const {
+  return metadata_dir_ + "/apex.img.metadata";
 }
 
 Result<void> ApexImageManager::UpdateApexList(

@@ -89,6 +89,7 @@ cc_defaults {
     static_libs: [
         "lib_apex_blocklist_proto",
         "lib_apex_image_list_proto",
+        "lib_apex_storage_metadata_proto",
         "lib_microdroid_metadata_proto",
         "libapex",
         "libapexd_flags",
