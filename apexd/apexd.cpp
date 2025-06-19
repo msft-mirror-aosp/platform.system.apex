@@ -749,11 +749,6 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
 Result<void> VerifyNoOverlapInSessions(std::span<const ApexFile> apex_files,
                                        std::span<const ApexSession> sessions) {
   for (const auto& session : sessions) {
-    // We don't want to install/stage while another session is being staged.
-    if (session.GetState() == SessionState::VERIFIED) {
-      return Error() << "Session " << session.GetId() << " is being staged.";
-    }
-
     // We don't want to install/stage if the same package is already staged.
     if (session.GetState() == SessionState::STAGED) {
       for (const auto& apex : apex_files) {
@@ -795,7 +790,6 @@ Result<VerificationResult> VerifyPackagesStagedInstall(
   auto sessions = gSessionManager->GetSessions();
 
   // Check overlapping: reject if the same package is already staged
-  // or if there's a session being staged.
   OR_RETURN(VerifyNoOverlapInSessions(apex_files, sessions));
 
   // Since there can be multiple staged sessions, let's verify incoming APEXes
@@ -3187,7 +3181,6 @@ Result<VerificationResult> VerifyPackageNonStagedInstall(
   auto sessions = gSessionManager->GetSessions();
 
   // Check overlapping: reject if the same package is already staged
-  // or if there's a session being staged.
   OR_RETURN(VerifyNoOverlapInSessions(Single(apex_file), sessions));
 
   auto check_fn =
