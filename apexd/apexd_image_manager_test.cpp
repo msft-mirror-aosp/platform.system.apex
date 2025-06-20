@@ -107,6 +107,38 @@ TEST(ApexImageManagerTest, GetMappedPath) {
   ASSERT_THAT(image_manager->GetMappedPath(image), Optional(dev.value()));
 }
 
+TEST(ApexImageManagerTest, AddApexFilesMultipleTimes) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(image_manager->PinApexFiles(std::vector{*apex}),
+              HasValue(SizeIs(1)));
+  ASSERT_THAT(image_manager->PinApexFiles(std::vector{*apex}),
+              HasValue(SizeIs(1)));
+  ASSERT_THAT(image_manager->GetAllImages(), SizeIs(2));
+}
+
+TEST(ApexImageManagerTest, AddDeleteAndAdd) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  auto images = image_manager->PinApexFiles(std::vector{*apex});
+  ASSERT_THAT(images, HasValue(SizeIs(1)));
+
+  ASSERT_THAT(image_manager->DeleteImage(images->at(0)), Ok());
+  ASSERT_THAT(image_manager->GetAllImages(), SizeIs(0));
+
+  ASSERT_THAT(image_manager->PinApexFiles(std::vector{*apex}),
+              HasValue(SizeIs(1)));
+  ASSERT_THAT(image_manager->GetAllImages(), SizeIs(1));
+}
+
 TEST(ApexImageManagerTest, ManageApexList) {
   TemporaryDir metadata_dir;
   TemporaryDir data_dir;

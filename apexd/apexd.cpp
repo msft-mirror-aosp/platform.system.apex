@@ -397,7 +397,6 @@ Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex,
   // TODO(b/405904883) measure the IO performance and reduce # of layers if
   // necessary
   DmTable table;
-  constexpr auto kBytesInSector = 512;
   table.Emplace<dm::DmTargetLinear>(0, *apex.GetImageSize() / kBytesInSector,
                                     apex.GetPath(),
                                     *apex.GetImageOffset() / kBytesInSector);
