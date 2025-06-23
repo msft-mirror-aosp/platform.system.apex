@@ -42,6 +42,10 @@ message ApexStorageMetadata {
     // Represents FIEMAP extents. Offset/length fields of in bytes, for easy
     // conversion from/to fiemap_extent
     repeated Extent extents = 2;
+
+    // The modification time of the apex image. This is the number of seconds
+    // since the epoch.
+    fixed64 mtime = 3;
   }
 
   // The list of apex image info

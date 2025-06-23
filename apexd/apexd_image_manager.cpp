@@ -221,9 +221,10 @@ std::vector<std::string> ApexStorageMetadata_GetAllImageNames(
   return image_names;
 }
 
-void ApexStorageMetadata_AddApexImageInfo(
-    ApexStorageMetadata& metadata, const std::string& name,
-    const std::vector<Interval>& extents) {
+void ApexStorageMetadata_AddApexImageInfo(ApexStorageMetadata& metadata,
+                                          const std::string& name,
+                                          const std::vector<Interval>& extents,
+                                          time_t mtime) {
   auto& bp_image_info = *metadata.add_images();
   bp_image_info.set_image_name(name);
   bp_image_info.mutable_extents()->Reserve(extents.size());
@@ -232,6 +233,7 @@ void ApexStorageMetadata_AddApexImageInfo(
     pb_extent.set_offset(extent.offset);
     pb_extent.set_length(extent.length);
   }
+  bp_image_info.set_mtime(mtime);
 }
 
 Result<DmDevice> CreateDmLinear(const std::string& name,
@@ -391,6 +393,7 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
 
     auto apex_path = apex_file.GetPath();
     auto file_size = OR_RETURN(GetFileSize(apex_path));
+    auto mtime = OR_RETURN(GetLastModifiedTime(apex_path));
 
     // Allocate extents for the apex from the free extents.
     // For now, the allocation strategy is as simple as to take from the head.
@@ -398,7 +401,8 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
         TakeLengthFromStart(free_extents, file_size);
 
     // Update APEX storage metadata
-    ApexStorageMetadata_AddApexImageInfo(metadata, image_name, allocated);
+    ApexStorageMetadata_AddApexImageInfo(metadata, image_name, allocated,
+                                         mtime);
     // Update free_extents
     free_extents = std::move(new_free_extents);
 
@@ -504,12 +508,15 @@ Result<std::string> ApexImageManager::MapImage(const std::string& image) {
     return Error() << "Failed to find image " << image;
   }
   auto extents = ExtentsToIntervals(it->extents());
+  auto mtime = it->mtime();
 
   // create a dm-linear device on the userdata partition
   auto dev = OR_RETURN(
       CreateDmLinear(image, kUserdataDevice, extents, /*read_only=*/true));
+  auto dev_path = dev.GetDevPath();
+  OR_RETURN(SetLastModifiedTime(dev_path, mtime));
   dev.Release();  // dm-linear device should not be deleted on exit
-  return dev.GetDevPath();
+  return dev_path;
 }
 
 Result<void> ApexImageManager::UnmapImage(const std::string& image) {

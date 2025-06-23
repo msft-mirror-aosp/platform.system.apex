@@ -27,6 +27,7 @@
 #include <dirent.h>
 #include <selinux/android.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -304,6 +305,29 @@ inline android::base::Result<uintmax_t> GetFileSize(
   }
 
   return value;
+}
+
+// Returns the number of seconds since the epoch.
+inline android::base::Result<int64_t> GetLastModifiedTime(
+    const std::string& path) {
+  struct stat st_buf;
+  if (stat(path.c_str(), &st_buf) != 0) {
+    return android::base::ErrnoError() << "Failed to stat " << path;
+  }
+  return st_buf.st_mtime;
+}
+
+inline android::base::Result<void> SetLastModifiedTime(const std::string& path,
+                                                       int64_t mtime) {
+  struct timeval times[2];
+  times[0].tv_sec = mtime;
+  times[0].tv_usec = 0;
+  times[1].tv_sec = mtime;
+  times[1].tv_usec = 0;
+  if (utimes(path.c_str(), times) != 0) {
+    return android::base::ErrnoError() << "Failed to set mtime for " << path;
+  }
+  return {};
 }
 
 inline android::base::Result<void> RestoreconPath(const std::string& path) {
