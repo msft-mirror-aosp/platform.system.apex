@@ -23,6 +23,8 @@
 
 namespace android::apex {
 
+constexpr uint64_t kBytesInSector = 512;
+
 class DmDevice {
  public:
   DmDevice() : cleared_(true) {}

@@ -20,16 +20,20 @@
 #include <android-base/result.h>
 #include <android-base/unique_fd.h>
 #include <libdm/dm.h>
+#include <libfiemap/split_fiemap_writer.h>
 #include <sys/sendfile.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cerrno>
-#include <chrono>
+#include <type_traits>
 
 #include "apex_image_list.pb.h"
+#include "apex_storage_metadata.pb.h"
 #include "apexd.h"
+#include "apexd_dm.h"
 #include "apexd_utils.h"
+#include "interval.h"
 
 using android::base::borrowed_fd;
 using android::base::ErrnoError;
@@ -38,6 +42,12 @@ using android::base::RemoveFileIfExists;
 using android::base::Result;
 using android::base::unique_fd;
 using android::dm::DeviceMapper;
+using android::dm::DmDeviceState;
+using android::dm::DmTable;
+using android::dm::DmTargetLinear;
+using android::fiemap::SplitFiemap;
+using apex::proto::ApexStorageMetadata;
+
 using namespace std::chrono_literals;
 
 namespace android::apex {
@@ -45,6 +55,12 @@ namespace android::apex {
 namespace {
 
 ApexImageManager* gImageManager;
+
+// Utility type for static_assert at the end of `if constexpr` branches.
+template <typename T>
+struct TypeDependentFalse {
+  enum { value = false };
+};
 
 Result<void> SendFile(borrowed_fd dest_fd, const std::string& src_path,
                       size_t size) {
@@ -57,6 +73,28 @@ Result<void> SendFile(borrowed_fd dest_fd, const std::string& src_path,
     return ErrnoError() << "Failed to sendfile from " << src_path;
   }
   return {};
+}
+
+Result<void> SendFile(const std::string& dest_path, const std::string& src_path,
+                      size_t size) {
+  unique_fd dest_fd(open(dest_path.c_str(), O_RDWR | O_CLOEXEC));
+  if (!dest_fd.ok()) {
+    return Error() << "Failed to open " << dest_path;
+  }
+  return SendFile(dest_fd, src_path, size);
+}
+
+Result<void> EnsureBlockDeviceIsUserdata(const std::string& bdev) {
+  struct stat userdata, given;
+  if (!stat(bdev.c_str(), &given) && !stat(kUserdataDevice, &userdata)) {
+    if (S_ISBLK(given.st_mode) && S_ISBLK(userdata.st_mode) &&
+        given.st_rdev == userdata.st_rdev) {
+      return {};
+    }
+    return Error() << "Invalid device for the APEX storage, which should be "
+                   << kUserdataDevice << ", but is " << bdev;
+  }
+  return ErrnoError() << "Failed to stat " << bdev;
 }
 
 // Find a unique "image" name for the apex name: e.g. com.android.foo_2.apex
@@ -133,6 +171,117 @@ Result<std::vector<ApexListEntry>> ReadImageList(const std::string& filename) {
   return list;
 }
 
+Result<ApexStorageMetadata> ApexStorageMetadata_Load(
+    const std::string& filename) {
+  unique_fd fd(open(filename.c_str(), O_RDONLY | O_CLOEXEC));
+  if (fd < 0) {
+    if (errno == ENOENT) {
+      return {};
+    }
+    return ErrnoError() << "Failed to open " << filename;
+  }
+
+  std::string content;
+  if (!base::ReadFdToString(fd.get(), &content)) {
+    return ErrnoError() << "Failed to read " << filename;
+  }
+
+  ApexStorageMetadata metadata;
+  if (!metadata.ParseFromString(content)) {
+    return Error() << "Failed to parse " << filename;
+  }
+  return metadata;
+}
+
+Result<void> ApexStorageMetadata_Save(const ApexStorageMetadata& metadata,
+                                      const std::string& filename) {
+  auto temp_filename = filename + ".tmp";
+
+  std::string content;
+  if (!metadata.SerializeToString(&content)) {
+    return Error() << "Failed to serialize ApexStorageMetadata";
+  }
+  if (!base::WriteStringToFile(content, temp_filename)) {
+    return ErrnoError() << "Failed to write " << temp_filename;
+  }
+  if (auto rc = rename(temp_filename.c_str(), filename.c_str()); rc == -1) {
+    return ErrnoError() << "Failed to rename " << temp_filename << " to "
+                        << filename;
+  }
+  return {};
+}
+
+std::vector<std::string> ApexStorageMetadata_GetAllImageNames(
+    const ApexStorageMetadata& metadata) {
+  std::vector<std::string> image_names;
+  image_names.reserve(metadata.images_size());
+  for (const auto& image_info : metadata.images()) {
+    image_names.emplace_back(image_info.image_name());
+  }
+  return image_names;
+}
+
+void ApexStorageMetadata_AddApexImageInfo(ApexStorageMetadata& metadata,
+                                          const std::string& name,
+                                          const std::vector<Interval>& extents,
+                                          time_t mtime) {
+  auto& bp_image_info = *metadata.add_images();
+  bp_image_info.set_image_name(name);
+  bp_image_info.mutable_extents()->Reserve(extents.size());
+  for (const auto& extent : extents) {
+    auto& pb_extent = *bp_image_info.add_extents();
+    pb_extent.set_offset(extent.offset);
+    pb_extent.set_length(extent.length);
+  }
+  bp_image_info.set_mtime(mtime);
+}
+
+Result<DmDevice> CreateDmLinear(const std::string& name,
+                                const std::string& block_dev,
+                                const std::vector<Interval>& extents,
+                                bool read_only) {
+  DmTable table;
+  uint64_t sector = 0;
+  for (const auto& extent : extents) {
+    if (extent.offset % kBytesInSector != 0 ||
+        extent.length % kBytesInSector != 0) {
+      return Error() << "Failed to create dm-linear: Extent is not "
+                        "sector-aligned: offset="
+                     << extent.offset << ", length=" << extent.length;
+    }
+    table.Emplace<DmTargetLinear>(sector, extent.length / kBytesInSector,
+                                  block_dev, extent.offset / kBytesInSector);
+    sector += extent.length / kBytesInSector;
+  }
+  if (read_only) {
+    table.set_readonly(true);
+  }
+  return CreateDmDevice(name, table, /*reuse=*/false);
+}
+
+template <typename T>
+Interval ExtentToInterval(const T& extent) {
+  if constexpr (std::is_same_v<T, struct fiemap_extent>) {
+    return {extent.fe_physical, extent.fe_length};
+  } else if constexpr (requires {
+                         extent.offset();
+                         extent.length();
+                       }) {
+    return {extent.offset(), extent.length()};
+  } else {
+    static_assert(TypeDependentFalse<T>::value, "Invalid extent type");
+  }
+}
+
+std::vector<Interval> ExtentsToIntervals(const auto& extents) {
+  std::vector<Interval> intervals;
+  intervals.reserve(extents.size());
+  for (const auto& extent : extents) {
+    intervals.emplace_back(ExtentToInterval(extent));
+  }
+  return intervals;
+}
+
 }  // namespace
 
 std::vector<ApexListEntry> UpdateApexListWithNewEntries(
@@ -155,9 +304,7 @@ std::vector<ApexListEntry> UpdateApexListWithNewEntries(
 
 ApexImageManager::ApexImageManager(const std::string& metadata_dir,
                                    const std::string& data_dir)
-    : metadata_dir_(metadata_dir),
-      data_dir_(data_dir),
-      fsmgr_(fiemap::ImageManager::Open(metadata_dir, data_dir)) {}
+    : metadata_dir_(metadata_dir), data_dir_(data_dir) {}
 
 // PinApexFiles makes apex_files accessible even before /data is mounted. At a
 // high-level, it pins those apex files, extract their extents, and save the
@@ -171,65 +318,120 @@ ApexImageManager::ApexImageManager(const std::string& metadata_dir,
 // dm-liner block devices directly from the extents of the apex files, you will
 // get encrypted data when reading the block devices.
 //
-// To work around this problem, for each apex file, this function creates a new
-// file in data_dir_/<name>.img that has the size >= size of the apex
-// file. That new file is then pinned, and its extents are saved to
-// metadata_dir_/. Then the function constructs a temporary dm-linear block
-// device using the extents and copy the content of apex file to the block
-// device. By doing so, the block device have unencrypted copy of the apex file.
-//
-// This comes with a size overhead of extra copies of APEX files and wasted
-// space due to the file-system specific granularity of pinned files.
-// (TODO/402256229)
+// To work around this problem, this function creates a new file in
+// data_dir_/apex.img that has the size >= total size of all apex files. That
+// file is then pinned. Its extents are used as a pool to store APEX files.
+// Extents are allocated to each APEX first and then the function constructs a
+// temporary dm-linear block device using the allocated extents and copy the
+// content of apex file to the block device. By doing so, the block device have
+// unencrypted copy of the apex file. The extents allocated for APEX files are
+// stored in metadata_dir/apex.img.metadata.
 Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
     std::span<const ApexFile> apex_files) {
-  std::vector<std::string> new_images;
-  // On error, clean up new backing files
-  auto guard = base::make_scope_guard([&]() {
-    for (const auto& image : new_images) {
-      fsmgr_->DeleteBackingImage(image);
-    }
-  });
+  auto new_apex_size = 0ul;
+  for (const auto& apex_file : apex_files) {
+    auto apex_path = apex_file.GetPath();
+    new_apex_size += OR_RETURN(GetFileSize(apex_path));
+  }
 
+  // APEX files are stored in the APEX storage backed by SplitFiemap
+  // (/data/apex/images/apex.img)
+  auto storage_path = GetApexStoragePath();
+  auto storage = SplitFiemap::Open(storage_path);
+  if (!storage) {
+    LOG(INFO) << "Creating " << storage_path << " for size=" << new_apex_size;
+    storage = SplitFiemap::Create(storage_path, new_apex_size, 0);
+    if (!storage) {
+      return Error() << "Failed to create APEX storage at " << storage_path;
+    }
+  }
+  // The SplitFiemap should be on top of "userdata" partition.
+  auto block_dev = storage->bdev_path();
+  OR_RETURN(EnsureBlockDeviceIsUserdata(block_dev));
+
+  // The locations (aka extents) where APEX files are stored are handled by
+  // ApexStorageMetadata (/metadata/apex/images/apex.img.metadata)
+  auto storage_metadata_path = GetApexStorageMetadataPath();
+  auto metadata = OR_RETURN(ApexStorageMetadata_Load(storage_metadata_path));
+
+  // Calculate free space by subtracting APEX allocation from the entire APEX
+  // Storage.
+  std::vector<Interval> used_extents;
+  for (const auto& apex_image : metadata.images()) {
+    used_extents.append_range(ExtentsToIntervals(apex_image.extents()));
+  }
+  auto free_extents =
+      SubtractIntervals(ExtentsToIntervals(storage->extents()), used_extents);
+  auto free_space = IntervalsGetLength(free_extents);
+
+  // Grow the APEX Storage if necessary.
+  // TODO(b/402256229) Consider shrink. BootCompletedCleanUp() might be a good
+  // chance to shrink.
+  if (free_space < new_apex_size) {
+    LOG(INFO) << "Free space (" << free_space
+              << " bytes) is not enough for incoming APEXes (" << new_apex_size
+              << " bytes). Growing it by " << (new_apex_size - free_space)
+              << " bytes.";
+    if (!storage->Grow(new_apex_size - free_space)) {
+      return Error() << "Failed to grow " << storage_path;
+    }
+    // Update free extents after growing
+    free_extents =
+        SubtractIntervals(ExtentsToIntervals(storage->extents()), used_extents);
+  }
+
+  // Now, okay to store incoming APEX files to the store.
+
+  std::vector<std::string> new_images;
+  new_images.reserve(apex_files.size());
   for (const auto& apex_file : apex_files) {
     // Get a unique "image" name from the apex name
-    auto image_name = AllocateNewName(fsmgr_->GetAllBackingImages(),
-                                      apex_file.GetManifest().name());
+    auto image_name =
+        AllocateNewName(ApexStorageMetadata_GetAllImageNames(metadata),
+                        apex_file.GetManifest().name());
+    new_images.emplace_back(image_name);
 
     auto apex_path = apex_file.GetPath();
     auto file_size = OR_RETURN(GetFileSize(apex_path));
+    auto mtime = OR_RETURN(GetLastModifiedTime(apex_path));
 
-    // Create a pinned file for the apex file using
-    // fiemap::ImageManager::CreateBackingImage() which creates
-    // /data/apex/images/{image_name}.img and saves its extents in
-    // /metadata/apex/images/lp_metadata.
-    auto status = fsmgr_->CreateBackingImage(image_name, file_size, 0);
-    if (!status.is_ok()) {
-      return Error() << "Failed to create a pinned backing file for "
-                     << apex_path;
-    }
-    new_images.emplace_back(image_name);
+    // Allocate extents for the apex from the free extents.
+    // For now, the allocation strategy is as simple as to take from the head.
+    auto [allocated, new_free_extents] =
+        TakeLengthFromStart(free_extents, file_size);
 
-    // Now, copy the apex file to the pinned file thru the block device which
-    // bypasseses the filesystem (/data) and encyryption layer (dm-default-key).
-    // MappedDevice::Open() constructs a dm-linear device from the extents of
-    // the pinned file.
-    auto device = fiemap::MappedDevice::Open(fsmgr_.get(), 10s, image_name);
-    if (!device) {
-      return Error() << "Failed to map the image: " << image_name;
-    }
-    OR_RETURN(SendFile(device->fd(), apex_path, file_size));
+    // Update APEX storage metadata
+    ApexStorageMetadata_AddApexImageInfo(metadata, image_name, allocated,
+                                         mtime);
+    // Update free_extents
+    free_extents = std::move(new_free_extents);
+
+    // Now, copy the apex file to the APEX storage thru the dm-linear block
+    // device which bypasseses the filesystem (/data) and encyryption layer
+    // (dm-default-key).
+    auto dev = OR_RETURN(
+        CreateDmLinear(image_name, block_dev, allocated, /*read_only=*/false));
+    OR_RETURN(SendFile(dev.GetDevPath(), apex_path, file_size));
   }
 
-  guard.Disable();
+  // Now save the metadata.
+  OR_RETURN(ApexStorageMetadata_Save(metadata, storage_metadata_path));
   return new_images;
 }
 
 Result<void> ApexImageManager::DeleteImage(const std::string& image) {
-  if (!fsmgr_->DeleteBackingImage(image)) {
-    return Error() << "Failed to delete backing image: " << image;
+  auto metadata_path = GetApexStorageMetadataPath();
+  auto metadata = OR_RETURN(ApexStorageMetadata_Load(metadata_path));
+
+  auto it = std::find_if(
+      metadata.images().begin(), metadata.images().end(),
+      [&](const auto& image_info) { return image_info.image_name() == image; });
+  if (it == metadata.images().end()) {
+    return Error() << "Failed to delete image " << image << ": not found";
   }
-  return {};
+  // Erase the entry and save the updated metadata
+  metadata.mutable_images()->erase(it);
+  return ApexStorageMetadata_Save(metadata, metadata_path);
 }
 
 Result<void> ApexImageManager::UnmapAndDeleteImage(const std::string& image) {
@@ -237,13 +439,24 @@ Result<void> ApexImageManager::UnmapAndDeleteImage(const std::string& image) {
   return DeleteImage(image);
 }
 
-std::vector<std::string> ApexImageManager::GetAllImages() {
-  return fsmgr_->GetAllBackingImages();
+std::vector<std::string> ApexImageManager::GetAllImages() const {
+  std::vector<std::string> images;
+  auto metadata_path = GetApexStorageMetadataPath();
+  auto metadata = ApexStorageMetadata_Load(metadata_path);
+  if (metadata.ok()) {
+    images.reserve(metadata->images_size());
+    for (const auto& image : metadata->images()) {
+      images.emplace_back(image.image_name());
+    }
+  }
+  return images;
 }
 
 std::optional<std::string> ApexImageManager::FindPinnedApex(
     const ApexFile& apex) const {
-  DeviceMapper& dm = DeviceMapper::Instance();
+  // Get the dm-device name first. Note that dm-linear devices created for APEX
+  // images are named with image names.
+  auto& dm = DeviceMapper::Instance();
   if (!dm.IsDmBlockDevice(apex.GetPath())) {
     return std::nullopt;
   }
@@ -251,43 +464,74 @@ std::optional<std::string> ApexImageManager::FindPinnedApex(
   if (!name) {
     return std::nullopt;
   }
+  // Verify the name is actually one of those APEX images.
   // TODO(405903373): Cache lp_metadata for faster lookup
-  if (fsmgr_->BackingImageExists(name.value())) {
-    return name.value();
+  if (std::ranges::contains(GetAllImages(), *name)) {
+    return *name;
   }
   return std::nullopt;
 }
 
 std::optional<std::string> ApexImageManager::GetMappedPath(
-    const std::string& image) {
+    const std::string& image) const {
+  auto& dm = DeviceMapper::Instance();
+  if (dm.GetState(image) == DmDeviceState::INVALID) {
+    return std::nullopt;
+  }
   std::string path;
-  if (fsmgr_->GetMappedImageDevice(image, &path)) {
+  if (dm.GetDmDevicePathByName(image, &path)) {
     return path;
   }
   return std::nullopt;
 }
 
 Result<std::string> ApexImageManager::MapImage(const std::string& image) {
-  std::string path;
-  if (fsmgr_->GetMappedImageDevice(image, &path)) {
-    return path;
+  // Check if it's already mapped.
+  auto path = GetMappedPath(image);
+  if (path) {
+    return *path;
   }
-  if (!fsmgr_->MapImageDevice(image, 10s, &path)) {
-    return Error() << "Failed to create dm-linear device for " << image;
+
+  // Otherwise, map the image to a dm-linear device:
+  // 1. load the metadata
+  // 2. get the extents of the image
+  // 3. create a dm-linear device with the extent
+
+  auto metadata_path = GetApexStorageMetadataPath();
+  auto metadata = OR_RETURN(ApexStorageMetadata_Load(metadata_path));
+
+  // get extents of the image.
+  auto it = std::find_if(
+      metadata.images().begin(), metadata.images().end(),
+      [&](const auto& image_info) { return image_info.image_name() == image; });
+  if (it == metadata.images().end()) {
+    return Error() << "Failed to find image " << image;
   }
-  return path;
+  auto extents = ExtentsToIntervals(it->extents());
+  auto mtime = it->mtime();
+
+  // create a dm-linear device on the userdata partition
+  auto dev = OR_RETURN(
+      CreateDmLinear(image, kUserdataDevice, extents, /*read_only=*/true));
+  auto dev_path = dev.GetDevPath();
+  OR_RETURN(SetLastModifiedTime(dev_path, mtime));
+  dev.Release();  // dm-linear device should not be deleted on exit
+  return dev_path;
 }
 
 Result<void> ApexImageManager::UnmapImage(const std::string& image) {
-  if (!fsmgr_->UnmapImageDevice(image)) {
-    return Error() << "Failed to unmap dm-linear device for " << image;
+  // Dm-linear device mapped for an APEX image is named after the image name.
+  auto& dm = DeviceMapper::Instance();
+  if (!dm.DeleteDevice(image)) {
+    return Error() << "Failed to unmap image " << image;
   }
   return {};
 }
 
 Result<void> ApexImageManager::UnmapImageIfExists(const std::string& image) {
-  if (fsmgr_->IsImageMapped(image)) {
-    return UnmapImage(image);
+  auto& dm = DeviceMapper::Instance();
+  if (!dm.DeleteDeviceIfExists(image)) {
+    return Error() << "Failed to unmap image " << image;
   }
   return {};
 }
@@ -299,6 +543,14 @@ std::string ApexImageManager::GetApexListFile(ApexListType list_type) const {
     case ApexListType::BACKUP:
       return metadata_dir_ + "/backup";
   }
+}
+
+std::string ApexImageManager::GetApexStoragePath() const {
+  return data_dir_ + "/apex.img";
+}
+
+std::string ApexImageManager::GetApexStorageMetadataPath() const {
+  return metadata_dir_ + "/apex.img.metadata";
 }
 
 Result<void> ApexImageManager::UpdateApexList(
@@ -325,7 +577,7 @@ Result<void> ApexImageManager::UpdateApexList(
 }
 
 Result<std::vector<ApexListEntry>> ApexImageManager::GetApexList(
-    ApexListType list_type) {
+    ApexListType list_type) const {
   auto list_file = GetApexListFile(list_type);
   return ReadImageList(list_file);
 }

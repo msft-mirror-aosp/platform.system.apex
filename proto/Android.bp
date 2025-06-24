@@ -118,6 +118,15 @@ cc_library_static {
     srcs: ["apex_image_list.proto"],
 }
 
+cc_library_static {
+    name: "lib_apex_storage_metadata_proto",
+    host_supported: true,
+    proto: {
+        export_proto_headers: true,
+    },
+    srcs: ["apex_storage_metadata.proto"],
+}
+
 genrule {
     name: "apex-protos",
     tools: ["soong_zip"],

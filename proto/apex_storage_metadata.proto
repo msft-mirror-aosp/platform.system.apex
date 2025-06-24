@@ -1,0 +1,53 @@
+/*
+ * Copyright (C) 2025 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+syntax = "proto3";
+
+package apex.proto;
+
+option java_package = "com.android.apex";
+option java_outer_classname = "Protos";
+
+// Represents all of APEX images stored in the APEX storage. Metadata is stored
+// in the /metadata partition so that apexd-bootstrap can access them before the
+// /data partition is ready.
+message ApexStorageMetadata {
+
+  message Extent {
+    // Position where this extent starts in bytes.
+    fixed64 offset = 1;
+
+    // Length of this extent in bytes.
+    fixed64 length = 2;
+  }
+
+  message ApexImageInfo {
+    // The name of the apex image, managed by ApexImageManager. Not same as the
+    // apex name.
+    string image_name = 1;
+
+    // Represents FIEMAP extents. Offset/length fields of in bytes, for easy
+    // conversion from/to fiemap_extent
+    repeated Extent extents = 2;
+
+    // The modification time of the apex image. This is the number of seconds
+    // since the epoch.
+    fixed64 mtime = 3;
+  }
+
+  // The list of apex image info
+  repeated ApexImageInfo images = 1;
+}

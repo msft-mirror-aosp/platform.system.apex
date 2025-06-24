@@ -17,7 +17,6 @@
 #pragma once
 
 #include <android-base/result.h>
-#include <libfiemap/image_manager.h>
 
 #include <memory>
 #include <span>
@@ -63,7 +62,7 @@ class ApexImageManager {
       std::span<const ApexFile> apex_files);
   base::Result<void> DeleteImage(const std::string& image);
   base::Result<void> UnmapAndDeleteImage(const std::string& image);
-  std::vector<std::string> GetAllImages();
+  std::vector<std::string> GetAllImages() const;
 
   // True if the apex is backed by a dm-linear device created by
   // ApexImageManager
@@ -77,7 +76,7 @@ class ApexImageManager {
 
   // Returns the path of the block device if mapped. Similar to MapImage(), but
   // this doesn't create a block device if not mapped already.
-  std::optional<std::string> GetMappedPath(const std::string& image);
+  std::optional<std::string> GetMappedPath(const std::string& image) const;
 
   // Creates a dm-linear block device for a pinned apex and returns the path of
   // the created block device.
@@ -87,7 +86,8 @@ class ApexImageManager {
 
   base::Result<void> UpdateApexList(ApexListType list_type,
                                     const std::vector<ApexListEntry>& entries);
-  base::Result<std::vector<ApexListEntry>> GetApexList(ApexListType list_type);
+  base::Result<std::vector<ApexListEntry>> GetApexList(
+      ApexListType list_type) const;
 
   static std::unique_ptr<ApexImageManager> Create(
       const std::string& metadata_images_dir,
@@ -98,10 +98,11 @@ class ApexImageManager {
                    const std::string& data_dir);
 
   std::string GetApexListFile(ApexListType list_type) const;
+  std::string GetApexStorageMetadataPath() const;
+  std::string GetApexStoragePath() const;
 
   std::string metadata_dir_;
   std::string data_dir_;
-  std::unique_ptr<fiemap::IImageManager> fsmgr_;
 };
 
 void InitializeImageManager(ApexImageManager* image_manager);
