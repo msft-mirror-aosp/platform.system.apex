@@ -247,11 +247,6 @@ Result<ApexSession> ApexSessionManager::GetSession(int session_id) const {
 std::vector<ApexSession> ApexSessionManager::GetSessions() const {
   std::vector<ApexSession> sessions;
 
-  // Return successfully without warning if the directory doesn't exist yet.
-  if (access(sessions_base_dir_.c_str(), F_OK) != 0) {
-    return sessions;
-  }
-
   auto walk_status = WalkDir(sessions_base_dir_, [&](const auto& entry) {
     if (!entry.is_directory()) {
       return;
@@ -269,7 +264,10 @@ std::vector<ApexSession> ApexSessionManager::GetSessions() const {
   });
 
   if (!walk_status.ok()) {
-    LOG(WARNING) << walk_status.error();
+    // Return successfully without warning if the directory doesn't exist yet.
+    if (walk_status.error().code() != ENOENT) {
+      LOG(WARNING) << walk_status.error();
+    }
   }
 
   return sessions;
