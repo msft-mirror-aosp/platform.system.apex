@@ -1775,11 +1775,6 @@ void MarkBootCompleted() { ApexdLifecycle::GetInstance().MarkBootCompleted(); }
 // Returns the name list of the apexes in the session on success.
 Result<std::vector<std::string>> TryActivateStagedSession(
     const ApexSession& session) {
-  std::string build_fingerprint = GetProperty(kBuildFingerprintSysprop, "");
-  if (session.GetBuildFingerprint().compare(build_fingerprint) != 0) {
-    return Error() << "APEX build fingerprint has changed";
-  }
-
   // If device supports fs-checkpoint, then apex session should only be
   // installed when in checkpoint-mode. Otherwise, we will not be able to
   // revert /data on error.
@@ -1848,6 +1843,25 @@ Result<std::vector<std::string>> TryActivateStagedSession(
 // failed and continues activation process. It's higher level component (e.g.
 // system_server) that needs to handle the failures.
 void ActivateStagedSessions(std::vector<ApexSession>&& sessions) {
+  auto fail = [](ApexSession& session, const std::string& message) {
+    LOG(ERROR) << "Fail: session " << session.GetId() << ": " << message;
+    session.SetErrorMessage(message);
+    LOG(WARNING) << "Marking session " << session.GetId() << " as failed.";
+    auto st = session.UpdateStateAndCommit(SessionState::ACTIVATION_FAILED);
+    if (!st.ok()) {
+      LOG(WARNING) << "Failed to mark session " << session.GetId()
+                   << " as failed : " << st.error();
+    }
+  };
+
+  // Sessions from the previous build fingerprint should be removed first.
+  std::string build_fingerprint = GetProperty(kBuildFingerprintSysprop, "");
+  for (auto& session : sessions) {
+    if (session.GetBuildFingerprint().compare(build_fingerprint) != 0) {
+      fail(session, "APEX build fingerprint has changed");
+    }
+  }
+
   std::vector<std::reference_wrapper<ApexSession>> sessions_to_activate;
   for (auto& session : sessions) {
     if (session.GetState() == SessionState::STAGED) {
@@ -1873,14 +1887,7 @@ void ActivateStagedSessions(std::vector<ApexSession>&& sessions) {
     auto session_id = session.GetId();
     auto packages = TryActivateStagedSession(session);
     if (!packages.ok()) {
-      LOG(ERROR) << packages.error();
-      session.SetErrorMessage(packages.error().message());
-      LOG(WARNING) << "Marking session " << session_id << " as failed.";
-      auto st = session.UpdateStateAndCommit(SessionState::ACTIVATION_FAILED);
-      if (!st.ok()) {
-        LOG(WARNING) << "Failed to mark session " << session_id
-                     << " as failed : " << st.error();
-      }
+      fail(session, packages.error().message());
       continue;
     }
 
