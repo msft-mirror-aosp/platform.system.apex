@@ -3653,6 +3653,20 @@ TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent) {
               HasSubstr("APEX build fingerprint has changed"));
 }
 
+TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent_Verified) {
+  auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
+  ASSERT_RESULT_OK(apex_session);
+  apex_session->SetBuildFingerprint("wrong fingerprint");
+  ASSERT_RESULT_OK(apex_session->UpdateStateAndCommit(SessionState::VERIFIED));
+
+  OnStart();
+
+  apex_session = GetSessionManager()->GetSession(123);
+  ASSERT_RESULT_OK(apex_session);
+  ASSERT_THAT(apex_session->GetErrorMessage(),
+              HasSubstr("APEX build fingerprint has changed"));
+}
+
 TEST_F(ApexActivationFailureTests, ApexFileMissingInStagingDirectory) {
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
   ASSERT_RESULT_OK(apex_session);
