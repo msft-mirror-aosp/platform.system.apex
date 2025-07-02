@@ -50,4 +50,7 @@ message ApexStorageMetadata {
 
   // The list of apex image info
   repeated ApexImageInfo images = 1;
+
+  // Allocation alignment in bytes
+  fixed64 allocation_alignment = 2;
 }

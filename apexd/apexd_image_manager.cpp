@@ -45,6 +45,7 @@ using android::dm::DeviceMapper;
 using android::dm::DmDeviceState;
 using android::dm::DmTable;
 using android::dm::DmTargetLinear;
+using android::fiemap::FiemapWriter;
 using android::fiemap::SplitFiemap;
 using apex::proto::ApexStorageMetadata;
 
@@ -282,6 +283,20 @@ std::vector<Interval> ExtentsToIntervals(const auto& extents) {
   return intervals;
 }
 
+uint64_t DeterminePinnedFileAlignment(const std::string& data_dir) {
+  std::string tempfile = data_dir + "/tempfile";
+  // Create the smallest file possible (one block).
+  auto writer = FiemapWriter::Open(tempfile, 1);
+  if (!writer) {
+    // fallback to 1, which leads to allocating a pinned file per apex.
+    return 1;
+  }
+  auto intervals = ExtentsToIntervals(writer->extents());
+  auto allocated_size = IntervalsGetLength(intervals);
+  unlink(tempfile.c_str());
+  return allocated_size;
+}
+
 }  // namespace
 
 std::vector<ApexListEntry> UpdateApexListWithNewEntries(
@@ -328,6 +343,21 @@ ApexImageManager::ApexImageManager(const std::string& metadata_dir,
 // stored in metadata_dir/apex.img.metadata.
 Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
     std::span<const ApexFile> apex_files) {
+  // The locations (aka extents) where APEX files are stored are handled by
+  // ApexStorageMetadata (/metadata/apex/images/apex.img.metadata)
+  auto storage_metadata_path = GetApexStorageMetadataPath();
+  auto metadata = OR_RETURN(ApexStorageMetadata_Load(storage_metadata_path));
+
+  // Determine the allocation alignment of pinned files first. If the
+  // alignment is small (e.g. 2 MiB), use the one backing/pinned file per APEX
+  // file strategy. Otherwise, we create a single split-file (apex.img) and put
+  // all APEX files in it.
+  if (metadata.allocation_alignment() == 0) {
+    auto alignment = DeterminePinnedFileAlignment(data_dir_);
+    metadata.set_allocation_alignment(alignment);
+    LOG(INFO) << "Allocation alignment is " << alignment;
+  }
+
   auto new_apex_size = 0ul;
   for (const auto& apex_file : apex_files) {
     auto apex_path = apex_file.GetPath();
@@ -348,11 +378,6 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
   // The SplitFiemap should be on top of "userdata" partition.
   auto block_dev = storage->bdev_path();
   OR_RETURN(EnsureBlockDeviceIsUserdata(block_dev));
-
-  // The locations (aka extents) where APEX files are stored are handled by
-  // ApexStorageMetadata (/metadata/apex/images/apex.img.metadata)
-  auto storage_metadata_path = GetApexStorageMetadataPath();
-  auto metadata = OR_RETURN(ApexStorageMetadata_Load(storage_metadata_path));
 
   // Calculate free space by subtracting APEX allocation from the entire APEX
   // Storage.
