@@ -21,15 +21,19 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "apexd_image_manager_private.h"
 #include "apexd_test_utils.h"
 #include "apexd_utils.h"
 
 using namespace std::literals;
 
 using android::base::make_scope_guard;
+using android::base::testing::HasError;
 using android::base::testing::HasValue;
 using android::base::testing::Ok;
+using android::base::testing::WithMessage;
 using testing::Eq;
+using testing::HasSubstr;
 using testing::IsEmpty;
 using testing::Optional;
 using testing::SizeIs;
@@ -246,6 +250,29 @@ TEST(UpdateApexListWithNewEntries, ReplaceAll) {
       {"image2_1", "apex2"},
   };
   ASSERT_EQ(UpdateApexListWithNewEntries(list, new_entries), updated);
+}
+
+TEST(FreeSpaceAllocator, CreateImage_AllocateFromStart) {
+  FreeSpaceAllocator alloc{{{0, 100}}};
+  EXPECT_THAT(alloc.CreateImage("a", 30),
+              HasValue(std::vector<Interval>{{0, 30}}));
+  EXPECT_THAT(alloc.CreateImage("b", 30),
+              HasValue(std::vector<Interval>{{30, 30}}));
+}
+
+TEST(FreeSpaceAllocator, CreateImage_NoSpace) {
+  FreeSpaceAllocator alloc{{{0, 100}}};
+  EXPECT_THAT(alloc.CreateImage("a", 200),
+              HasError(WithMessage(HasSubstr("Fail to allocate"))));
+}
+
+TEST(FreeSpaceAllocator, CreateImage_AllocateFromStart_Fragmented) {
+  //            0    30        100           200
+  // free:      [    ]         [             ]
+  // alloc(50): ######         ####
+  FreeSpaceAllocator alloc{{{0, 30}, {100, 100}}};
+  EXPECT_THAT(alloc.CreateImage("a", 50),
+              HasValue(std::vector<Interval>{{0, 30}, {100, 20}}));
 }
 
 }  // namespace android::apex

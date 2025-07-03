@@ -32,6 +32,7 @@
 #include "apex_storage_metadata.pb.h"
 #include "apexd.h"
 #include "apexd_dm.h"
+#include "apexd_image_manager_private.h"
 #include "apexd_utils.h"
 #include "interval.h"
 
@@ -297,6 +298,15 @@ uint64_t DeterminePinnedFileAlignment(const std::string& data_dir) {
   return allocated_size;
 }
 
+std::vector<Interval> ApexStorageMetadata_GetUsedExtents(
+    const ApexStorageMetadata& metadata) {
+  std::vector<Interval> used_extents;
+  for (const auto& apex_image : metadata.images()) {
+    used_extents.append_range(ExtentsToIntervals(apex_image.extents()));
+  }
+  return used_extents;
+}
+
 }  // namespace
 
 std::vector<ApexListEntry> UpdateApexListWithNewEntries(
@@ -315,6 +325,63 @@ std::vector<ApexListEntry> UpdateApexListWithNewEntries(
   // Add new entries to the list
   list.append_range(new_entries);
   return list;
+}
+
+Result<std::unique_ptr<SplitFiemap>> OpenOrCreateApexStorage(
+    const std::string& storage_path, uint64_t initial_size) {
+  auto storage = SplitFiemap::Open(storage_path);
+  if (!storage) {
+    storage = SplitFiemap::Create(storage_path, initial_size, 0);
+    if (!storage) {
+      return Error() << "Failed to create APEX storage at " << storage_path;
+    }
+  }
+  // The SplitFiemap should be on top of "userdata" partition.
+  auto block_dev = storage->bdev_path();
+  OR_RETURN(EnsureBlockDeviceIsUserdata(block_dev));
+  return storage;
+}
+
+Result<std::unique_ptr<FreeSpaceAllocator>> FreeSpaceAllocator::Create(
+    const std::string& storage_path, uint64_t initial_size,
+    const std::vector<Interval>& used_extents) {
+  auto storage = OR_RETURN(OpenOrCreateApexStorage(storage_path, initial_size));
+  // Calculate free space by subtracting APEX allocation from the entire APEX
+  // Storage.
+  auto free_extents =
+      SubtractIntervals(ExtentsToIntervals(storage->extents()), used_extents);
+  auto free_space = IntervalsGetLength(free_extents);
+
+  // Grow the APEX Storage if necessary.
+  // TODO(b/402256229) Consider shrink. BootCompletedCleanUp() might be a good
+  // chance to shrink.
+  if (free_space < initial_size) {
+    LOG(INFO) << "Free space (" << free_space
+              << " bytes) is not enough for incoming APEXes (" << initial_size
+              << " bytes). Growing it by " << (initial_size - free_space)
+              << " bytes.";
+    if (!storage->Grow(initial_size - free_space)) {
+      return Error() << "Failed to grow apex.img";
+    }
+    // Update free extents after growing
+    free_extents =
+        SubtractIntervals(ExtentsToIntervals(storage->extents()), used_extents);
+  }
+  return std::make_unique<FreeSpaceAllocator>(std::move(free_extents));
+}
+
+Result<std::vector<Interval>> FreeSpaceAllocator::CreateImage(
+    const std::string& image_name, uint64_t size) {
+  // Allocate extents for the apex from the free extents.
+  // For now, the allocation strategy is as simple as to take from the head.
+  auto [allocated, new_free_extents] = TakeLengthFromStart(free_extents, size);
+  if (IntervalsGetLength(allocated) != size) {
+    return Error() << "Fail to allocate " << image_name << " (" << size
+                   << ") from apex.img";
+  }
+  // Update free_extents
+  free_extents = std::move(new_free_extents);
+  return allocated;
 }
 
 ApexImageManager::ApexImageManager(const std::string& metadata_dir,
@@ -364,46 +431,10 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
     new_apex_size += OR_RETURN(GetFileSize(apex_path));
   }
 
-  // APEX files are stored in the APEX storage backed by SplitFiemap
-  // (/data/apex/images/apex.img)
-  auto storage_path = GetApexStoragePath();
-  auto storage = SplitFiemap::Open(storage_path);
-  if (!storage) {
-    LOG(INFO) << "Creating " << storage_path << " for size=" << new_apex_size;
-    storage = SplitFiemap::Create(storage_path, new_apex_size, 0);
-    if (!storage) {
-      return Error() << "Failed to create APEX storage at " << storage_path;
-    }
-  }
-  // The SplitFiemap should be on top of "userdata" partition.
-  auto block_dev = storage->bdev_path();
-  OR_RETURN(EnsureBlockDeviceIsUserdata(block_dev));
-
-  // Calculate free space by subtracting APEX allocation from the entire APEX
-  // Storage.
-  std::vector<Interval> used_extents;
-  for (const auto& apex_image : metadata.images()) {
-    used_extents.append_range(ExtentsToIntervals(apex_image.extents()));
-  }
-  auto free_extents =
-      SubtractIntervals(ExtentsToIntervals(storage->extents()), used_extents);
-  auto free_space = IntervalsGetLength(free_extents);
-
-  // Grow the APEX Storage if necessary.
-  // TODO(b/402256229) Consider shrink. BootCompletedCleanUp() might be a good
-  // chance to shrink.
-  if (free_space < new_apex_size) {
-    LOG(INFO) << "Free space (" << free_space
-              << " bytes) is not enough for incoming APEXes (" << new_apex_size
-              << " bytes). Growing it by " << (new_apex_size - free_space)
-              << " bytes.";
-    if (!storage->Grow(new_apex_size - free_space)) {
-      return Error() << "Failed to grow " << storage_path;
-    }
-    // Update free extents after growing
-    free_extents =
-        SubtractIntervals(ExtentsToIntervals(storage->extents()), used_extents);
-  }
+  auto storage_path = GetApexStoragePath("apex.img");
+  auto used_extents = ApexStorageMetadata_GetUsedExtents(metadata);
+  auto image_creator = OR_RETURN(
+      FreeSpaceAllocator::Create(storage_path, new_apex_size, used_extents));
 
   // Now, okay to store incoming APEX files to the store.
 
@@ -420,22 +451,16 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
     auto file_size = OR_RETURN(GetFileSize(apex_path));
     auto mtime = OR_RETURN(GetLastModifiedTime(apex_path));
 
-    // Allocate extents for the apex from the free extents.
-    // For now, the allocation strategy is as simple as to take from the head.
-    auto [allocated, new_free_extents] =
-        TakeLengthFromStart(free_extents, file_size);
+    auto extents = OR_RETURN(image_creator->CreateImage(image_name, file_size));
 
     // Update APEX storage metadata
-    ApexStorageMetadata_AddApexImageInfo(metadata, image_name, allocated,
-                                         mtime);
-    // Update free_extents
-    free_extents = std::move(new_free_extents);
+    ApexStorageMetadata_AddApexImageInfo(metadata, image_name, extents, mtime);
 
     // Now, copy the apex file to the APEX storage thru the dm-linear block
     // device which bypasseses the filesystem (/data) and encyryption layer
     // (dm-default-key).
-    auto dev = OR_RETURN(
-        CreateDmLinear(image_name, block_dev, allocated, /*read_only=*/false));
+    auto dev = OR_RETURN(CreateDmLinear(image_name, kUserdataDevice, extents,
+                                        /*read_only=*/false));
     OR_RETURN(SendFile(dev.GetDevPath(), apex_path, file_size));
   }
 
@@ -570,8 +595,9 @@ std::string ApexImageManager::GetApexListFile(ApexListType list_type) const {
   }
 }
 
-std::string ApexImageManager::GetApexStoragePath() const {
-  return data_dir_ + "/apex.img";
+std::string ApexImageManager::GetApexStoragePath(
+    const std::string& image_name) const {
+  return data_dir_ + "/" + image_name;
 }
 
 std::string ApexImageManager::GetApexStorageMetadataPath() const {

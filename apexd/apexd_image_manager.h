@@ -99,7 +99,7 @@ class ApexImageManager {
 
   std::string GetApexListFile(ApexListType list_type) const;
   std::string GetApexStorageMetadataPath() const;
-  std::string GetApexStoragePath() const;
+  std::string GetApexStoragePath(const std::string& image_name) const;
 
   std::string metadata_dir_;
   std::string data_dir_;
