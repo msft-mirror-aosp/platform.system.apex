@@ -36,6 +36,7 @@ using testing::Eq;
 using testing::HasSubstr;
 using testing::IsEmpty;
 using testing::Optional;
+using testing::ResultOf;
 using testing::SizeIs;
 
 namespace android::apex {
@@ -263,7 +264,7 @@ TEST(FreeSpaceAllocator, CreateImage_AllocateFromStart) {
 TEST(FreeSpaceAllocator, CreateImage_NoSpace) {
   FreeSpaceAllocator alloc{{{0, 100}}};
   EXPECT_THAT(alloc.CreateImage("a", 200),
-              HasError(WithMessage(HasSubstr("Fail to allocate"))));
+              HasError(WithMessage(HasSubstr("Failed to allocate"))));
 }
 
 TEST(FreeSpaceAllocator, CreateImage_AllocateFromStart_Fragmented) {
@@ -273,6 +274,40 @@ TEST(FreeSpaceAllocator, CreateImage_AllocateFromStart_Fragmented) {
   FreeSpaceAllocator alloc{{{0, 30}, {100, 100}}};
   EXPECT_THAT(alloc.CreateImage("a", 50),
               HasValue(std::vector<Interval>{{0, 30}, {100, 20}}));
+}
+
+TEST(ApexStoragePerImageCreator, CreateImage) {
+  TemporaryDir data_dir;
+  auto creator = ApexStoragePerImageCreator(data_dir.path);
+  EXPECT_THAT(creator.CreateImage("a", 100), Ok());
+  EXPECT_THAT(creator.CreateImage("b", 100), Ok());
+  EXPECT_TRUE(std::filesystem::exists(data_dir.path + "/a"s));
+  EXPECT_TRUE(std::filesystem::exists(data_dir.path + "/b"s));
+}
+
+TEST(ApexStoragePerImageCreator, CreateImage_Overwrite) {
+  TemporaryDir data_dir;
+  auto creator = ApexStoragePerImageCreator(data_dir.path);
+  EXPECT_THAT(creator.CreateImage("a", 100),
+              HasValue(ResultOf("length", &IntervalsGetLength, Eq(100))));
+  EXPECT_THAT(creator.CreateImage("a", 200),
+              HasValue(ResultOf("length", &IntervalsGetLength, Eq(200))));
+}
+
+TEST(ApexStoragePerImageCreator, CleanUpOnExit) {
+  TemporaryDir data_dir;
+  {
+    auto creator = ApexStoragePerImageCreator(data_dir.path);
+    EXPECT_THAT(creator.CreateImage("a", 100), Ok());
+  }
+  EXPECT_FALSE(std::filesystem::exists(data_dir.path + "/a"s));
+
+  {
+    auto creator = ApexStoragePerImageCreator(data_dir.path);
+    EXPECT_THAT(creator.CreateImage("a", 100), Ok());
+    creator.MarkDone();
+  }
+  EXPECT_TRUE(std::filesystem::exists(data_dir.path + "/a"s));
 }
 
 }  // namespace android::apex

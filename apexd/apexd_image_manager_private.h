@@ -50,4 +50,22 @@ class FreeSpaceAllocator : public ImageCreator {
   std::vector<Interval> free_extents;
 };
 
+class ApexStoragePerImageCreator : public ImageCreator {
+ public:
+  ApexStoragePerImageCreator(const std::string& data_dir)
+      : data_dir(data_dir) {}
+
+  ~ApexStoragePerImageCreator();
+
+  base::Result<std::vector<Interval>> CreateImage(const std::string& image_name,
+                                                  uint64_t size) override;
+
+  void MarkDone() override { intermediate_files.clear(); }
+
+ private:
+  std::string data_dir;
+  // These files will be deleted on exit unless MarkDone() is called.
+  std::vector<std::string> intermediate_files;
+};
+
 }  // namespace android::apex
