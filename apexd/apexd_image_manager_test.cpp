@@ -267,13 +267,19 @@ TEST(FreeSpaceAllocator, CreateImage_NoSpace) {
               HasError(WithMessage(HasSubstr("Failed to allocate"))));
 }
 
-TEST(FreeSpaceAllocator, CreateImage_AllocateFromStart_Fragmented) {
-  //            0    30        100           200
-  // free:      [    ]         [             ]
-  // alloc(50): ######         ####
+TEST(FreeSpaceAllocator, CreateImage_AllocateTheBiggestExtentFirst) {
+  //            0    30        100                200
+  // free:      [    ]         [                  ]
+  // alloc(50):                ##########
+  // alloc(30):                          ######
+  // alloc(40): ######                         ##
   FreeSpaceAllocator alloc{{{0, 30}, {100, 100}}};
   EXPECT_THAT(alloc.CreateImage("a", 50),
-              HasValue(std::vector<Interval>{{0, 30}, {100, 20}}));
+              HasValue(std::vector<Interval>{{100, 50}}));
+  EXPECT_THAT(alloc.CreateImage("b", 30),
+              HasValue(std::vector<Interval>{{150, 30}}));
+  EXPECT_THAT(alloc.CreateImage("c", 40),
+              HasValue(std::vector<Interval>{{0, 30}, {180, 10}}));
 }
 
 TEST(ApexStoragePerImageCreator, CreateImage) {

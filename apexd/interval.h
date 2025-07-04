@@ -57,6 +57,12 @@ struct Interval {
   }
 };
 
+struct IntervalComparatorByLength {
+  bool operator()(const Interval &a, const Interval &b) {
+    return a.length != b.length ? a.length < b.length : a.offset < b.offset;
+  }
+};
+
 uint64_t IntervalsGetLength(const std::vector<Interval> &intervals);
 
 std::vector<Interval> SubtractIntervals(const std::vector<Interval> &list_a,

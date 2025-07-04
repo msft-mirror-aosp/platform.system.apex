@@ -382,16 +382,27 @@ Result<std::unique_ptr<FreeSpaceAllocator>> FreeSpaceAllocator::Create(
 
 Result<std::vector<Interval>> FreeSpaceAllocator::CreateImage(
     const std::string& image_name, uint64_t size) {
-  // Allocate extents for the apex from the free extents.
-  // For now, the allocation strategy is as simple as to take from the head.
-  auto [allocated, new_free_extents] = TakeLengthFromStart(free_extents, size);
-  if (IntervalsGetLength(allocated) != size) {
-    return Error() << "Failed to allocate " << image_name << " (" << size
-                   << ") from apex.img";
+  std::vector<Interval> allocated;
+  while (size > 0) {
+    if (free_extents.empty()) {
+      return Error() << "Failed to allocate " << image_name << " (" << size
+                     << " bytes).";
+    }
+
+    // free_extents is sorted with the largest one first, so we can just take
+    // from the front/top.
+    Interval largest_extent = free_extents.top();
+    free_extents.pop();
+
+    auto [taken, remaining] = largest_extent.SplitAtLength(size);
+    allocated.push_back(taken);
+    size -= taken.length;
+
+    if (remaining.length > 0) {
+      free_extents.push(remaining);
+    }
   }
-  // Update free_extents
-  free_extents = std::move(new_free_extents);
-  return allocated;
+  return NormalizeIntervals(allocated);
 }
 
 ApexStoragePerImageCreator::~ApexStoragePerImageCreator() {

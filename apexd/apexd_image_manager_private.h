@@ -19,6 +19,7 @@
 #include <android-base/result.h>
 
 #include <cstdint>
+#include <queue>
 #include <string>
 #include <vector>
 
@@ -37,7 +38,7 @@ struct ImageCreator {
 class FreeSpaceAllocator : public ImageCreator {
  public:
   FreeSpaceAllocator(std::vector<Interval>&& free_extents)
-      : free_extents(std::move(free_extents)) {}
+      : free_extents(IntervalComparatorByLength(), std::move(free_extents)) {}
 
   base::Result<std::vector<Interval>> CreateImage(const std::string& image_name,
                                                   uint64_t size) override;
@@ -47,7 +48,10 @@ class FreeSpaceAllocator : public ImageCreator {
       const std::vector<Interval>& used_extents);
 
  private:
-  std::vector<Interval> free_extents;
+  // The longest extent/interval is the top element.
+  std::priority_queue<Interval, std::vector<Interval>,
+                      IntervalComparatorByLength>
+      free_extents;
 };
 
 class ApexStoragePerImageCreator : public ImageCreator {
