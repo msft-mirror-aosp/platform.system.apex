@@ -21,17 +21,22 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "apexd_image_manager_private.h"
 #include "apexd_test_utils.h"
 #include "apexd_utils.h"
 
 using namespace std::literals;
 
 using android::base::make_scope_guard;
+using android::base::testing::HasError;
 using android::base::testing::HasValue;
 using android::base::testing::Ok;
+using android::base::testing::WithMessage;
 using testing::Eq;
+using testing::HasSubstr;
 using testing::IsEmpty;
 using testing::Optional;
+using testing::ResultOf;
 using testing::SizeIs;
 
 namespace android::apex {
@@ -246,6 +251,69 @@ TEST(UpdateApexListWithNewEntries, ReplaceAll) {
       {"image2_1", "apex2"},
   };
   ASSERT_EQ(UpdateApexListWithNewEntries(list, new_entries), updated);
+}
+
+TEST(FreeSpaceAllocator, CreateImage_AllocateFromStart) {
+  FreeSpaceAllocator alloc{{{0, 100}}};
+  EXPECT_THAT(alloc.CreateImage("a", 30),
+              HasValue(std::vector<Interval>{{0, 30}}));
+  EXPECT_THAT(alloc.CreateImage("b", 30),
+              HasValue(std::vector<Interval>{{30, 30}}));
+}
+
+TEST(FreeSpaceAllocator, CreateImage_NoSpace) {
+  FreeSpaceAllocator alloc{{{0, 100}}};
+  EXPECT_THAT(alloc.CreateImage("a", 200),
+              HasError(WithMessage(HasSubstr("Failed to allocate"))));
+}
+
+TEST(FreeSpaceAllocator, CreateImage_AllocateTheBiggestExtentFirst) {
+  //            0    30        100                200
+  // free:      [    ]         [                  ]
+  // alloc(50):                ##########
+  // alloc(30):                          ######
+  // alloc(40): ######                         ##
+  FreeSpaceAllocator alloc{{{0, 30}, {100, 100}}};
+  EXPECT_THAT(alloc.CreateImage("a", 50),
+              HasValue(std::vector<Interval>{{100, 50}}));
+  EXPECT_THAT(alloc.CreateImage("b", 30),
+              HasValue(std::vector<Interval>{{150, 30}}));
+  EXPECT_THAT(alloc.CreateImage("c", 40),
+              HasValue(std::vector<Interval>{{0, 30}, {180, 10}}));
+}
+
+TEST(ApexStoragePerImageCreator, CreateImage) {
+  TemporaryDir data_dir;
+  auto creator = ApexStoragePerImageCreator(data_dir.path);
+  EXPECT_THAT(creator.CreateImage("a", 100), Ok());
+  EXPECT_THAT(creator.CreateImage("b", 100), Ok());
+  EXPECT_TRUE(std::filesystem::exists(data_dir.path + "/a"s));
+  EXPECT_TRUE(std::filesystem::exists(data_dir.path + "/b"s));
+}
+
+TEST(ApexStoragePerImageCreator, CreateImage_Overwrite) {
+  TemporaryDir data_dir;
+  auto creator = ApexStoragePerImageCreator(data_dir.path);
+  EXPECT_THAT(creator.CreateImage("a", 100),
+              HasValue(ResultOf("length", &IntervalsGetLength, Eq(100))));
+  EXPECT_THAT(creator.CreateImage("a", 200),
+              HasValue(ResultOf("length", &IntervalsGetLength, Eq(200))));
+}
+
+TEST(ApexStoragePerImageCreator, CleanUpOnExit) {
+  TemporaryDir data_dir;
+  {
+    auto creator = ApexStoragePerImageCreator(data_dir.path);
+    EXPECT_THAT(creator.CreateImage("a", 100), Ok());
+  }
+  EXPECT_FALSE(std::filesystem::exists(data_dir.path + "/a"s));
+
+  {
+    auto creator = ApexStoragePerImageCreator(data_dir.path);
+    EXPECT_THAT(creator.CreateImage("a", 100), Ok());
+    creator.MarkDone();
+  }
+  EXPECT_TRUE(std::filesystem::exists(data_dir.path + "/a"s));
 }
 
 }  // namespace android::apex
