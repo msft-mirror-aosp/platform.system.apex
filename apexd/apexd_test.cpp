@@ -2722,6 +2722,15 @@ TEST_F(ApexdMountTest,
                                    ApexInfoXmlEq(apex_info_xml_2)));
 }
 
+TEST_F(ApexdMountTest, OnStartSetsStatusAsStarting) {
+  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
+  ASSERT_THAT(ApexFileRepository::GetInstance().AddPreInstalledApex(
+                  {{GetPartition(), GetBuiltInDir()}}),
+              Ok());
+  OnStart();
+  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
+}
+
 TEST_F(ApexdMountTest, OnStartOnlyPreInstalledApexes) {
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
@@ -2733,7 +2742,6 @@ TEST_F(ApexdMountTest, OnStartOnlyPreInstalledApexes) {
 
   OnStart();
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.test_package",
@@ -2754,7 +2762,6 @@ TEST_F(ApexdMountTest, OnStartDataHasHigherVersion) {
 
   OnStart();
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.test_package",
@@ -2792,7 +2799,6 @@ TEST_F(ApexdMountTest, OnStartDataHasSameVersion) {
 
   OnStart();
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.test_package",
@@ -2821,7 +2827,6 @@ TEST_F(ApexdMountTest, OnStartSystemHasHigherVersion) {
 
   OnStart();
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.test_package",
@@ -2850,7 +2855,6 @@ TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToBuiltIn) {
 
   OnStart();
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.test_package",
@@ -2886,7 +2890,6 @@ TEST_F(ApexdMountTest, OnStartApexOnDataHasWrongKeyFallsBackToBuiltIn) {
 
   OnStart();
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.test_package",
@@ -2918,7 +2921,6 @@ TEST_F(ApexdMountTest, OnStartOnlyPreInstalledCapexes) {
       "%s/com.android.apex.compressed@1%s", GetDecompressionDir().c_str(),
       kDecompressedApexPackageSuffix);
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.compressed",
@@ -2945,7 +2947,6 @@ TEST_F(ApexdMountTest, OnStartDataHasHigherVersionThanCapex) {
 
   OnStart();
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.compressed",
@@ -2973,7 +2974,6 @@ TEST_F(ApexdMountTest, OnStartDataHasSameVersionAsCapex) {
 
   // Data APEX should be mounted
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.compressed",
@@ -3006,7 +3006,6 @@ TEST_F(ApexdMountTest, OnStartSystemHasHigherVersionCapexThanData) {
       "%s/com.android.apex.compressed@2%s", GetDecompressionDir().c_str(),
       kDecompressedApexPackageSuffix);
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.compressed",
@@ -3038,7 +3037,6 @@ TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToCapex) {
       "%s/com.android.apex.compressed@1%s", GetDecompressionDir().c_str(),
       kDecompressedApexPackageSuffix);
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.compressed",
@@ -3072,7 +3070,6 @@ TEST_F(ApexdMountTest, OnStartFallbackToAlreadyDecompressedCapex) {
       "%s/com.android.apex.compressed@1%s", GetDecompressionDir().c_str(),
       kDecompressedApexPackageSuffix);
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.compressed",
@@ -3108,7 +3105,6 @@ TEST_F(ApexdMountTest, OnStartFallbackToCapexSameVersion) {
       "%s/com.android.apex.compressed@2%s", GetDecompressionDir().c_str(),
       kDecompressedApexPackageSuffix);
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.compressed",
@@ -3138,7 +3134,6 @@ TEST_F(ApexdMountTest, OnStartCapexToApex) {
 
   // Uncompressed APEX should be mounted
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.compressed",
@@ -3202,7 +3197,6 @@ TEST_F(ApexdMountTest, OnStartDecompressedApexVersionDifferentThanCapex) {
       "%s/com.android.apex.compressed@1%s", GetDecompressionDir().c_str(),
       kDecompressedApexPackageSuffix);
 
-  ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "starting");
   auto apex_mounts = GetApexMounts();
   ASSERT_THAT(apex_mounts,
               UnorderedElementsAre("/apex/com.android.apex.compressed",
@@ -3556,7 +3550,11 @@ TEST_F(ApexdMountTest, OnStartInVmModeActivatesPreInstalled) {
                                    "/apex/com.android.apex.test_package@1",
                                    "/apex/com.android.apex.test_package_2",
                                    "/apex/com.android.apex.test_package_2@1"));
+}
 
+TEST_F(ApexdMountTest, OnStartInVmModeSetsStatusAsReady) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  ASSERT_EQ(0, OnStartInVmMode());
   ASSERT_EQ(GetProperty(kTestApexdStatusSysprop, ""), "ready");
 }
 
