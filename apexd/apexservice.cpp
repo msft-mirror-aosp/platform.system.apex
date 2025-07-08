@@ -388,7 +388,7 @@ static ApexInfo GetApexInfo(const ApexFile& package) {
   if (preinstalled_path.ok()) {
     out.preinstalledModulePath = *preinstalled_path;
   }
-  out.activeApexChanged = ::android::apex::IsActiveApexChanged(package);
+  out.activeApexChanged = false;
   out.partition = Cast(OR_FATAL(instance.GetPartition(package)));
   return out;
 }
@@ -497,10 +497,13 @@ BinderStatus ApexService::getActivePackages(
     return check;
   }
 
+  auto changed_active_apexes = ::android::apex::GetChangedActiveApexes();
   auto packages = ::android::apex::GetActivePackages();
   for (const auto& package : packages) {
     ApexInfo apex_info = GetApexInfo(package);
     apex_info.isActive = true;
+    apex_info.activeApexChanged =
+        changed_active_apexes.contains(apex_info.moduleName);
     aidl_return->push_back(std::move(apex_info));
   }
 

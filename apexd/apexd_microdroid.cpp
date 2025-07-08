@@ -27,6 +27,7 @@
 
 static const android::apex::ApexdConfig kMicrodroidConfig = {
     android::apex::kApexStatusSysprop,
+    nullptr, /* apexd_changed_active_apexes_sysprop */
     {{android::apex::ApexPartition::System,
       android::apex::kApexPackageSystemDir}},
     // A bunch of things are not used in Microdroid, hence we use nullptr

@@ -74,6 +74,7 @@ using android::base::ReadFileToString;
 using android::base::ReadFully;
 using android::base::RemoveFileIfExists;
 using android::base::Result;
+using android::base::SetProperty;
 using android::base::Split;
 using android::base::StringPrintf;
 using android::base::unique_fd;
@@ -160,6 +161,8 @@ class MockCheckpointInterface : public CheckpointInterface {
 };
 
 static constexpr const char* kTestApexdStatusSysprop = "apexd.status.test";
+static constexpr const char* kTestApexdChangedActiveApexesSysprop =
+    "apexd.test.changed_active_apexes";
 static constexpr const char* kTestVmPayloadMetadataPartitionProp =
     "apexd.vm.payload_metadata_partition.test";
 
@@ -192,6 +195,7 @@ class ApexdUnitTest : public ::testing::Test {
 
     config_ = ApexdConfig{
         kTestApexdStatusSysprop,
+        kTestApexdChangedActiveApexesSysprop,
         {{partition_, built_in_dir_}},
         data_dir_.c_str(),
         decompression_dir_.c_str(),
@@ -320,6 +324,8 @@ class ApexdUnitTest : public ::testing::Test {
     DeleteDirContent(GetSessionsDir());
 
     InitializeImageManager(image_manager_.get());
+
+    SetProperty(kTestApexdChangedActiveApexesSysprop, "");
   }
 
   void TearDown() override {
@@ -817,7 +823,6 @@ class ApexdMountTest : public ApexdUnitTest {
   void SetUp() override {
     ApexdUnitTest::SetUp();
     GetApexDatabaseForTesting().Reset();
-    GetChangedActiveApexesForTesting().clear();
     ASSERT_THAT(SetUpApexTestEnvironment(), Ok());
   }
 
@@ -4068,12 +4073,11 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexWrongSELinuxContext) {
 
 TEST_F(ApexdMountTest, OnStartNoApexUpdated) {
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
-  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
-  std::string apex_path_2 =
-      AddPreInstalledApex("apex.apexd_test_different_app.apex");
-  std::string apex_path_3 = AddDataApex("apex.apexd_test_v2.apex");
-  std::string apex_path_4 =
-      AddDecompressedApex("com.android.apex.compressed.v1.apex");
+  AddPreInstalledApex("apex.apexd_test.apex");
+  AddPreInstalledApex("apex.apexd_test_different_app.apex");
+
+  AddDataApex("apex.apexd_test_v2.apex");
+  AddDecompressedApex("com.android.apex.compressed.v1.apex");
 
   ASSERT_THAT(ApexFileRepository::GetInstance().AddPreInstalledApex(
                   {{GetPartition(), GetBuiltInDir()}}),
@@ -4081,31 +4085,8 @@ TEST_F(ApexdMountTest, OnStartNoApexUpdated) {
 
   OnStart();
 
-  auto updated_apexes = GetChangedActiveApexesForTesting();
-  ASSERT_EQ(updated_apexes.size(), 0u);
-  // Quick check that all apexes were mounted
-  auto apex_mounts = GetApexMounts();
-  ASSERT_EQ(apex_mounts.size(), 6u);
-}
-
-TEST_F(ApexdMountTest, OnStartDecompressingConsideredApexUpdate) {
-  AddPreInstalledApex("com.android.apex.compressed.v1.capex");
-  std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
-  std::string decompressed_active_apex = StringPrintf(
-      "%s/com.android.apex.compressed@1%s", GetDecompressionDir().c_str(),
-      kDecompressedApexPackageSuffix);
-
-  ASSERT_THAT(ApexFileRepository::GetInstance().AddPreInstalledApex(
-                  {{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  OnStart();
-
-  auto updated_apexes = GetChangedActiveApexesForTesting();
-  ASSERT_EQ(updated_apexes.size(), 1u);
-  auto apex_file = ApexFile::Open(decompressed_active_apex);
-  ASSERT_THAT(apex_file, Ok());
-  ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+  ASSERT_THAT(GetChangedActiveApexes(), IsEmpty());
+  ASSERT_THAT(GetApexMounts(), SizeIs(6));
 }
 
 TEST_F(ApexdMountTest, ActivatesStagedSession) {
@@ -4117,9 +4098,6 @@ TEST_F(ApexdMountTest, ActivatesStagedSession) {
                   {{GetPartition(), GetBuiltInDir()}}),
               Ok());
 
-  std::string active_apex =
-      GetDataDir() + "/" + "com.android.apex.test_package@2.apex";
-
   OnStart();
 
   // Quick check that session was activated
@@ -4129,15 +4107,12 @@ TEST_F(ApexdMountTest, ActivatesStagedSession) {
     ASSERT_EQ(session->GetState(), SessionState::ACTIVATED);
   }
 
-  auto updated_apexes = GetChangedActiveApexesForTesting();
-  ASSERT_EQ(updated_apexes.size(), 1u);
-  auto apex_file = ApexFile::Open(active_apex);
-  ASSERT_THAT(apex_file, Ok());
-  ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+  ASSERT_THAT(GetChangedActiveApexes(),
+              UnorderedElementsAre("com.android.apex.test_package"));
 }
 
 TEST_F(ApexdMountTest, FailsToActivateStagedSession) {
-  std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
+  AddPreInstalledApex("apex.apexd_test.apex");
   auto apex_session =
       CreateStagedSession("apex.apexd_test_manifest_mismatch.apex", 73);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
@@ -4148,23 +4123,26 @@ TEST_F(ApexdMountTest, FailsToActivateStagedSession) {
 
   OnStart();
 
-  // Quick check that session was activated
+  // Quick check that session failed.
   {
     auto session = GetSessionManager()->GetSession(73);
     ASSERT_THAT(session, Ok());
     ASSERT_NE(session->GetState(), SessionState::ACTIVATED);
   }
 
-  auto updated_apexes = GetChangedActiveApexesForTesting();
-  ASSERT_EQ(updated_apexes.size(), 1u);
-
-  auto apex_file = ApexFile::Open(preinstalled_apex);
-  ASSERT_THAT(apex_file, Ok());
-  ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+  // Failed session should trigger "revert & reboot". However, "revert" fails
+  // while running tests (We'd better not reboot the device under test).
+  // Hence, failed session causes activating fallback(preinstalled) apexes.
+  // Note that activating pre-installed apexes doesn't necessarily mean
+  // "changed" active apexes because they could be the same previous active
+  // apexes, but we don't know if there was data APEXes that's removed by the
+  // failed session.
+  ASSERT_THAT(GetChangedActiveApexes(),
+              UnorderedElementsAre("com.android.apex.test_package"));
 }
 
 TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
-  std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
+  AddPreInstalledApex("apex.apexd_test.apex");
   AddDataApex("apex.apexd_test_manifest_mismatch.apex");
 
   ASSERT_THAT(ApexFileRepository::GetInstance().AddPreInstalledApex(
@@ -4173,12 +4151,8 @@ TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
 
   OnStart();
 
-  auto updated_apexes = GetChangedActiveApexesForTesting();
-  ASSERT_EQ(updated_apexes.size(), 1u);
-
-  auto apex_file = ApexFile::Open(preinstalled_apex);
-  ASSERT_THAT(apex_file, Ok());
-  ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+  ASSERT_THAT(GetChangedActiveApexes(),
+              UnorderedElementsAre("com.android.apex.test_package"));
 }
 
 TEST_F(ApexdMountTest, SubmitSingleStagedSessionKeepsPreviousSessions) {
@@ -4424,12 +4398,8 @@ TEST_F(ApexdMountTest, ActivatesStagedSessionSucceedVerifiedBrandNewApex) {
     ASSERT_THAT(session, Ok());
     ASSERT_EQ(session->GetState(), SessionState::ACTIVATED);
   }
-
-  auto updated_apexes = GetChangedActiveApexesForTesting();
-  ASSERT_EQ(updated_apexes.size(), 1u);
-  auto apex_file = ApexFile::Open(active_apex);
-  ASSERT_THAT(apex_file, Ok());
-  ASSERT_TRUE(IsActiveApexChanged(*apex_file));
+  ASSERT_THAT(GetChangedActiveApexes(),
+              UnorderedElementsAre("com.android.apex.brand.new"));
 
   file_repository.Reset();
 }
@@ -4461,8 +4431,10 @@ TEST_F(ApexdMountTest, ActivatesStagedSessionFailUnverifiedBrandNewApex) {
     ASSERT_EQ(session->GetState(), SessionState::ACTIVATION_FAILED);
   }
 
-  auto updated_apexes = GetChangedActiveApexesForTesting();
-  ASSERT_EQ(updated_apexes.size(), 0u);
+  // Failed session would trigger revert or fallback to preinstalled. In tests,
+  // fallback happens, but since brand-new apexes don't have pre-installed
+  // counterparts, fallback doesn't cause any "change".
+  ASSERT_THAT(GetChangedActiveApexes(), IsEmpty());
 
   file_repository.Reset();
 }
