@@ -1995,10 +1995,12 @@ Result<void> StagePackages(const std::vector<std::string>& tmp_paths) {
 
 Result<void> UnstagePackages(const std::vector<std::string>& paths) {
   if (paths.empty()) {
-    return Errorf("Empty set of inputs");
+    return Error() << "Empty set of inputs";
   }
   LOG(DEBUG) << "UnstagePackages() for " << Join(paths, ',');
 
+  std::vector<ApexFile> apex_files;
+  // Ensure the input paths are APEX files, but not pre-installed.
   for (const std::string& path : paths) {
     auto apex = ApexFile::Open(path);
     if (!apex.ok()) {
@@ -2007,11 +2009,35 @@ Result<void> UnstagePackages(const std::vector<std::string>& paths) {
     if (ApexFileRepository::GetInstance().IsPreInstalledApex(*apex)) {
       return Error() << "Can't uninstall pre-installed apex " << path;
     }
+    apex_files.emplace_back(std::move(*apex));
   }
 
-  for (const std::string& path : paths) {
-    if (unlink(path.c_str()) != 0) {
-      return ErrnoError() << "Can't unlink " << path;
+  // For now, UnstagePackages() is only for tests and callers should call
+  // reboot() immediately.
+  // TODO(b/384040968) Implement a proper "uninstall". Until then, we just
+  // unlink/remove the input APEX paths.
+  if (IsMountBeforeDataEnabled()) {
+    // Removing image names from the ACTIVE list is enough. After reboot, the
+    // actual images will be removed as part of boot-completion cleanup.
+    auto image_manager = GetImageManager();
+    auto active_list =
+        OR_RETURN(image_manager->GetApexList(ApexListType::ACTIVE));
+    for (const auto& apex_file : apex_files) {
+      auto image = image_manager->FindPinnedApex(apex_file);
+      if (!image) {
+        return Error() << "Can't uninstall: image not found: "
+                       << apex_file.GetPath();
+      }
+      std::erase_if(active_list, [&](const auto& entry) {
+        return entry.image_name == *image;
+      });
+    }
+    OR_RETURN(image_manager->UpdateApexList(ApexListType::ACTIVE, active_list));
+  } else {
+    for (const std::string& path : paths) {
+      if (unlink(path.c_str()) != 0) {
+        return ErrnoError() << "Can't unlink " << path;
+      }
     }
   }
 
