@@ -160,15 +160,6 @@ struct Mutex : std::mutex {
   const Mutex& operator!() const { return *this; }  // for negative capability
 } gInstallLock;
 
-// APEXEs for which a different version was activated than in the previous boot.
-// This can happen in the following scenarios:
-//  1. This APEX is part of the staged session that was applied during this
-//    boot.
-//  2. This is a compressed APEX that was decompressed during this boot.
-//  3. We failed to activate APEX from /data/apex/active and fallback to the
-//  pre-installed APEX.
-std::set<std::string> gChangedActiveApexes;
-
 static constexpr size_t kLoopDeviceSetupAttempts = 3u;
 
 // Please DO NOT add new modules to this list without contacting
@@ -1385,6 +1376,14 @@ Result<void> ActivateApex(const ApexFile& apex, ActivationMode mode,
 }
 
 struct ActivationContext {
+  // APEXes for which a different version was activated than in the previous
+  // boot. This can happen in the following scenarios:
+  //   1. This APEX is part of the staged session that was applied during this
+  //   boot.
+  //   2. We failed to activate APEX from /data/apex/active and fallback to the
+  //   pre-installed APEX.
+  std::set<std::string> changed_active_apexes;
+
   std::unordered_map<std::string, ApexFile> decompressed_apex_store;
   // Wrapper to ProcessCompressedApex to keep the ApexFile object in the store
   Result<ApexFileRef> DecompressApex(const ApexFile& capex,
@@ -1413,7 +1412,7 @@ struct ActivationResult {
 // In case some of the apexes failed to activate, we will attempt to activate
 // their corresponding pre-installed copies.
 std::vector<ApexFileRef> GetFallbackApexes(
-    const std::vector<ApexFileRef>& failed, ActivationMode mode) {
+    const std::vector<ApexFileRef>& failed) {
   LOG(INFO) << "Trying to activate pre-installed versions of missing apexes";
   const auto& file_repository = ApexFileRepository::GetInstance();
   std::vector<ApexFileRef> fallback_apexes;
@@ -1433,15 +1432,6 @@ std::vector<ApexFileRef> GetFallbackApexes(
       continue;
     }
     fallback_apexes.push_back(preinstalled.value());
-  }
-
-  if (mode == ActivationMode::kBootMode) {
-    // Treat fallback to pre-installed APEXes as a change of the active APEX,
-    // since we are already in a pretty dire situation, so it's better if we
-    // drop all the caches.
-    for (const auto& apex : fallback_apexes) {
-      gChangedActiveApexes.insert(apex.get().GetManifest().name());
-    }
   }
   return fallback_apexes;
 }
@@ -1518,12 +1508,18 @@ ActivationResult ActivateApexPackages(ActivationContext& ctx,
       }
     }
     if (fallback_on_error) {
-      auto fallback_apexes = GetFallbackApexes(activation_result.failed, mode);
+      auto fallback_apexes = GetFallbackApexes(activation_result.failed);
       auto st = ActivateApexPackages(ctx, fallback_apexes, mode,
                                      /*revert_on_error=*/false,
                                      /*fallback_on_error=*/false);
       if (!st.ok()) {
         LOG(ERROR) << st.error();
+      }
+      // Treat fallback to pre-installed APEXes as a change of the active APEX,
+      // since we are already in a pretty dire situation, so it's better if we
+      // drop all the caches.
+      for (const auto& apex : st.activated) {
+        ctx.changed_active_apexes.insert(apex.get().GetManifest().name());
       }
       // Collect activated apex files and clear the failure.
       activation_result.activated.append_range(std::move(st.activated));
@@ -1842,7 +1838,8 @@ Result<std::vector<std::string>> TryActivateStagedSession(
 // Note that this doesn't abort with failed sessions. Apexd just marks them as
 // failed and continues activation process. It's higher level component (e.g.
 // system_server) that needs to handle the failures.
-void ActivateStagedSessions(std::vector<ApexSession>&& sessions) {
+void ActivateStagedSessions(ActivationContext& ctx,
+                            std::vector<ApexSession>&& sessions) {
   auto fail = [](ApexSession& session, const std::string& message) {
     LOG(ERROR) << "Fail: session " << session.GetId() << ": " << message;
     session.SetErrorMessage(message);
@@ -1893,7 +1890,7 @@ void ActivateStagedSessions(std::vector<ApexSession>&& sessions) {
 
     LOG(INFO) << "Session(" << session_id
               << ") is successfully activated: " << base::Join(*packages, ", ");
-    gChangedActiveApexes.insert_range(*packages);
+    ctx.changed_active_apexes.insert_range(*packages);
 
     auto st = session.UpdateStateAndCommit(SessionState::ACTIVATED);
     if (!st.ok()) {
@@ -1995,10 +1992,12 @@ Result<void> StagePackages(const std::vector<std::string>& tmp_paths) {
 
 Result<void> UnstagePackages(const std::vector<std::string>& paths) {
   if (paths.empty()) {
-    return Errorf("Empty set of inputs");
+    return Error() << "Empty set of inputs";
   }
   LOG(DEBUG) << "UnstagePackages() for " << Join(paths, ',');
 
+  std::vector<ApexFile> apex_files;
+  // Ensure the input paths are APEX files, but not pre-installed.
   for (const std::string& path : paths) {
     auto apex = ApexFile::Open(path);
     if (!apex.ok()) {
@@ -2007,11 +2006,35 @@ Result<void> UnstagePackages(const std::vector<std::string>& paths) {
     if (ApexFileRepository::GetInstance().IsPreInstalledApex(*apex)) {
       return Error() << "Can't uninstall pre-installed apex " << path;
     }
+    apex_files.emplace_back(std::move(*apex));
   }
 
-  for (const std::string& path : paths) {
-    if (unlink(path.c_str()) != 0) {
-      return ErrnoError() << "Can't unlink " << path;
+  // For now, UnstagePackages() is only for tests and callers should call
+  // reboot() immediately.
+  // TODO(b/384040968) Implement a proper "uninstall". Until then, we just
+  // unlink/remove the input APEX paths.
+  if (IsMountBeforeDataEnabled()) {
+    // Removing image names from the ACTIVE list is enough. After reboot, the
+    // actual images will be removed as part of boot-completion cleanup.
+    auto image_manager = GetImageManager();
+    auto active_list =
+        OR_RETURN(image_manager->GetApexList(ApexListType::ACTIVE));
+    for (const auto& apex_file : apex_files) {
+      auto image = image_manager->FindPinnedApex(apex_file);
+      if (!image) {
+        return Error() << "Can't uninstall: image not found: "
+                       << apex_file.GetPath();
+      }
+      std::erase_if(active_list, [&](const auto& entry) {
+        return entry.image_name == *image;
+      });
+    }
+    OR_RETURN(image_manager->UpdateApexList(ApexListType::ACTIVE, active_list));
+  } else {
+    for (const std::string& path : paths) {
+      if (unlink(path.c_str()) != 0) {
+        return ErrnoError() << "Can't unlink " << path;
+      }
     }
   }
 
@@ -2123,7 +2146,7 @@ void PrepareResources(size_t loop_device_cnt,
   // Create empty dm device for each found APEX.
   // This is a boot time optimization that makes use of the fact that user
   // space paths will be created by ueventd before apexd is started, and hence
-  // reducing the time to activate APEXEs on /data.
+  // reducing the time to activate APEXes on /data.
   // Note: since at this point we don't know which APEXes are updated, we are
   // optimistically creating a verity device for all of them. Once boot
   // finishes, apexd will clean up unused devices.
@@ -2138,7 +2161,7 @@ void PrepareResources(size_t loop_device_cnt,
 // Note that this needs to be called before scanning data apexes because
 // revert or activation may change the active set of data apexes. For example,
 // revert restores the active apexes from the last backup.
-void ProcessSessions() {
+void ProcessSessions(ActivationContext& ctx) {
   auto sessions = gSessionManager->GetSessions();
 
   if (sessions.empty()) {
@@ -2155,7 +2178,7 @@ void ProcessSessions() {
     }
   } else {
     // Otherwise, activate STAGED sessions.
-    ActivateStagedSessions(std::move(sessions));
+    ActivateStagedSessions(ctx, std::move(sessions));
   }
 }
 
@@ -2215,6 +2238,7 @@ int OnBootstrap() {
     return 1;
   }
 
+  ActivationContext ctx;
   std::vector<ApexFileRef> activation_list;
   bool fallback_on_error = false;
   bool revert_on_error = false;
@@ -2235,7 +2259,7 @@ int OnBootstrap() {
     // can change the list of active data apexes:
     // - if there's a pending revert, then reverts all active sessions.
     // - if there's staged sessions, then activate them first.
-    ProcessSessions();
+    ProcessSessions(ctx);
     auto data_apexes = ScanDataApexFiles(GetImageManager());
     instance.AddDataApexFiles(std::move(data_apexes));
     activation_list = instance.SelectApexForActivation();
@@ -2267,7 +2291,6 @@ int OnBootstrap() {
     PrepareResources(loop_device_cnt, apex_names);
   }
 
-  ActivationContext ctx;
   auto result =
       ActivateApexPackages(ctx, activation_list, ActivationMode::kBootstrapMode,
                            revert_on_error, fallback_on_error);
@@ -2276,6 +2299,9 @@ int OnBootstrap() {
     return 1;
   }
   EmitApexInfoList(result.activated, /*is_bootstrap=*/true);
+  if (IsMountBeforeDataEnabled()) {
+    SaveChangedActiveApexes(ctx.changed_active_apexes);
+  }
 
   auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                           boot_clock::now() - time_started)
@@ -2460,8 +2486,6 @@ Result<ApexFile> ProcessCompressedApex(const ApexFile& capex,
     return Error() << "Failed to decompress CAPEX: " << return_apex.error();
   }
 
-  gChangedActiveApexes.insert(return_apex->GetManifest().name());
-
   scope_guard.Disable();
   return return_apex;
 }
@@ -2493,10 +2517,11 @@ Result<void> ValidateDecompressedApex(const ApexFile& capex,
 }
 
 void ActivateApexesOnStart() {
+  ActivationContext ctx;
   // Process sessions before adding data apexes.
   // If there is any new apex to be installed on /data/app-staging, hardlink
   // them to /data/apex/active first.
-  ProcessSessions();
+  ProcessSessions(ctx);
 
   auto& instance = ApexFileRepository::GetInstance();
   if (auto status = instance.AddDataApex(gConfig->active_apex_data_dir);
@@ -2504,12 +2529,11 @@ void ActivateApexesOnStart() {
     LOG(ERROR) << "Failed to collect data APEX files : " << status.error();
   }
 
-  // Group every ApexFile on device by name
-  ActivationContext ctx;
   auto activate_status = ActivateApexPackages(
       ctx, instance.SelectApexForActivation(), ActivationMode::kBootMode,
       /*revert_on_error=*/true, /*fallback_on_error=*/true);
   EmitApexInfoList(activate_status.activated, /*is_bootstrap=*/false);
+  SaveChangedActiveApexes(ctx.changed_active_apexes);
 }
 
 void OnStart() {
@@ -3502,13 +3526,26 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   return new_apex;
 }
 
-bool IsActiveApexChanged(const ApexFile& apex) {
-  return gChangedActiveApexes.find(apex.GetManifest().name()) !=
-         gChangedActiveApexes.end();
+std::set<std::string> GetChangedActiveApexes() {
+  std::string content =
+      GetProperty(gConfig->apexd_changed_active_apexes_sysprop, "");
+  if (content.empty()) {
+    return {};
+  }
+  return {std::from_range, base::Split(content, ":")};
 }
 
-std::set<std::string>& GetChangedActiveApexesForTesting() {
-  return gChangedActiveApexes;
+void SaveChangedActiveApexes(
+    const std::set<std::string>& changed_active_apexes) {
+  if (changed_active_apexes.empty()) {
+    return;
+  }
+  std::string content =
+      base::Join(std::vector{std::from_range, changed_active_apexes}, ":");
+  if (!SetProperty(gConfig->apexd_changed_active_apexes_sysprop, content)) {
+    LOG(ERROR) << "Failed to set "
+               << gConfig->apexd_changed_active_apexes_sysprop;
+  }
 }
 
 ApexSessionManager* GetSessionManager() { return gSessionManager; }

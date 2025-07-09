@@ -42,6 +42,7 @@ namespace apex {
 // this config should do the trick.
 struct ApexdConfig {
   const char* apex_status_sysprop;
+  const char* apexd_changed_active_apexes_sysprop;
   std::unordered_map<ApexPartition, std::string> builtin_dirs;
   const char* active_apex_data_dir;
   const char* decompression_dir;
@@ -66,6 +67,7 @@ struct ApexdConfig {
 
 static const ApexdConfig kDefaultConfig = {
     kApexStatusSysprop,
+    kApexdChangedActiveApexesSysprop,
     kBuiltinApexPackageDirs,
     kActiveApexPackagesDataDir,
     kApexDecompressedDir,
@@ -216,10 +218,12 @@ android::apex::MountedApexDatabase& GetApexDatabaseForTesting();
 android::base::Result<ApexFile> InstallPackage(const std::string& package_path,
                                                bool force);
 
-bool IsActiveApexChanged(const ApexFile& apex);
+std::set<std::string> GetChangedActiveApexes();
 
-// Shouldn't be used outside of apexd_test.cpp
-std::set<std::string>& GetChangedActiveApexesForTesting();
+// Supposed to be called only once in OnBootstrap() or OnStart() to set the
+// ro.apexd.changed_active_apexes property.
+void SaveChangedActiveApexes(
+    const std::set<std::string>& changed_active_apexes);
 
 ApexSessionManager* GetSessionManager();
 

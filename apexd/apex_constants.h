@@ -83,6 +83,9 @@ static constexpr const char* kApexStatusStarting = "starting";
 static constexpr const char* kApexStatusActivated = "activated";
 static constexpr const char* kApexStatusReady = "ready";
 
+static constexpr const char* kApexdChangedActiveApexesSysprop =
+    "ro.apexd.changed_active_apexes";
+
 static constexpr const char* kApexSelectPersistPrefix = "persist.vendor.apex.";
 static constexpr const char* kApexSelectBootconfigPrefix =
     "ro.boot.vendor.apex.";
