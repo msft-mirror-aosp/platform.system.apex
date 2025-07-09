@@ -4980,6 +4980,31 @@ TEST_F(MountBeforeDataTest, BrandNewApex) {
   ApexFileRepository::GetInstance().Reset();
 }
 
+TEST_F(MountBeforeDataTest, UnstagePackages) {
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Install v2.
+  const auto apex_name = "com.android.apex.test_package"s;
+  ASSERT_THAT(InstallPackage(GetTestFile("apex.apexd_test_v2.apex"),
+                             /* force= */ true),
+              Ok());
+  ASSERT_THAT(GetApexMounts(),
+              Contains("/apex/com.android.apex.test_package@2"));
+
+  auto mount_data = GetApexDatabaseForTesting().GetLatestMountedApex(apex_name);
+  ASSERT_TRUE(mount_data.has_value());
+
+  // Remove v2.
+  ASSERT_THAT(UnstagePackages({mount_data->full_path}), Ok());
+
+  SimulateReboot();
+  ASSERT_THAT(OnBootstrap(), Eq(0));
+
+  // Now v1 is activated.
+  ASSERT_THAT(GetApexMounts(),
+              Contains("/apex/com.android.apex.test_package@1"));
+}
+
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
   void OnTestStart(const ::testing::TestInfo& test_info) override {
 #ifdef __ANDROID__
