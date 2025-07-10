@@ -31,7 +31,11 @@ namespace {
 
 std::string ToString(const ApexBlocklist& blocklist) {
   std::string out;
-  google::protobuf::util::MessageToJsonString(blocklist, &out);
+  auto status = google::protobuf::util::MessageToJsonString(blocklist, &out);
+  if (!status.ok()) {
+    ADD_FAILURE() << "Failed to convert APEX blocklist to JSON: "
+                  << status.message();
+  }
   return out;
 }
 
