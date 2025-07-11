@@ -774,4 +774,7 @@ aconfig_declarations {
 cc_aconfig_library {
     name: "libapexd_flags",
     aconfig_declarations: "apexd_flags",
+    mode: "force-read-only",
+    ramdisk_available: true,
+    recovery_available: true,
 }
