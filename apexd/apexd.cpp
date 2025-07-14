@@ -931,10 +931,10 @@ Result<void> RestoreActivePackages() {
   return {};
 }
 
-Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
-                            bool deferred, bool detach_mount_point) {
+Result<void> UnmountPackage(const ApexFile& apex, bool deferred,
+                            bool detach_mount_point) {
   LOG(INFO) << "Unmounting " << GetPackageId(apex.GetManifest())
-            << " allow_latest : " << allow_latest << " deferred : " << deferred
+            << " deferred : " << deferred
             << " detach_mount_point : " << detach_mount_point;
 
   const ApexManifest& manifest = apex.GetManifest();
@@ -955,9 +955,6 @@ Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
   }
 
   if (latest) {
-    if (!allow_latest) {
-      return Error() << "Package " << apex.GetPath() << " is active";
-    }
     std::string mount_point = apexd_private::GetActiveMountPoint(manifest);
     LOG(INFO) << "Unmounting " << mount_point;
     int flags = UMOUNT_NOFOLLOW;
@@ -1156,8 +1153,8 @@ Result<void> DeactivatePackage(const std::string& full_path) {
     return apex_file.error();
   }
 
-  return UnmountPackage(*apex_file, /* allow_latest= */ true,
-                        /* deferred= */ false, /* detach_mount_point= */ false);
+  return UnmountPackage(*apex_file,
+                        /*deferred=*/false, /*detach_mount_point=*/false);
 }
 
 Result<std::vector<std::string>> ScanApexFilesInSessionDirs(
@@ -3412,9 +3409,9 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   std::vector<base::ScopeGuard<std::function<void()>>> guards;
 
   // 3. Unmount currently active APEX.
-  OR_RETURN(UnmountPackage(*cur_apex, /* allow_latest= */ true,
-                           /* deferred= */ true,
-                           /* detach_mount_point= */ force));
+  OR_RETURN(UnmountPackage(*cur_apex,
+                           /*deferred=*/true,
+                           /*detach_mount_point=*/force));
   // Re-activate the current apex on error.
   guards.emplace_back(base::make_scope_guard([&]() {
     // We can't really rely on the fact that dm-verity device backing up
