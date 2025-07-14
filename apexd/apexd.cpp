@@ -2348,8 +2348,7 @@ void Initialize(CheckpointInterface* checkpoint_service) {
     return;
   }
 
-  gMountedApexes.PopulateFromMounts(
-      {gConfig->active_apex_data_dir, gConfig->decompression_dir});
+  gMountedApexes.PopulateFromMounts();
 }
 
 namespace {
@@ -2867,25 +2866,13 @@ void BootCompletedCleanup() REQUIRES(!gInstallLock) {
   }
 }
 
-int UnmountAll(bool also_include_staged_apexes) {
-  std::vector<std::string> data_dirs = {gConfig->active_apex_data_dir,
-                                        gConfig->decompression_dir};
-
-  if (also_include_staged_apexes) {
-    for (const ApexSession& session :
-         gSessionManager->GetSessionsInState(SessionState::STAGED)) {
-      std::vector<std::string> dirs_to_scan =
-          session.GetStagedApexDirs(gConfig->staged_session_dir);
-      std::move(dirs_to_scan.begin(), dirs_to_scan.end(),
-                std::back_inserter(data_dirs));
-    }
-  }
-
-  gMountedApexes.PopulateFromMounts(data_dirs);
+int UnmountAll() {
+  // Use a separate DB instance to avoid interaction with other parts.
+  MountedApexDatabase database;
+  database.PopulateFromMounts();
   int ret = 0;
-  gMountedApexes.ForallMountedApexes([&](const std::string& /*package*/,
-                                         const MountedApexData& data,
-                                         bool latest) {
+  database.ForallMountedApexes([&](const std::string& /*package*/,
+                                   const MountedApexData& data, bool latest) {
     LOG(INFO) << "Unmounting " << data.full_path << " mounted on "
               << data.mount_point;
     auto apex = ApexFile::Open(data.full_path);
