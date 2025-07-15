@@ -47,9 +47,7 @@ int HandleSubcommand(int argc, char** argv) {
 
   if (strcmp("--unmount-all", argv[1]) == 0) {
     SetDefaultTag("apexd-unmount-all");
-    bool also_include_staged_apexes =
-        argc >= 3 && strcmp("--also-include-staged-apexes", argv[2]) == 0;
-    return android::apex::UnmountAll(also_include_staged_apexes);
+    return android::apex::UnmountAll();
   }
 
   if (strcmp("--otachroot-bootstrap", argv[1]) == 0) {

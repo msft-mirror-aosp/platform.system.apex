@@ -931,10 +931,10 @@ Result<void> RestoreActivePackages() {
   return {};
 }
 
-Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
-                            bool deferred, bool detach_mount_point) {
+Result<void> UnmountPackage(const ApexFile& apex, bool deferred,
+                            bool detach_mount_point) {
   LOG(INFO) << "Unmounting " << GetPackageId(apex.GetManifest())
-            << " allow_latest : " << allow_latest << " deferred : " << deferred
+            << " deferred : " << deferred
             << " detach_mount_point : " << detach_mount_point;
 
   const ApexManifest& manifest = apex.GetManifest();
@@ -955,9 +955,6 @@ Result<void> UnmountPackage(const ApexFile& apex, bool allow_latest,
   }
 
   if (latest) {
-    if (!allow_latest) {
-      return Error() << "Package " << apex.GetPath() << " is active";
-    }
     std::string mount_point = apexd_private::GetActiveMountPoint(manifest);
     LOG(INFO) << "Unmounting " << mount_point;
     int flags = UMOUNT_NOFOLLOW;
@@ -1156,8 +1153,8 @@ Result<void> DeactivatePackage(const std::string& full_path) {
     return apex_file.error();
   }
 
-  return UnmountPackage(*apex_file, /* allow_latest= */ true,
-                        /* deferred= */ false, /* detach_mount_point= */ false);
+  return UnmountPackage(*apex_file,
+                        /*deferred=*/false, /*detach_mount_point=*/false);
 }
 
 Result<std::vector<std::string>> ScanApexFilesInSessionDirs(
@@ -2351,8 +2348,7 @@ void Initialize(CheckpointInterface* checkpoint_service) {
     return;
   }
 
-  gMountedApexes.PopulateFromMounts(
-      {gConfig->active_apex_data_dir, gConfig->decompression_dir});
+  gMountedApexes.PopulateFromMounts();
 }
 
 namespace {
@@ -2870,25 +2866,13 @@ void BootCompletedCleanup() REQUIRES(!gInstallLock) {
   }
 }
 
-int UnmountAll(bool also_include_staged_apexes) {
-  std::vector<std::string> data_dirs = {gConfig->active_apex_data_dir,
-                                        gConfig->decompression_dir};
-
-  if (also_include_staged_apexes) {
-    for (const ApexSession& session :
-         gSessionManager->GetSessionsInState(SessionState::STAGED)) {
-      std::vector<std::string> dirs_to_scan =
-          session.GetStagedApexDirs(gConfig->staged_session_dir);
-      std::move(dirs_to_scan.begin(), dirs_to_scan.end(),
-                std::back_inserter(data_dirs));
-    }
-  }
-
-  gMountedApexes.PopulateFromMounts(data_dirs);
+int UnmountAll() {
+  // Use a separate DB instance to avoid interaction with other parts.
+  MountedApexDatabase database;
+  database.PopulateFromMounts();
   int ret = 0;
-  gMountedApexes.ForallMountedApexes([&](const std::string& /*package*/,
-                                         const MountedApexData& data,
-                                         bool latest) {
+  database.ForallMountedApexes([&](const std::string& /*package*/,
+                                   const MountedApexData& data, bool latest) {
     LOG(INFO) << "Unmounting " << data.full_path << " mounted on "
               << data.mount_point;
     auto apex = ApexFile::Open(data.full_path);
@@ -3412,9 +3396,9 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   std::vector<base::ScopeGuard<std::function<void()>>> guards;
 
   // 3. Unmount currently active APEX.
-  OR_RETURN(UnmountPackage(*cur_apex, /* allow_latest= */ true,
-                           /* deferred= */ true,
-                           /* detach_mount_point= */ force));
+  OR_RETURN(UnmountPackage(*cur_apex,
+                           /*deferred=*/true,
+                           /*detach_mount_point=*/force));
   // Re-activate the current apex on error.
   guards.emplace_back(base::make_scope_guard([&]() {
     // We can't really rely on the fact that dm-verity device backing up

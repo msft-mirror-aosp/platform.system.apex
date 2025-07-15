@@ -105,6 +105,9 @@ using ::testing::UnorderedElementsAreArray;
 using ::testing::internal::CaptureStderr;
 using ::testing::internal::GetCapturedStderr;
 
+#define OR_FAIL(expr) \
+  UNWRAP_OR_DO(__or_fail, expr, { ASSERT_THAT(__or_fail, Ok()); })
+
 static int64_t GetMTime(const std::string& path) {
   struct stat st_buf;
   if (stat(path.c_str(), &st_buf) != 0) {
@@ -204,7 +207,7 @@ class ApexdUnitTest : public ::testing::Test {
         kTestVmPayloadMetadataPartitionProp,
         kTestActiveApexSelinuxCtx,
         {{partition_, brand_new_config_dir_}}, /* brand_new_apex_config_dirs */
-        false,                                 /*mount_before_data*/
+        flags::mount_before_data(),
         metadata_config_dir_.c_str(),
     };
   }
@@ -300,6 +303,8 @@ class ApexdUnitTest : public ::testing::Test {
     result->SetBuildFingerprint(GetProperty("ro.build.fingerprint", ""));
     return result;
   }
+
+  bool IsMountBeforeDataEnabled() const { return config_.mount_before_data; }
 
  protected:
   void SetUp() override {
@@ -927,6 +932,8 @@ TEST_F(ApexdMountTest, CalculateSizeForCompressedApex) {
 TEST_F(
     ApexdMountTest,
     CalculateSizeForCompressedApex_SkipIfDataApexIsNewerThanOrEqualToPreInstalledApex) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto& instance = ApexFileRepository::GetInstance();
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   AddDataApex("com.android.apex.compressed.v2_original.apex");
@@ -1261,6 +1268,8 @@ TEST_F(ApexdMountTest, InstallPackageDataVersionActive) {
 }
 
 TEST_F(ApexdMountTest, InstallPackageResolvesPathCollision) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("test.rebootless_apex_v1.apex");
   ApexFileRepository::GetInstance().AddPreInstalledApex(
       {{GetPartition(), GetBuiltInDir()}});
@@ -1452,6 +1461,8 @@ TEST_F(ApexdMountTest, InstallPackageUnmountFailedUpdatedApexActive) {
 }
 
 TEST_F(ApexdMountTest, InstallPackageUpdatesApexInfoList) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto apex_1 = AddPreInstalledApex("test.rebootless_apex_v1.apex");
   auto apex_2 = AddPreInstalledApex("apex.apexd_test.apex");
   ApexFileRepository::GetInstance().AddPreInstalledApex(
@@ -2737,6 +2748,8 @@ TEST_F(ApexdMountTest, OnStartSetsStatusAsStarting) {
 }
 
 TEST_F(ApexdMountTest, OnStartOnlyPreInstalledApexes) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -2756,6 +2769,8 @@ TEST_F(ApexdMountTest, OnStartOnlyPreInstalledApexes) {
 }
 
 TEST_F(ApexdMountTest, OnStartDataHasHigherVersion) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -2776,6 +2791,8 @@ TEST_F(ApexdMountTest, OnStartDataHasHigherVersion) {
 }
 
 TEST_F(ApexdMountTest, OnStartDataHasWrongSHA) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   std::string apex_path = AddPreInstalledApex("com.android.apex.cts.shim.apex");
   AddDataApex("com.android.apex.cts.shim.v2_wrong_sha.apex");
 
@@ -2793,6 +2810,8 @@ TEST_F(ApexdMountTest, OnStartDataHasWrongSHA) {
 }
 
 TEST_F(ApexdMountTest, OnStartDataHasSameVersion) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -2821,6 +2840,8 @@ TEST_F(ApexdMountTest, OnStartDataHasSameVersion) {
 }
 
 TEST_F(ApexdMountTest, OnStartSystemHasHigherVersion) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test_v2.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -2849,6 +2870,8 @@ TEST_F(ApexdMountTest, OnStartSystemHasHigherVersion) {
 }
 
 TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToBuiltIn) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -2877,6 +2900,8 @@ TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToBuiltIn) {
 }
 
 TEST_F(ApexdMountTest, OnStartApexOnDataHasWrongKeyFallsBackToBuiltIn) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   std::string apex_path_1 = AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
       AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -2912,6 +2937,8 @@ TEST_F(ApexdMountTest, OnStartApexOnDataHasWrongKeyFallsBackToBuiltIn) {
 }
 
 TEST_F(ApexdMountTest, OnStartOnlyPreInstalledCapexes) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   std::string apex_path_1 =
       AddPreInstalledApex("com.android.apex.compressed.v1.capex");
 
@@ -2942,6 +2969,8 @@ TEST_F(ApexdMountTest, OnStartOnlyPreInstalledCapexes) {
 }
 
 TEST_F(ApexdMountTest, OnStartDataHasHigherVersionThanCapex) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   std::string apex_path_2 =
       AddDataApex("com.android.apex.compressed.v2_original.apex");
@@ -2968,6 +2997,8 @@ TEST_F(ApexdMountTest, OnStartDataHasHigherVersionThanCapex) {
 }
 
 TEST_F(ApexdMountTest, OnStartDataHasSameVersionAsCapex) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   std::string apex_path_2 = AddDataApex("com.android.apex.compressed.v1.apex");
 
@@ -2996,6 +3027,8 @@ TEST_F(ApexdMountTest, OnStartDataHasSameVersionAsCapex) {
 }
 
 TEST_F(ApexdMountTest, OnStartSystemHasHigherVersionCapexThanData) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   std::string apex_path_1 =
       AddPreInstalledApex("com.android.apex.compressed.v2.capex");
   AddDataApex("com.android.apex.compressed.v1.apex");
@@ -3028,6 +3061,8 @@ TEST_F(ApexdMountTest, OnStartSystemHasHigherVersionCapexThanData) {
 }
 
 TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToCapex) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   AddDataApex("com.android.apex.compressed.v2_manifest_mismatch.apex");
 
@@ -3061,6 +3096,8 @@ TEST_F(ApexdMountTest, OnStartFailsToActivateApexOnDataFallsBackToCapex) {
 // Test scenario when we fallback to capex but it already has a decompressed
 // version on data
 TEST_F(ApexdMountTest, OnStartFallbackToAlreadyDecompressedCapex) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   PrepareCompressedApex("com.android.apex.compressed.v1.capex");
   AddDataApex("com.android.apex.compressed.v2_manifest_mismatch.apex");
 
@@ -3093,6 +3130,8 @@ TEST_F(ApexdMountTest, OnStartFallbackToAlreadyDecompressedCapex) {
 // Test scenario when we fallback to capex but it has same version as corrupt
 // data apex
 TEST_F(ApexdMountTest, OnStartFallbackToCapexSameVersion) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("com.android.apex.compressed.v2.capex");
   // Add data apex using the common naming convention for /data/apex/active
   // directory
@@ -3126,6 +3165,8 @@ TEST_F(ApexdMountTest, OnStartFallbackToCapexSameVersion) {
 }
 
 TEST_F(ApexdMountTest, OnStartCapexToApex) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   TemporaryDir previous_built_in_dir;
   PrepareCompressedApex("com.android.apex.compressed.v1.capex",
                         previous_built_in_dir.path);
@@ -3185,6 +3226,8 @@ TEST_F(ApexdMountTest, OnStartOrphanedDecompressedApexInActiveDirectory) {
 // Test scenario when decompressed version has different version than
 // pre-installed CAPEX
 TEST_F(ApexdMountTest, OnStartDecompressedApexVersionDifferentThanCapex) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   TemporaryDir previous_built_in_dir;
   PrepareCompressedApex("com.android.apex.compressed.v2.capex",
                         previous_built_in_dir.path);
@@ -3219,6 +3262,8 @@ TEST_F(ApexdMountTest, OnStartDecompressedApexVersionDifferentThanCapex) {
 
 // Test that ota_apex is persisted until slot switch
 TEST_F(ApexdMountTest, OnStartOtaApexKeptUntilSlotSwitch) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   // Imagine current system has v1 capex and we have v2 incoming via ota
   auto old_capex = AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   auto ota_apex_path =
@@ -3265,6 +3310,8 @@ TEST_F(ApexdMountTest, OnStartOtaApexKeptUntilSlotSwitch) {
 // digest
 TEST_F(ApexdMountTest,
        OnStartDecompressedApexVersionSameAsCapexDifferentDigest) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   // Push a CAPEX to system without decompressing it
   auto apex_path = AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   auto pre_installed_apex = ApexFile::Open(apex_path);
@@ -3300,6 +3347,8 @@ TEST_F(ApexdMountTest,
 
 // Test when decompressed APEX has different key than CAPEX
 TEST_F(ApexdMountTest, OnStartDecompressedApexVersionSameAsCapexDifferentKey) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   TemporaryDir previous_built_in_dir;
   auto [different_key_apex_path, _] =
       PrepareCompressedApex("com.android.apex.compressed_different_key.capex",
@@ -3331,84 +3380,6 @@ TEST_F(ApexdMountTest, OnStartDecompressedApexVersionSameAsCapexDifferentKey) {
       GetRootDigest(*different_key_apex));
 }
 
-TEST_F(ApexdMountTest, PopulateFromMountsChecksPathPrefix) {
-  AddPreInstalledApex("apex.apexd_test.apex");
-  std::string apex_path = AddDataApex("apex.apexd_test_v2.apex");
-
-  // Mount an apex from decomrpession_dir
-  PrepareCompressedApex("com.android.apex.compressed.v1.capex");
-  std::string decompressed_apex =
-      StringPrintf("%s/com.android.apex.compressed@1.decompressed.apex",
-                   GetDecompressionDir().c_str());
-
-  // Mount an apex from some other directory
-  TemporaryDir td;
-  AddPreInstalledApex("apex.apexd_test_different_app.apex");
-  fs::copy(GetTestFile("apex.apexd_test_different_app.apex"), td.path);
-  std::string other_apex =
-      StringPrintf("%s/apex.apexd_test_different_app.apex", td.path);
-
-  auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  ASSERT_THAT(ActivatePackage(apex_path), Ok());
-  ASSERT_THAT(ActivatePackage(decompressed_apex), Ok());
-  ASSERT_THAT(ActivatePackage(other_apex), Ok());
-
-  auto& db = GetApexDatabaseForTesting();
-  // Remember mount information for |other_apex|, since it won't be available in
-  // the database. We will need to tear it down manually.
-  std::optional<MountedApexData> other_apex_mount_data;
-  db.ForallMountedApexes(
-      "com.android.apex.test_package_2",
-      [&other_apex_mount_data](const MountedApexData& data, bool latest) {
-        if (latest) {
-          other_apex_mount_data.emplace(data);
-        }
-      });
-  ASSERT_TRUE(other_apex_mount_data.has_value());
-  auto deleter = make_scope_guard([&other_apex_mount_data]() {
-    if (!other_apex_mount_data.has_value()) {
-      return;
-    }
-    if (umount2("/apex/com.android.apex.test_package_2", 0) != 0) {
-      PLOG(ERROR) << "Failed to unmount /apex/com.android.apex.test_package_2";
-    }
-    auto res = Unmount(*other_apex_mount_data, /* deferred= */ false);
-    if (!res.ok()) {
-      LOG(ERROR) << res.error();
-    }
-  });
-
-  auto apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts,
-              UnorderedElementsAre("/apex/com.android.apex.test_package",
-                                   "/apex/com.android.apex.test_package@2",
-                                   "/apex/com.android.apex.compressed",
-                                   "/apex/com.android.apex.compressed@1",
-                                   "/apex/com.android.apex.test_package_2",
-                                   "/apex/com.android.apex.test_package_2@1"));
-
-  // Clear the database before calling PopulateFromMounts
-  db.Reset();
-
-  // Populate from mount
-  db.PopulateFromMounts({GetDataDir(), GetDecompressionDir()});
-
-  // Count number of package and collect package names
-  int package_count = 0;
-  std::vector<std::string> mounted_paths;
-  db.ForallMountedApexes([&](const std::string& package,
-                             const MountedApexData& data, bool latest) {
-    package_count++;
-    mounted_paths.push_back(data.full_path);
-  });
-  ASSERT_EQ(package_count, 2);
-  ASSERT_THAT(mounted_paths,
-              UnorderedElementsAre(apex_path, decompressed_apex));
-}
-
 TEST_F(ApexdMountTest, UnmountAll) {
   AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
@@ -3438,14 +3409,8 @@ TEST_F(ApexdMountTest, UnmountAll) {
                                    "/apex/com.android.apex.test_package_2",
                                    "/apex/com.android.apex.test_package_2@1"));
 
-  auto& db = GetApexDatabaseForTesting();
-  // UnmountAll expects apex database to empty, hence this reset.
-  db.Reset();
-
-  ASSERT_EQ(0, UnmountAll(/*also_include_staged_apexes=*/false));
-
-  auto new_apex_mounts = GetApexMounts();
-  ASSERT_EQ(new_apex_mounts.size(), 0u);
+  ASSERT_EQ(0, UnmountAll());
+  ASSERT_THAT(GetApexMounts(), IsEmpty());
 }
 
 TEST_F(ApexdMountTest, UnmountAllDeferred) {
@@ -3478,11 +3443,8 @@ TEST_F(ApexdMountTest, UnmountAllDeferred) {
            O_RDONLY));
   ASSERT_GE(fd, 0) << strerror(errno);
 
-  auto& db = GetApexDatabaseForTesting();
-  // UnmountAll expects apex database to empty, hence this reset.
-  db.Reset();
   // UnmountAll should succeed despite the open file.
-  ASSERT_EQ(UnmountAll(/*also_include_staged_apexes=*/false), 0);
+  ASSERT_EQ(UnmountAll(), 0);
 
   // The mount should still be there, but it should be detached from the
   // filesystem, so the mount point should be gone.
@@ -3510,35 +3472,19 @@ TEST_F(ApexdMountTest, UnmountAllStaged) {
   // Both a pre-installed apex and a staged apex are mounted. UnmountAll should
   // unmount both.
   AddPreInstalledApex("apex.apexd_test.apex");
-  std::string apex_path_2 =
-      AddPreInstalledApex("apex.apexd_test_different_app.apex");
-  AddDataApex("apex.apexd_test_v2.apex");
-  auto apex_session = CreateStagedSession("apex.apexd_test_v2.apex", 123);
-  apex_session->UpdateStateAndCommit(SessionState::STAGED);
-  std::string apex_path_3 =
-      GetStagedDir(apex_session->GetId()) + "/" + "apex.apexd_test_v2.apex";
+  AddPreInstalledApex("apex.apexd_test_different_app.apex");
+  auto session = OR_FAIL(CreateStagedSession("apex.apexd_test_v2.apex", 123));
+  ASSERT_THAT(session.UpdateStateAndCommit(SessionState::STAGED), Ok());
 
-  auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  ASSERT_THAT(ActivatePackage(apex_path_2), Ok());
-  ASSERT_THAT(ActivatePackage(apex_path_3), Ok());
-
-  auto apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts,
+  ASSERT_THAT(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/true), 0);
+  ASSERT_THAT(GetApexMounts(),
               UnorderedElementsAre("/apex/com.android.apex.test_package",
                                    "/apex/com.android.apex.test_package@2",
                                    "/apex/com.android.apex.test_package_2",
                                    "/apex/com.android.apex.test_package_2@1"));
 
-  auto& db = GetApexDatabaseForTesting();
-  // UnmountAll expects apex database to empty, hence this reset.
-  db.Reset();
-
-  ASSERT_EQ(0, UnmountAll(/*also_include_staged_apexes=*/true));
-  apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts, IsEmpty());
+  ASSERT_EQ(0, UnmountAll());
+  ASSERT_THAT(GetApexMounts(), IsEmpty());
 }
 
 TEST_F(ApexdMountTest, OnStartInVmModeActivatesPreInstalled) {
@@ -3643,6 +3589,8 @@ TEST_F(ApexdMountTest, OnStartInVmModeFailsWithWrongRootDigest) {
 class ApexActivationFailureTests : public ApexdMountTest {};
 
 TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
   ASSERT_RESULT_OK(apex_session);
   apex_session->SetBuildFingerprint("wrong fingerprint");
@@ -3657,6 +3605,8 @@ TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent) {
 }
 
 TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent_Verified) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
   ASSERT_RESULT_OK(apex_session);
   apex_session->SetBuildFingerprint("wrong fingerprint");
@@ -3671,6 +3621,8 @@ TEST_F(ApexActivationFailureTests, BuildFingerprintDifferent_Verified) {
 }
 
 TEST_F(ApexActivationFailureTests, ApexFileMissingInStagingDirectory) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
   ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
@@ -3685,6 +3637,8 @@ TEST_F(ApexActivationFailureTests, ApexFileMissingInStagingDirectory) {
 }
 
 TEST_F(ApexActivationFailureTests, MultipleApexFileInStagingDirectory) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
   ASSERT_RESULT_OK(apex_session);
   CreateStagedSession("com.android.apex.compressed.v1.apex", 123);
@@ -3698,6 +3652,8 @@ TEST_F(ApexActivationFailureTests, MultipleApexFileInStagingDirectory) {
 }
 
 TEST_F(ApexActivationFailureTests, CorruptedSuperblockApexCannotBeStaged) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto apex_session =
       CreateStagedSession("apex.apexd_test_corrupt_superblock_apex.apex", 123);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
@@ -3712,6 +3668,8 @@ TEST_F(ApexActivationFailureTests, CorruptedSuperblockApexCannotBeStaged) {
 }
 
 TEST_F(ApexActivationFailureTests, CorruptedApexCannotBeStaged) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto apex_session = CreateStagedSession("corrupted_b146895998.apex", 123);
   ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
@@ -3725,6 +3683,8 @@ TEST_F(ApexActivationFailureTests, CorruptedApexCannotBeStaged) {
 }
 
 TEST_F(ApexActivationFailureTests, ActivatePackageImplFails) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto shim_path = AddPreInstalledApex("com.android.apex.cts.shim.apex");
   auto& instance = ApexFileRepository::GetInstance();
   ASSERT_RESULT_OK(
@@ -3747,6 +3707,8 @@ TEST_F(ApexActivationFailureTests, ActivatePackageImplFails) {
 
 TEST_F(ApexActivationFailureTests,
        StagedSessionFailsWhenNotInFsCheckpointMode) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   MockCheckpointInterface checkpoint_interface;
   checkpoint_interface.SetSupportsCheckpoint(true);
   // Need to call InitializeVold before calling OnStart
@@ -3795,6 +3757,8 @@ TEST_F(ApexActivationFailureTests, StagedSessionRevertsWhenInFsRollbackMode) {
 }
 
 TEST_F(ApexdMountTest, OnBootstrapCreatesEmptyDmDevices) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("apex.apexd_test.apex");
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
 
@@ -3814,6 +3778,8 @@ TEST_F(ApexdMountTest, OnBootstrapCreatesEmptyDmDevices) {
 }
 
 TEST_F(ApexdMountTest, OnBootstrapLoadBootstrapApexOnly) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("apex.apexd_test.apex");
   AddPreInstalledApex("apex.apexd_bootstrap_test.apex");
 
@@ -3953,6 +3919,8 @@ TEST_F(ApexdUnitTest, StagePackagesMultiplePackages) {
 }
 
 TEST_F(ApexdUnitTest, UnstagePackages) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto file_path1 = AddDataApex("apex.apexd_test.apex");
   auto file_path2 = AddDataApex("apex.apexd_test_different_app.apex");
 
@@ -4072,6 +4040,8 @@ TEST_F(ApexdUnitTest, ProcessCompressedApexWrongSELinuxContext) {
 }
 
 TEST_F(ApexdMountTest, OnStartNoApexUpdated) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("com.android.apex.compressed.v1.capex");
   AddPreInstalledApex("apex.apexd_test.apex");
   AddPreInstalledApex("apex.apexd_test_different_app.apex");
@@ -4090,6 +4060,8 @@ TEST_F(ApexdMountTest, OnStartNoApexUpdated) {
 }
 
 TEST_F(ApexdMountTest, ActivatesStagedSession) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   std::string preinstalled_apex = AddPreInstalledApex("apex.apexd_test.apex");
   auto apex_session = CreateStagedSession("apex.apexd_test_v2.apex", 37);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
@@ -4112,6 +4084,8 @@ TEST_F(ApexdMountTest, ActivatesStagedSession) {
 }
 
 TEST_F(ApexdMountTest, FailsToActivateStagedSession) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("apex.apexd_test.apex");
   auto apex_session =
       CreateStagedSession("apex.apexd_test_manifest_mismatch.apex", 73);
@@ -4142,6 +4116,8 @@ TEST_F(ApexdMountTest, FailsToActivateStagedSession) {
 }
 
 TEST_F(ApexdMountTest, FailsToActivateApexFallbacksToSystemOne) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("apex.apexd_test.apex");
   AddDataApex("apex.apexd_test_manifest_mismatch.apex");
 
@@ -4216,6 +4192,8 @@ struct SpyMetrics : Metrics {
 };
 
 TEST_F(ApexdMountTest, SendEventOnSubmitStagedSession) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   MockCheckpointInterface checkpoint_interface;
   checkpoint_interface.SetSupportsCheckpoint(true);
   InitializeVold(&checkpoint_interface);
@@ -4374,6 +4352,8 @@ TEST_F(ApexdUnitTest, StagePackagesFailUnverifiedBrandNewApex) {
 }
 
 TEST_F(ApexdMountTest, ActivatesStagedSessionSucceedVerifiedBrandNewApex) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   ApexFileRepository::EnableBrandNewApex();
   auto& file_repository = ApexFileRepository::GetInstance();
   const auto partition = ApexPartition::System;
@@ -4405,6 +4385,8 @@ TEST_F(ApexdMountTest, ActivatesStagedSessionSucceedVerifiedBrandNewApex) {
 }
 
 TEST_F(ApexdMountTest, ActivatesStagedSessionFailUnverifiedBrandNewApex) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   ApexFileRepository::EnableBrandNewApex();
   auto& file_repository = ApexFileRepository::GetInstance();
   const auto partition = ApexPartition::System;
@@ -4462,6 +4444,8 @@ TEST_F(ApexdMountTest, NonStagedUpdateFailVerifiedBrandNewApex) {
 }
 
 TEST_F(ApexdMountTest, BootCompletedCleanup_CleanupInactiveApexes) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   AddPreInstalledApex("apex.apexd_test.apex");
   auto selected = AddDataApex("apex.apexd_test_v2.apex");
   auto ignored1 = AddDataApex("apex.apexd_test.apex");
@@ -4556,6 +4540,8 @@ TEST_F(SubmitStagedSessionTest,
 }
 
 TEST_F(SubmitStagedSessionTest, RejectInstallPackageForStagedPackage) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto session_id = 42;
   PrepareStagedSession("apex.apexd_test.apex", session_id);
   ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
@@ -4567,6 +4553,8 @@ TEST_F(SubmitStagedSessionTest, RejectInstallPackageForStagedPackage) {
 }
 
 TEST_F(SubmitStagedSessionTest, AbortedSessionDoesNotBlockNewStagingOrInstall) {
+  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
+
   auto session_id = 42;
   PrepareStagedSession("apex.apexd_test.apex", session_id);
   ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
@@ -4637,7 +4625,7 @@ TEST_F(SubmitStagedSessionTest, SuccessWithMultiSession) {
               ElementsAre(child_session1_id, child_session2_id));
 }
 
-// Temporary test cases until the feature is fully enabled/implemented
+// Test cases specific to mount_before_data
 class MountBeforeDataTest : public ApexdMountTest {
  protected:
   void SetUp() override {
@@ -4688,7 +4676,7 @@ TEST_F(MountBeforeDataTest, ActivatePinnedApex) {
 
   // Checks if PopulateFromMounts() works okay with dm-linear device
   MountedApexDatabase db;
-  db.PopulateFromMounts({});
+  db.PopulateFromMounts();
   auto linear_name = GetPackageId(orig->GetManifest()) + kDmLinearPayloadSuffix;
   ASSERT_THAT(db.GetLatestMountedApex(name),
               Optional(Field(&MountedApexData::linear_name, linear_name)));

@@ -184,9 +184,8 @@ void NormalizeIfDeleted(MountedApexData* apex_data) {
   apex_data->full_path = full_path;
 }
 
-Result<MountedApexData> ResolveMountInfo(
-    const BlockDevice& block, const std::string& mount_point,
-    const std::vector<std::string>& data_dirs) {
+Result<MountedApexData> ResolveMountInfo(const BlockDevice& block,
+                                         const std::string& mount_point) {
   MountedApexData result;
   result.mount_point = mount_point;
 
@@ -221,40 +220,32 @@ Result<MountedApexData> ResolveMountInfo(
     }
   }
 
-  // Check if a mount with dm-verity + loop is backed by a data apex
-  if (!result.verity_name.empty() && !result.loop_name.empty()) {
-    bool is_data_loop_device = std::any_of(
-        data_dirs.begin(), data_dirs.end(), [&](const std::string& dir) {
-          return StartsWith(result.full_path, dir);
-        });
-    if (!is_data_loop_device) {
-      return Error() << "Data loop device " << result.loop_name
-                     << " has unexpected backing file " << result.full_path;
-    }
-  }
-
   NormalizeIfDeleted(&result);
   return result;
 }
 
 }  // namespace
 
-// On startup, APEX database is populated from /proc/mounts.
+// Parses active APEX mounts from /proc/mounts and populates the DB.
 //
 // /apex/<package-id> can be mounted from
 // - /dev/block/loopX : loop device
 // - /dev/block/dm-X : dm-verity
 //
+// (For more information about APEX mounts, please refer to MountPackageImpl())
+//
 // In case of loop device, the original APEX file can be tracked
 // by /sys/block/loopX/loop/backing_file.
 //
 // In case of dm-verity, its underlying block device can be
-// either a loop device or a dm-linear device.
+// either a loop device or a dm-linear device:
+// - Loop device is backed by an APEX file (e.g. /data/apex/active/foo.apex)
+// - Dm-linear device is created on top of another dm-linear device which
+//   represents the APEX file
 //
 // Need to read /proc/mounts on startup since apexd can start
 // at any time (It's a lazy service).
-void MountedApexDatabase::PopulateFromMounts(
-    const std::vector<std::string>& data_dirs)
+void MountedApexDatabase::PopulateFromMounts()
     REQUIRES(!mounted_apexes_mutex_) {
   LOG(INFO) << "Populating APEX database from mounts...";
 
@@ -273,8 +264,7 @@ void MountedApexDatabase::PopulateFromMounts(
     if (IsTempMountPoint(mount_point)) {
       continue;
     }
-    auto mount_data =
-        ResolveMountInfo(BlockDevice(block), mount_point, data_dirs);
+    auto mount_data = ResolveMountInfo(BlockDevice(block), mount_point);
     if (!mount_data.ok()) {
       LOG(WARNING) << "Can't resolve mount info " << mount_data.error();
       continue;

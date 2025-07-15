@@ -179,9 +179,8 @@ void RemoveInactiveDataApex();
 void BootCompletedCleanup();
 int SnapshotOrRestoreDeUserData();
 
-// Unmounts all apexes.
-// If `also_include_staged_apexes` is true, it's for Pre-reboot Dexopt.
-int UnmountAll(bool also_include_staged_apexes);
+// Unmounts all apex mounts from /proc/mounts
+int UnmountAll();
 
 // Exposed for unit tests
 bool ShouldAllocateSpaceForDecompression(const std::string& new_apex_name,

@@ -154,7 +154,7 @@ class MountedApexDatabase {
     return ret;
   }
 
-  void PopulateFromMounts(const std::vector<std::string>& data_dirs);
+  void PopulateFromMounts();
 
   // Resets state of the database. Should only be used in testing.
   inline void Reset() REQUIRES(!mounted_apexes_mutex_) {
