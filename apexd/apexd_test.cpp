@@ -105,6 +105,9 @@ using ::testing::UnorderedElementsAreArray;
 using ::testing::internal::CaptureStderr;
 using ::testing::internal::GetCapturedStderr;
 
+#define OR_FAIL(expr) \
+  UNWRAP_OR_DO(__or_fail, expr, { ASSERT_THAT(__or_fail, Ok()); })
+
 static int64_t GetMTime(const std::string& path) {
   struct stat st_buf;
   if (stat(path.c_str(), &st_buf) != 0) {
@@ -3331,84 +3334,6 @@ TEST_F(ApexdMountTest, OnStartDecompressedApexVersionSameAsCapexDifferentKey) {
       GetRootDigest(*different_key_apex));
 }
 
-TEST_F(ApexdMountTest, PopulateFromMountsChecksPathPrefix) {
-  AddPreInstalledApex("apex.apexd_test.apex");
-  std::string apex_path = AddDataApex("apex.apexd_test_v2.apex");
-
-  // Mount an apex from decomrpession_dir
-  PrepareCompressedApex("com.android.apex.compressed.v1.capex");
-  std::string decompressed_apex =
-      StringPrintf("%s/com.android.apex.compressed@1.decompressed.apex",
-                   GetDecompressionDir().c_str());
-
-  // Mount an apex from some other directory
-  TemporaryDir td;
-  AddPreInstalledApex("apex.apexd_test_different_app.apex");
-  fs::copy(GetTestFile("apex.apexd_test_different_app.apex"), td.path);
-  std::string other_apex =
-      StringPrintf("%s/apex.apexd_test_different_app.apex", td.path);
-
-  auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  ASSERT_THAT(ActivatePackage(apex_path), Ok());
-  ASSERT_THAT(ActivatePackage(decompressed_apex), Ok());
-  ASSERT_THAT(ActivatePackage(other_apex), Ok());
-
-  auto& db = GetApexDatabaseForTesting();
-  // Remember mount information for |other_apex|, since it won't be available in
-  // the database. We will need to tear it down manually.
-  std::optional<MountedApexData> other_apex_mount_data;
-  db.ForallMountedApexes(
-      "com.android.apex.test_package_2",
-      [&other_apex_mount_data](const MountedApexData& data, bool latest) {
-        if (latest) {
-          other_apex_mount_data.emplace(data);
-        }
-      });
-  ASSERT_TRUE(other_apex_mount_data.has_value());
-  auto deleter = make_scope_guard([&other_apex_mount_data]() {
-    if (!other_apex_mount_data.has_value()) {
-      return;
-    }
-    if (umount2("/apex/com.android.apex.test_package_2", 0) != 0) {
-      PLOG(ERROR) << "Failed to unmount /apex/com.android.apex.test_package_2";
-    }
-    auto res = Unmount(*other_apex_mount_data, /* deferred= */ false);
-    if (!res.ok()) {
-      LOG(ERROR) << res.error();
-    }
-  });
-
-  auto apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts,
-              UnorderedElementsAre("/apex/com.android.apex.test_package",
-                                   "/apex/com.android.apex.test_package@2",
-                                   "/apex/com.android.apex.compressed",
-                                   "/apex/com.android.apex.compressed@1",
-                                   "/apex/com.android.apex.test_package_2",
-                                   "/apex/com.android.apex.test_package_2@1"));
-
-  // Clear the database before calling PopulateFromMounts
-  db.Reset();
-
-  // Populate from mount
-  db.PopulateFromMounts({GetDataDir(), GetDecompressionDir()});
-
-  // Count number of package and collect package names
-  int package_count = 0;
-  std::vector<std::string> mounted_paths;
-  db.ForallMountedApexes([&](const std::string& package,
-                             const MountedApexData& data, bool latest) {
-    package_count++;
-    mounted_paths.push_back(data.full_path);
-  });
-  ASSERT_EQ(package_count, 2);
-  ASSERT_THAT(mounted_paths,
-              UnorderedElementsAre(apex_path, decompressed_apex));
-}
-
 TEST_F(ApexdMountTest, UnmountAll) {
   AddPreInstalledApex("apex.apexd_test.apex");
   std::string apex_path_2 =
@@ -3438,14 +3363,8 @@ TEST_F(ApexdMountTest, UnmountAll) {
                                    "/apex/com.android.apex.test_package_2",
                                    "/apex/com.android.apex.test_package_2@1"));
 
-  auto& db = GetApexDatabaseForTesting();
-  // UnmountAll expects apex database to empty, hence this reset.
-  db.Reset();
-
-  ASSERT_EQ(0, UnmountAll(/*also_include_staged_apexes=*/false));
-
-  auto new_apex_mounts = GetApexMounts();
-  ASSERT_EQ(new_apex_mounts.size(), 0u);
+  ASSERT_EQ(0, UnmountAll());
+  ASSERT_THAT(GetApexMounts(), IsEmpty());
 }
 
 TEST_F(ApexdMountTest, UnmountAllDeferred) {
@@ -3478,11 +3397,8 @@ TEST_F(ApexdMountTest, UnmountAllDeferred) {
            O_RDONLY));
   ASSERT_GE(fd, 0) << strerror(errno);
 
-  auto& db = GetApexDatabaseForTesting();
-  // UnmountAll expects apex database to empty, hence this reset.
-  db.Reset();
   // UnmountAll should succeed despite the open file.
-  ASSERT_EQ(UnmountAll(/*also_include_staged_apexes=*/false), 0);
+  ASSERT_EQ(UnmountAll(), 0);
 
   // The mount should still be there, but it should be detached from the
   // filesystem, so the mount point should be gone.
@@ -3510,35 +3426,19 @@ TEST_F(ApexdMountTest, UnmountAllStaged) {
   // Both a pre-installed apex and a staged apex are mounted. UnmountAll should
   // unmount both.
   AddPreInstalledApex("apex.apexd_test.apex");
-  std::string apex_path_2 =
-      AddPreInstalledApex("apex.apexd_test_different_app.apex");
-  AddDataApex("apex.apexd_test_v2.apex");
-  auto apex_session = CreateStagedSession("apex.apexd_test_v2.apex", 123);
-  apex_session->UpdateStateAndCommit(SessionState::STAGED);
-  std::string apex_path_3 =
-      GetStagedDir(apex_session->GetId()) + "/" + "apex.apexd_test_v2.apex";
+  AddPreInstalledApex("apex.apexd_test_different_app.apex");
+  auto session = OR_FAIL(CreateStagedSession("apex.apexd_test_v2.apex", 123));
+  ASSERT_THAT(session.UpdateStateAndCommit(SessionState::STAGED), Ok());
 
-  auto& instance = ApexFileRepository::GetInstance();
-  ASSERT_THAT(instance.AddPreInstalledApex({{GetPartition(), GetBuiltInDir()}}),
-              Ok());
-
-  ASSERT_THAT(ActivatePackage(apex_path_2), Ok());
-  ASSERT_THAT(ActivatePackage(apex_path_3), Ok());
-
-  auto apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts,
+  ASSERT_THAT(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/true), 0);
+  ASSERT_THAT(GetApexMounts(),
               UnorderedElementsAre("/apex/com.android.apex.test_package",
                                    "/apex/com.android.apex.test_package@2",
                                    "/apex/com.android.apex.test_package_2",
                                    "/apex/com.android.apex.test_package_2@1"));
 
-  auto& db = GetApexDatabaseForTesting();
-  // UnmountAll expects apex database to empty, hence this reset.
-  db.Reset();
-
-  ASSERT_EQ(0, UnmountAll(/*also_include_staged_apexes=*/true));
-  apex_mounts = GetApexMounts();
-  ASSERT_THAT(apex_mounts, IsEmpty());
+  ASSERT_EQ(0, UnmountAll());
+  ASSERT_THAT(GetApexMounts(), IsEmpty());
 }
 
 TEST_F(ApexdMountTest, OnStartInVmModeActivatesPreInstalled) {
@@ -4688,7 +4588,7 @@ TEST_F(MountBeforeDataTest, ActivatePinnedApex) {
 
   // Checks if PopulateFromMounts() works okay with dm-linear device
   MountedApexDatabase db;
-  db.PopulateFromMounts({});
+  db.PopulateFromMounts();
   auto linear_name = GetPackageId(orig->GetManifest()) + kDmLinearPayloadSuffix;
   ASSERT_THAT(db.GetLatestMountedApex(name),
               Optional(Field(&MountedApexData::linear_name, linear_name)));
