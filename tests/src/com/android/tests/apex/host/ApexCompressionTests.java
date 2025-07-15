@@ -20,6 +20,7 @@ import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeFalse;
 import static org.junit.Assume.assumeTrue;
 
 import android.cts.install.lib.host.InstallUtilsHost;
@@ -67,6 +68,12 @@ public class ApexCompressionTests extends BaseHostJUnit4Test {
         if (!mWasAdbRoot) {
             assumeTrue("Requires root", getDevice().enableAdbRoot());
         }
+
+        // Devices with mount_before_data enabled can't mount compressed APEXes because APEXes are
+        // activated before the data partition. (Decompression requires the data partition.)
+        assumeFalse("Requires mount_before_data disabled",
+                getDevice().doesFileExist("/metadata/apex/config/mount_before_data"));
+
         deleteFiles("/system/apex/" + COMPRESSED_APEX_PACKAGE_NAME + "*apex",
                 APEX_ACTIVE_DIR + COMPRESSED_APEX_PACKAGE_NAME + "*apex",
                 DECOMPRESSED_DIR_PATH + COMPRESSED_APEX_PACKAGE_NAME + "*apex",
