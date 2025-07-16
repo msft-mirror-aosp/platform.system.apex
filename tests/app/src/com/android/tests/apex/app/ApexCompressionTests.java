@@ -144,7 +144,8 @@ public class ApexCompressionTests {
                 COMPRESSED_APEX_PACKAGE_NAME, PackageManager.MATCH_APEX);
         assertThat(pi.getLongVersionCode()).isEqualTo(2);
         assertThat(isFactoryPackage(pi)).isFalse();
-        assertThat(pi.applicationInfo.sourceDir).startsWith("/data/apex/active/");
+        assertThat(pi.applicationInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)
+                .isEqualTo(ApplicationInfo.FLAG_UPDATED_SYSTEM_APP);
 
         // Trigger rollback
         RollbackInfo available = RollbackUtils.getAvailableRollback(COMPRESSED_APEX_PACKAGE_NAME);
@@ -158,6 +159,7 @@ public class ApexCompressionTests {
                 COMPRESSED_APEX_PACKAGE_NAME, PackageManager.MATCH_APEX);
         assertThat(pi.getLongVersionCode()).isEqualTo(1);
         assertThat(isFactoryPackage(pi)).isFalse();
-        assertThat(pi.applicationInfo.sourceDir).startsWith("/data/apex/active/");
+        assertThat(pi.applicationInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)
+                .isEqualTo(ApplicationInfo.FLAG_UPDATED_SYSTEM_APP);
     }
 }

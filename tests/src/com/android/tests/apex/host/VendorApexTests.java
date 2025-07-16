@@ -92,8 +92,7 @@ public class VendorApexTests extends BaseHostJUnit4Test {
 
     @After
     public void tearDown() throws Exception {
-        deleteFiles("/" + mPartition + "/apex/com.android.apex.vendor.*apex",
-                "/data/apex/active/com.android.apex.vendor.*apex");
+        deleteFiles("/" + mPartition + "/apex/com.android.apex.vendor.*apex");
     }
 
     @Test

@@ -22,6 +22,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.Manifest;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
@@ -91,17 +92,22 @@ public class VendorApexTests {
         final PackageManager pm =
                 InstrumentationRegistry.getInstrumentation().getContext().getPackageManager();
         {
+            // Check that the apex is v1 and pre-installed.
             PackageInfo apex = pm.getPackageInfo(APEX_PACKAGE_NAME, PackageManager.MATCH_APEX);
             assertThat(apex.getLongVersionCode()).isEqualTo(1);
             assertThat(apex.applicationInfo.sourceDir).startsWith("/" + mPartition + "/apex");
+            assertThat(apex.applicationInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)
+                    .isEqualTo(0);
         }
 
         Install.single(Apex2Rebootless).commit();
 
         {
+            // Check that the apex is v2 and not pre-installed.
             PackageInfo apex = pm.getPackageInfo(APEX_PACKAGE_NAME, PackageManager.MATCH_APEX);
             assertThat(apex.getLongVersionCode()).isEqualTo(2);
-            assertThat(apex.applicationInfo.sourceDir).startsWith("/data/apex/active");
+            assertThat(apex.applicationInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)
+                    .isEqualTo(ApplicationInfo.FLAG_UPDATED_SYSTEM_APP);
         }
     }
 
