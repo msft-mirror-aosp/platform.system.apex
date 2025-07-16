@@ -184,6 +184,17 @@ void NormalizeIfDeleted(MountedApexData* apex_data) {
   apex_data->full_path = full_path;
 }
 
+std::string ReplaceSuffix(std::string_view str, std::string_view old_suffix,
+                          std::string_view new_suffix) {
+  if (str.size() >= old_suffix.size() &&
+      str.substr(str.size() - old_suffix.size()) == old_suffix) {
+    std::string result(str.substr(0, str.length() - old_suffix.length()));
+    result.append(new_suffix);
+    return result;
+  }
+  return std::string(str);
+}
+
 Result<MountedApexData> ResolveMountInfo(const BlockDevice& block,
                                          const std::string& mount_point) {
   MountedApexData result;
@@ -207,8 +218,15 @@ Result<MountedApexData> ResolveMountInfo(const BlockDevice& block,
         } break;
         case DeviceMapperDevice: {
           result.linear_name = OR_RETURN(underlying.GetProperty("dm/name"));
-          OR_RETURN(ValidateDm(result.linear_name, "linear"));
-          result.full_path = OR_RETURN(GetUnderlying(underlying)).DevPath();
+          auto dm_name_for_apex =
+              ReplaceSuffix(result.linear_name, kDmLinearPayloadSuffix, "");
+          DeviceMapper& dm = DeviceMapper::Instance();
+          std::string dev_path_for_apex;
+          if (!dm.GetDmDevicePathByName(dm_name_for_apex, &dev_path_for_apex)) {
+            return Error() << "Failed to get path of dm device "
+                           << dm_name_for_apex;
+          }
+          result.full_path = dev_path_for_apex;
         } break;
         default:
           return Error() << "Unknown underlying device type for dm-verity:"
@@ -240,8 +258,8 @@ Result<MountedApexData> ResolveMountInfo(const BlockDevice& block,
 // In case of dm-verity, its underlying block device can be
 // either a loop device or a dm-linear device:
 // - Loop device is backed by an APEX file (e.g. /data/apex/active/foo.apex)
-// - Dm-linear device is created on top of another dm-linear device which
-//   represents the APEX file
+// - Dm-linear device is created on top of userdata partition which represents
+//   the APEX payload
 //
 // Need to read /proc/mounts on startup since apexd can start
 // at any time (It's a lazy service).

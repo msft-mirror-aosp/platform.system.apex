@@ -24,6 +24,8 @@
 #include <vector>
 
 #include "apex_file.h"
+#include "apexd_dm.h"
+#include "interval.h"
 
 namespace android::apex {
 
@@ -44,11 +46,21 @@ struct ApexListEntry {
   inline auto operator<=>(const ApexListEntry&) const = default;
 };
 
+struct ApexImageInfo {
+  std::vector<Interval> extents;
+  uint64_t mtime;
+};
+
 // Returns an updated list. A new entry replaces any existing entries with the
 // same apex name.
 std::vector<ApexListEntry> UpdateApexListWithNewEntries(
     std::vector<ApexListEntry> list,
     const std::vector<ApexListEntry>& new_entries);
+
+base::Result<DmDevice> CreateDmLinear(const std::string& name,
+                                      const std::string& block_dev,
+                                      const std::vector<Interval>& extents,
+                                      bool read_only);
 
 class ApexImageManager {
  public:
@@ -83,6 +95,7 @@ class ApexImageManager {
   virtual base::Result<std::string> MapImage(const std::string& image);
   base::Result<void> UnmapImage(const std::string& image);
   base::Result<void> UnmapImageIfExists(const std::string& image);
+  base::Result<std::vector<Interval>> GetImageExtents(const std::string& image);
 
   base::Result<void> UpdateApexList(ApexListType list_type,
                                     const std::vector<ApexListEntry>& entries);
@@ -96,6 +109,8 @@ class ApexImageManager {
  protected:
   ApexImageManager(const std::string& metadata_dir,
                    const std::string& data_dir);
+
+  base::Result<ApexImageInfo> GetApexImageInfo(const std::string& image);
 
   std::string GetApexListFile(ApexListType list_type) const;
   std::string GetApexStorageMetadataPath() const;

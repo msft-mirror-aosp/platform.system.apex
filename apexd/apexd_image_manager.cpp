@@ -238,29 +238,6 @@ void ApexStorageMetadata_AddApexImageInfo(ApexStorageMetadata& metadata,
   bp_image_info.set_mtime(mtime);
 }
 
-Result<DmDevice> CreateDmLinear(const std::string& name,
-                                const std::string& block_dev,
-                                const std::vector<Interval>& extents,
-                                bool read_only) {
-  DmTable table;
-  uint64_t sector = 0;
-  for (const auto& extent : extents) {
-    if (extent.offset % kBytesInSector != 0 ||
-        extent.length % kBytesInSector != 0) {
-      return Error() << "Failed to create dm-linear: Extent is not "
-                        "sector-aligned: offset="
-                     << extent.offset << ", length=" << extent.length;
-    }
-    table.Emplace<DmTargetLinear>(sector, extent.length / kBytesInSector,
-                                  block_dev, extent.offset / kBytesInSector);
-    sector += extent.length / kBytesInSector;
-  }
-  if (read_only) {
-    table.set_readonly(true);
-  }
-  return CreateDmDevice(name, table, /*reuse=*/false);
-}
-
 template <typename T>
 Interval ExtentToInterval(const T& extent) {
   if constexpr (std::is_same_v<T, struct fiemap_extent>) {
@@ -325,6 +302,29 @@ std::vector<ApexListEntry> UpdateApexListWithNewEntries(
   // Add new entries to the list
   list.append_range(new_entries);
   return list;
+}
+
+Result<DmDevice> CreateDmLinear(const std::string& name,
+                                const std::string& block_dev,
+                                const std::vector<Interval>& extents,
+                                bool read_only) {
+  DmTable table;
+  uint64_t sector = 0;
+  for (const auto& extent : extents) {
+    if (extent.offset % kBytesInSector != 0 ||
+        extent.length % kBytesInSector != 0) {
+      return Error() << "Failed to create dm-linear: Extent is not "
+                        "sector-aligned: offset="
+                     << extent.offset << ", length=" << extent.length;
+    }
+    table.Emplace<DmTargetLinear>(sector, extent.length / kBytesInSector,
+                                  block_dev, extent.offset / kBytesInSector);
+    sector += extent.length / kBytesInSector;
+  }
+  if (read_only) {
+    table.set_readonly(true);
+  }
+  return CreateDmDevice(name, table, /*reuse=*/false);
 }
 
 Result<std::unique_ptr<SplitFiemap>> OpenOrCreateApexStorage(
@@ -593,18 +593,14 @@ std::optional<std::string> ApexImageManager::GetMappedPath(
   return std::nullopt;
 }
 
-Result<std::string> ApexImageManager::MapImage(const std::string& image) {
-  // Check if it's already mapped.
-  auto path = GetMappedPath(image);
-  if (path) {
-    return *path;
-  }
+Result<std::vector<Interval>> ApexImageManager::GetImageExtents(
+    const std::string& image) {
+  auto info = OR_RETURN(GetApexImageInfo(image));
+  return info.extents;
+}
 
-  // Otherwise, map the image to a dm-linear device:
-  // 1. load the metadata
-  // 2. get the extents of the image
-  // 3. create a dm-linear device with the extent
-
+Result<ApexImageInfo> ApexImageManager::GetApexImageInfo(
+    const std::string& image) {
   auto metadata_path = GetApexStorageMetadataPath();
   auto metadata = OR_RETURN(ApexStorageMetadata_Load(metadata_path));
 
@@ -615,8 +611,24 @@ Result<std::string> ApexImageManager::MapImage(const std::string& image) {
   if (it == metadata.images().end()) {
     return Error() << "Failed to find image " << image;
   }
-  auto extents = ExtentsToIntervals(it->extents());
-  auto mtime = it->mtime();
+  return ApexImageInfo{ExtentsToIntervals(it->extents()), it->mtime()};
+}
+
+Result<std::string> ApexImageManager::MapImage(const std::string& image) {
+  // Check if it's already mapped.
+  auto path = GetMappedPath(image);
+  if (path) {
+    return *path;
+  }
+
+  // Otherwise, map the image to a dm-linear device:
+  // 1. get the extents of the image
+  // 2. create a dm-linear device with the extent
+
+  // get extents of the image.
+  auto info = OR_RETURN(GetApexImageInfo(image));
+  auto extents = info.extents;
+  auto mtime = info.mtime;
 
   // create a dm-linear device on the userdata partition
   auto dev = OR_RETURN(
