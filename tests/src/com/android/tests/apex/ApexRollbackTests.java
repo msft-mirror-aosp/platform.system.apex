@@ -293,6 +293,8 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
             // revert mechanism in apexd. Since there is nothing to revert, this should be a no-op
             // and device will boot successfully.
             getDevice().setProperty("persist.debug.trigger_updatable_crashing_for_testing", "1");
+            // Put a test apex in /data/apex/active to see if it's deleted on boot completion.
+            // Note that this apex is not activated because there's no preinstalled counterpart.
             assertThat(getDevice().pushFile(mHostUtils.getTestFile("apex.apexd_test_v2.apex"),
                     "/data/apex/active/apexd_test_v2.apex")).isTrue();
             getDevice().reboot();
@@ -301,10 +303,11 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
             // Verify that property was set to true.
             assertThat(
                     getDevice().getBooleanProperty("sys.init.updatable_crashing", false)).isTrue();
-            final Set<ITestDevice.ApexInfo> activeApexes = getDevice().getActiveApexes();
-            ITestDevice.ApexInfo testApex = new ITestDevice.ApexInfo(
-                    "com.android.apex.cts.shim", 2L);
-            assertThat(activeApexes).doesNotContain(testApex);
+
+            // Apexd does nothing about the crash because there's no active sessions to revert.
+            // Apexd just waits for the boot completion.
+
+            // Verify that inactive apexes are deleted on boot completion.
             mHostUtils.waitForFileDeleted("/data/apex/active/apexd_test_v2.apex",
                     Duration.ofMinutes(3));
         } finally {

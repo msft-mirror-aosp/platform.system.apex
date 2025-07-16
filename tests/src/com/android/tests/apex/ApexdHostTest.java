@@ -257,6 +257,7 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
         // Kill apexd. This means apexd will perform its start logic when the second install
         // is staged.
         getDevice().executeShellV2Command("kill `pidof apexd`");
+        Thread.sleep(1000); // 1 sec for servicemanager to handle it
 
         // Verify that the session state remains consistent after apexd has restarted.
         String updatedState = getDevice().executeShellV2Command(sessionStateCmd).getStdout();
