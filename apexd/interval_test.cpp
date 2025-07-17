@@ -157,4 +157,34 @@ TEST(IntervalsTest, Subtract_NotNormalized_SecondArg) {
   ASSERT_EQ(SubtractIntervals(intervals, subtract), expected);
 }
 
+TEST(IntervalTest, ApplyOffsetLength_WithinIntervals) {
+  const std::vector<Interval> intervals = {{10, 5}, {20, 10}, {40, 8}};
+  auto result = ApplyOffsetLength(intervals, 2, 15);
+  EXPECT_EQ(result, (std::vector<Interval>{{12, 3}, {20, 10}, {40, 2}}));
+}
+
+TEST(IntervalTest, ApplyOffsetLength_ZeroOffset) {
+  const std::vector<Interval> intervals = {{10, 5}, {20, 10}, {40, 8}};
+  auto result = ApplyOffsetLength(intervals, 0, 15);
+  EXPECT_EQ(result, (std::vector<Interval>{{10, 5}, {20, 10}}));
+}
+
+TEST(IntervalTest, ApplyOffsetLength_ZeroLength) {
+  const std::vector<Interval> intervals = {{10, 5}, {20, 10}, {40, 8}};
+  auto result = ApplyOffsetLength(intervals, 5, 0);
+  EXPECT_TRUE(result.empty());
+}
+
+TEST(IntervalTest, ApplyOffsetLength_ExactBoundary) {
+  const std::vector<Interval> intervals = {{10, 5}, {20, 10}, {40, 8}};
+  auto result = ApplyOffsetLength(intervals, 5, 10);
+  EXPECT_EQ(result, (std::vector<Interval>{{20, 10}}));
+}
+
+TEST(IntervalTest, ApplyOffsetLength_ZeroInput) {
+  const std::vector<Interval> intervals = {{10, 5}, {20, 10}, {40, 8}};
+  auto result = ApplyOffsetLength({}, 10, 10);
+  EXPECT_TRUE(result.empty());
+}
+
 }  // namespace android::apex
