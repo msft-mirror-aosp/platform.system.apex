@@ -46,6 +46,7 @@
 #include "apex_file_repository.h"
 #include "apex_manifest.pb.h"
 #include "apexd_checkpoint.h"
+#include "apexd_dm.h"
 #include "apexd_image_manager.h"
 #include "apexd_loop.h"
 #include "apexd_metrics.h"
@@ -252,6 +253,25 @@ class ApexdUnitTest : public ::testing::Test {
                           const std::string& target_name) {
     fs::copy(GetTestFile(apex_name), data_dir_ + "/" + target_name);
     return StringPrintf("%s/%s", data_dir_.c_str(), target_name.c_str());
+  }
+
+  // Returns image name
+  std::string AddPinnedDataApex(const std::string& apex_name) {
+    auto apex_file = ApexFile::Open(GetTestFile(apex_name));
+    CHECK(apex_file.ok());
+    auto images = image_manager_->PinApexFiles(Single(*apex_file));
+    CHECK(images.ok());
+
+    // Add it to the ACTIVE
+    auto list = image_manager_->GetApexList(ApexListType::ACTIVE);
+    CHECK(list.ok());
+    ApexListEntry new_entry{images->at(0), apex_file->GetManifest().name()};
+    auto update = image_manager_->UpdateApexList(
+        ApexListType::ACTIVE,
+        UpdateApexListWithNewEntries(std::move(*list), {new_entry}));
+    CHECK(update.ok());
+
+    return images->at(0);
   }
 
   std::string AddDecompressedApex(const std::string& apex_name) {
@@ -1719,6 +1739,59 @@ TEST_F(ApexdMountTest, OnOtaChrootBootstrapOnlyPreInstalledApexes) {
   ASSERT_THAT(info_list->getApexInfo(),
               UnorderedElementsAre(ApexInfoXmlEq(apex_info_xml_1),
                                    ApexInfoXmlEq(apex_info_xml_2)));
+}
+
+TEST_F(ApexdMountTest, OnOtaChrootBootstrap_ActivatesPinnedApex_UnmountAll) {
+  if constexpr (!flags::mount_before_data()) {
+    GTEST_SKIP() << "mount_before_data flag not set";
+  }
+  AddPreInstalledApex("apex.apexd_test.apex");
+  auto image = AddPinnedDataApex("apex.apexd_test_v2.apex");
+  AddPreInstalledApex("apex.apexd_test_different_app.apex");
+
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/false), 0);
+
+  auto apex_mounts = GetApexMounts();
+  ASSERT_THAT(apex_mounts,
+              UnorderedElementsAre("/apex/com.android.apex.test_package",
+                                   "/apex/com.android.apex.test_package@2",
+                                   "/apex/com.android.apex.test_package_2",
+                                   "/apex/com.android.apex.test_package_2@1"));
+
+  // UnmountAll unmounts pinned APEX as well.
+  ASSERT_EQ(UnmountAll(), 0);
+  ASSERT_THAT(GetApexMounts(), IsEmpty());
+
+  // The dm-linear device created for the APEX is not destroyed.
+  ASSERT_THAT(DeleteDmDevice(image, /*deferred=*/false), Ok());
+}
+
+TEST_F(ApexdMountTest, OnOtaChrootBootstrap_WithStaged_ActivatesPinnedApex) {
+  if constexpr (!flags::mount_before_data()) {
+    GTEST_SKIP() << "mount_before_data flag not set";
+  }
+  // preinstalled: V1
+  AddPreInstalledApex("apex.apexd_test.apex");
+  // pinned data: V1
+  auto image = AddPinnedDataApex("apex.apexd_test.apex");
+  // staged: V2
+  auto apex_session = CreateStagedSession("apex.apexd_test_v2.apex", 123);
+  apex_session->UpdateStateAndCommit(SessionState::STAGED);
+
+  ASSERT_EQ(OnOtaChrootBootstrap(/*also_include_staged_apexes=*/true), 0);
+
+  // Verify that the staged one (V2) is chosen.
+  auto apex_mounts = GetApexMounts();
+  ASSERT_THAT(apex_mounts,
+              UnorderedElementsAre("/apex/com.android.apex.test_package",
+                                   "/apex/com.android.apex.test_package@2"));
+
+  // UnmountAll unmounts pinned APEX as well.
+  ASSERT_EQ(UnmountAll(), 0);
+  ASSERT_THAT(GetApexMounts(), IsEmpty());
+
+  // The dm-linear device created for the APEX is not destroyed.
+  ASSERT_THAT(DeleteDmDevice(image, /*deferred=*/false), Ok());
 }
 
 TEST_F(ApexdMountTest, OnOtaChrootBootstrapFailsToScanPreInstalledApexes) {

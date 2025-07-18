@@ -3161,6 +3161,12 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
       }
     }
   }
+
+  if constexpr (flags::mount_before_data()) {
+    auto data_apexes = ScanDataApexFiles(GetImageManager());
+    instance.AddDataApexFiles(std::move(data_apexes));
+  }
+
   if (auto status = instance.AddDataApex(gConfig->active_apex_data_dir);
       !status.ok()) {
     LOG(ERROR) << "Failed to scan upgraded apexes from "
