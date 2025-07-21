@@ -4750,7 +4750,7 @@ TEST_F(MountBeforeDataTest, ActivatePinnedApex) {
   // Checks if PopulateFromMounts() works okay with dm-linear device
   MountedApexDatabase db;
   db.PopulateFromMounts();
-  auto linear_name = GetPackageId(orig->GetManifest()) + kDmLinearPayloadSuffix;
+  auto linear_name = image + kDmLinearPayloadSuffix;
   ASSERT_THAT(db.GetLatestMountedApex(name),
               Optional(Field(&MountedApexData::linear_name, linear_name)));
 }

@@ -380,8 +380,7 @@ bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
   }
 }
 
-Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex,
-                                          const std::string& device_name) {
+Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex) {
   if (!apex.GetImageOffset() || !apex.GetImageSize()) {
     return Error() << "Cannot create mount point without image offset and size";
   }
@@ -392,6 +391,14 @@ Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex,
                                     apex.GetPath(),
                                     *apex.GetImageOffset() / kBytesInSector);
   table.set_readonly(true);
+
+  auto image_manager = GetImageManager();
+  auto image_name = image_manager->FindPinnedApex(apex);
+  if (!image_name) {
+    return Error() << "Not a pinned apex: " << apex.GetPath();
+  }
+
+  auto device_name = *image_name + kDmLinearPayloadSuffix;
   auto dev =
       OR_RETURN(CreateDmDevice(device_name, table, /* reuse device */ false));
 
@@ -458,8 +465,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   DmDevice linear_dev;
 
   if (IsMountBeforeDataEnabled() && GetImageManager()->IsPinnedApex(apex)) {
-    linear_dev = OR_RETURN(
-        CreateDmLinearForPayload(apex, device_name + kDmLinearPayloadSuffix));
+    linear_dev = OR_RETURN(CreateDmLinearForPayload(apex));
     block_device = linear_dev.GetDevPath();
   } else {
     loop = OR_RETURN(CreateLoopForApex(apex, loop_id));
