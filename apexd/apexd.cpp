@@ -93,6 +93,7 @@
 #include "apexd_verity.h"
 #include "com_android_apex.h"
 #include "com_android_apex_flags.h"
+#include "interval.h"
 
 namespace flags = com::android::apex::flags;
 namespace fs = std::filesystem;
@@ -380,21 +381,26 @@ bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
   }
 }
 
-Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex,
-                                          const std::string& device_name) {
+Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex) {
   if (!apex.GetImageOffset() || !apex.GetImageSize()) {
     return Error() << "Cannot create mount point without image offset and size";
   }
-  // TODO(b/405904883) measure the IO performance and reduce # of layers if
-  // necessary
-  DmTable table;
-  table.Emplace<dm::DmTargetLinear>(0, *apex.GetImageSize() / kBytesInSector,
-                                    apex.GetPath(),
-                                    *apex.GetImageOffset() / kBytesInSector);
-  table.set_readonly(true);
-  auto dev =
-      OR_RETURN(CreateDmDevice(device_name, table, /* reuse device */ false));
 
+  auto image_manager = GetImageManager();
+  auto image_name = image_manager->FindPinnedApex(apex);
+  if (!image_name) {
+    return Error() << "Not a pinned apex: " << apex.GetPath();
+  }
+
+  auto extents = OR_RETURN(image_manager->GetImageExtents(*image_name));
+
+  auto payload_extents =
+      ApplyOffsetLength(extents, *apex.GetImageOffset(), *apex.GetImageSize());
+
+  auto device_name = *image_name + kDmLinearPayloadSuffix;
+  auto dev =
+      OR_RETURN(CreateDmLinear(device_name, kUserdataDevice, payload_extents,
+                               /*read_only=*/false));
   OR_RETURN(loop::ConfigureReadAhead(dev.GetDevPath()));
   return std::move(dev);
 }
@@ -458,8 +464,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   DmDevice linear_dev;
 
   if (IsMountBeforeDataEnabled() && GetImageManager()->IsPinnedApex(apex)) {
-    linear_dev = OR_RETURN(
-        CreateDmLinearForPayload(apex, device_name + kDmLinearPayloadSuffix));
+    linear_dev = OR_RETURN(CreateDmLinearForPayload(apex));
     block_device = linear_dev.GetDevPath();
   } else {
     loop = OR_RETURN(CreateLoopForApex(apex, loop_id));

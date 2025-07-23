@@ -181,4 +181,12 @@ std::pair<std::vector<Interval>, std::vector<Interval>> TakeLengthFromStart(
   return std::make_pair(first_part, second_part);
 }
 
+std::vector<Interval> ApplyOffsetLength(const std::vector<Interval>& intervals,
+                                        uint32_t offset, size_t length) {
+  auto [_, intervals_with_offset] = TakeLengthFromStart(intervals, offset);
+  auto [intervals_truncated_by_length, __] =
+      TakeLengthFromStart(intervals_with_offset, length);
+  return intervals_truncated_by_length;
+}
+
 }  // namespace android::apex

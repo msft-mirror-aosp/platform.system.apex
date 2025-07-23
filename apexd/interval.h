@@ -74,4 +74,7 @@ std::vector<Interval> NormalizeIntervals(std::vector<Interval> intervals);
 std::pair<std::vector<Interval>, std::vector<Interval>> TakeLengthFromStart(
     const std::vector<Interval> &intervals, uint64_t length);
 
+std::vector<Interval> ApplyOffsetLength(const std::vector<Interval> &intervals,
+                                        uint32_t offset, size_t length);
+
 }  // namespace android::apex
