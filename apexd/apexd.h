@@ -154,6 +154,8 @@ void Initialize(CheckpointInterface* checkpoint_service);
 // "activated").
 void OnStart();
 
+int OnDump(const std::vector<std::string>& args);
+
 android::base::Result<ApexFile> ProcessCompressedApex(const ApexFile& capex,
                                                       bool is_ota_chroot);
 // Validate |apex| is same as |capex|

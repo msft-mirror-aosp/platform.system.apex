@@ -140,6 +140,7 @@ cc_binary {
         "libapexd_metrics_stats-deps",
     ],
     srcs: [
+        "apexd_dump.cpp",
         "apexd_main.cpp",
     ],
     static_libs: [
