@@ -102,6 +102,7 @@ using android::base::boot_clock;
 using android::base::ConsumePrefix;
 using android::base::ErrnoError;
 using android::base::Error;
+using android::base::GetBoolProperty;
 using android::base::GetProperty;
 using android::base::Join;
 using android::base::ParseUint;
@@ -573,6 +574,38 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   LOG(VERBOSE) << "Successfully mounted package " << full_path << " on "
                << mount_point << " duration=" << time_elapsed;
   return apex_data;
+}
+
+// Run test hook commands specified by the sysprop for testing.
+//
+// The sysprop value may have a list of commands separated by |.
+// Available commands are
+// - sleep_ms <ms>: sleep(ms)
+// - error <message>: return Error()
+Result<void> RunTestHookCommands(const std::string& sysprop) {
+  auto hook_commands = GetProperty(sysprop, "");
+  if (!hook_commands.empty()) {
+    // Clear the sysprop so that the command runs only once
+    SetProperty(sysprop, "");
+
+    for (auto command : base::Split(hook_commands, "|")) {
+      if (command.empty()) {
+        continue;
+      }
+      LOG(INFO) << "Running " << command;
+      auto args = base::Split(command, " ");
+      uint32_t num = 0;
+      if (args[0] == "sleep_ms" && args.size() == 2 &&
+          ParseUint(args[1], &num)) {
+        usleep(num * 1000);
+      } else if (args[0] == "error" && args.size() == 2) {
+        return Error() << args[1];
+      } else {
+        LOG(ERROR) << "Invalid command: " << command;
+      }
+    }
+  }
+  return {};
 }
 
 }  // namespace
@@ -2650,6 +2683,12 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   std::vector<std::string> apex_images;
   if (IsMountBeforeDataEnabled()) {
     apex_images = OR_RETURN(GetImageManager()->PinApexFiles(ret));
+  }
+
+  // Run test commands only when installing Shim APEX on a debuggable device.
+  if (GetBoolProperty("ro.debuggable", false) &&
+      std::ranges::any_of(ret, &shim::IsShimApex)) {
+    OR_RETURN(RunTestHookCommands("apexd.test_hook.submit_staged_session"));
   }
 
   // The incoming session is now verified by apexd. From now on, apexd keeps
