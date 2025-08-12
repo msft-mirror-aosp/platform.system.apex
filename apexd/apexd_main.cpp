@@ -81,6 +81,12 @@ int HandleSubcommand(int argc, char** argv) {
     return result;
   }
 
+  if (strcmp("--dump", argv[1]) == 0) {
+    SetDefaultTag("apexd-dump");
+    return android::apex::OnDump(
+        std::vector<std::string>{argv + 2, argv + argc});
+  }
+
   if (strcmp("--vm", argv[1]) == 0) {
     SetDefaultTag("apexd-vm");
     return android::apex::OnStartInVmMode();
