@@ -40,6 +40,7 @@ static const android::apex::ApexdConfig kMicrodroidConfig = {
     nullptr, /* active_apex_selinux_ctx */
     {},      /* brand_new_apex_config_dirs */
     false,   /* mount_before_data */
+    false,   /* migration_mode */
     nullptr, /* metadata_config_dir */
 };
 
