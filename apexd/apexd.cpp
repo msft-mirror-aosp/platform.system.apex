@@ -967,7 +967,15 @@ Result<void> UnmountPackage(const ApexFile& apex, bool deferred,
       flags |= MNT_DETACH;
     }
     if (umount2(mount_point.c_str(), flags) != 0) {
-      return ErrnoError() << "Failed to unmount " << mount_point;
+      auto err = errno;
+      // Invoke apexd-lsof for better debugging on "Device or resource busy"
+      if (err == EBUSY && base::GetBoolProperty("ro.debuggable", false)) {
+        LOG(WARNING) << mount_point << " is busy. See apexd-lsof logs.";
+        if (!SetProperty("apexd.debug.lsof", mount_point)) {
+          LOG(ERROR) << "Failed to invoke apexd-lsof";
+        }
+      }
+      return Error(err) << "Failed to unmount " << mount_point;
     }
 
     if (!deferred) {
