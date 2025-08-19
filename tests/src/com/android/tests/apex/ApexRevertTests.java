@@ -154,9 +154,9 @@ public class ApexRevertTests extends BaseHostJUnit4Test {
                 .doesNotContain(ctsShimV2);
 
         // Assert that a session has failed with the expected reason
-        String sessionInfo = device.executeShellCommand("cmd -w apexservice getStagedSessionInfo "
-                    + sessionIdToCheck);
-        assertThat(sessionInfo).contains("revertReason: zygote");
+        String sessionInfo = getStagedSession(sessionIdToCheck);
+        assertThat(sessionInfo).contains("isFailed = true");
+        assertThat(sessionInfo).contains("crashing native process: zygote");
     }
 
     /**
