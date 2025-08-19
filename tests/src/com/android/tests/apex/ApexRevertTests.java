@@ -47,7 +47,7 @@ import java.util.Set;
  * Test for automatic recovery of apex update that causes boot loop.
  */
 @RunWith(DeviceJUnit4ClassRunner.class)
-public class ApexRollbackTests extends BaseHostJUnit4Test {
+public class ApexRevertTests extends BaseHostJUnit4Test {
     private final InstallUtilsHost mHostUtils = new InstallUtilsHost(this);
     @Rule
     public AbandonSessionsRule mHostTestRule = new AbandonSessionsRule(this);

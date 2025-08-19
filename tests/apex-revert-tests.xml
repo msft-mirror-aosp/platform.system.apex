@@ -13,8 +13,8 @@
      See the License for the specific language governing permissions and
      limitations under the License.
 -->
-<configuration description="Runs the apex rollback test cases">
-    <option name="test-suite-tag" value="apex_rollback_tests" />
+<configuration description="Runs the apex revert test cases">
+    <option name="test-suite-tag" value="apex_revert_tests" />
     <option name="test-suite-tag" value="apct" />
     <target_preparer class="com.android.tradefed.targetprep.RootTargetPreparer"/>
     <target_preparer class="com.android.tradefed.targetprep.PushFilePreparer">
@@ -25,6 +25,6 @@
       <option name="push" value="trigger_reboot.sh->/system/bin/trigger_reboot.sh"/>
     </target_preparer>
     <test class="com.android.tradefed.testtype.HostTest" >
-        <option name="jar" value="apex_rollback_tests.jar" />
+        <option name="jar" value="apex_revert_tests.jar" />
     </test>
 </configuration>
