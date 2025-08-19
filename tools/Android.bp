@@ -163,3 +163,8 @@ python_binary_host {
         "apex_blocklist_proto",
     ],
 }
+
+sh_binary {
+    name: "apexd-lsof.sh",
+    src: "apexd-lsof.sh",
+}
