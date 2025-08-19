@@ -29,6 +29,8 @@ import com.android.tradefed.device.ITestDevice.ApexInfo;
 import com.android.tradefed.log.LogUtil.CLog;
 import com.android.tradefed.testtype.junit4.BaseHostJUnit4Test;
 
+import com.google.common.truth.Correspondence;
+
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -83,12 +85,22 @@ public abstract class ApexE2EBaseHostTest extends BaseHostJUnit4Test {
         stageActivateUninstallApexPackage();
     }
 
+    // TODO(b/438043271) getApexInfo doesn't return a full object. It only has name/version.
+    static final Correspondence<ApexInfo, ApexInfo> APEX_INFO_COMPARE =
+            Correspondence.from(
+                    (ApexInfo a, ApexInfo b) ->
+                            a.name.equals(b.name) && a.versionCode == b.versionCode,
+                    "is equal to");
+
     private void stageActivateUninstallApexPackage()  throws Exception {
         ApexInfo apex = installApex(mApexFileName);
 
         getDevice().reboot(); // for install to take affect
         Set<ApexInfo> activatedApexes = getDevice().getActiveApexes();
-        assertWithMessage("Failed to activate %s", apex).that(activatedApexes).contains(apex);
+        assertWithMessage("Failed to activate %s", apex)
+                .that(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .contains(apex);
 
         additionalCheck();
     }
