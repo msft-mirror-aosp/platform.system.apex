@@ -150,6 +150,7 @@ cc_binary {
         "libapexd",
         "libapexservice",
     ],
+    required: ["apexd-lsof.sh"],
     init_rc: ["apexd.rc"],
     // Just like the init, apexd should be able to run without
     // any APEX activated. To do so, it uses the bootstrap linker
