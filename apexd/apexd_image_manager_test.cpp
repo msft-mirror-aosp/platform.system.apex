@@ -207,6 +207,89 @@ TEST(ApexImageManagerTest, UpdateApexListMultipleTimes) {
               HasValue(IsEmpty()));
 }
 
+TEST(ApexImageManagerTest, BackupAndRestore) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  // Prepare ACTIVE list
+  std::vector<ApexListEntry> list;
+  list.emplace_back("image1", "package1");
+  list.emplace_back("image2", "package2");
+  ASSERT_THAT(image_manager->UpdateApexList(ApexListType::ACTIVE, list), Ok());
+
+  // Create a backup
+  ASSERT_THAT(image_manager->BackupApexList(), Ok());
+
+  // Update ACTIVE list
+  ASSERT_THAT(image_manager->UpdateApexList(
+                  ApexListType::ACTIVE,
+                  UpdateApexListWithNewEntries(list, {{"image3", "package3"}})),
+              Ok());
+
+  // Restore
+  ASSERT_THAT(image_manager->RestoreApexList(), Ok());
+  ASSERT_THAT(image_manager->GetApexList(ApexListType::ACTIVE), HasValue(list));
+  // After restore, backup is cleaned up
+  ASSERT_THAT(image_manager->GetApexList(ApexListType::BACKUP),
+              HasValue(IsEmpty()));
+}
+
+TEST(ApexImageManagerTest, BackupAndRestore_RestoreNeedsBackup) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  // Prepare ACTIVE list
+  std::vector<ApexListEntry> list;
+  list.emplace_back("image1", "package1");
+  list.emplace_back("image2", "package2");
+  ASSERT_THAT(image_manager->UpdateApexList(ApexListType::ACTIVE, list), Ok());
+
+  // Restore fails because there's no BACKUP
+  ASSERT_THAT(image_manager->RestoreApexList(),
+              HasError(WithMessage(HasSubstr("Can't find backup file"))));
+
+  // ACTIVE is not modified
+  ASSERT_THAT(image_manager->GetApexList(ApexListType::ACTIVE), HasValue(list));
+}
+
+TEST(ApexImageManagerTest, BackupAndRestore_CreateBackupFromNothing) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  ASSERT_THAT(image_manager->BackupApexList(), Ok());
+  ASSERT_THAT(image_manager->GetApexList(ApexListType::BACKUP),
+              HasValue(IsEmpty()));
+}
+
+TEST(ApexImageManagerTest, BackupAndRestore_BackupOverwritesExistingBackup) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  // Create a backup
+  std::vector<ApexListEntry> list1;
+  list1.emplace_back("image1", "package1");
+  list1.emplace_back("image2", "package2");
+  ASSERT_THAT(image_manager->UpdateApexList(ApexListType::ACTIVE, list1), Ok());
+  ASSERT_THAT(image_manager->BackupApexList(), Ok());
+
+  // Create a new backup
+  std::vector<ApexListEntry> list2;
+  list2.emplace_back("image3", "package3");
+  ASSERT_THAT(image_manager->UpdateApexList(ApexListType::ACTIVE, list2), Ok());
+  ASSERT_THAT(image_manager->BackupApexList(), Ok());
+
+  ASSERT_THAT(image_manager->GetApexList(ApexListType::BACKUP),
+              HasValue(list2));
+}
+
 TEST(UpdateApexListWithNewEntries, AddNew) {
   auto list = std::vector<ApexListEntry>{};
   auto new_entries = std::vector<ApexListEntry>{
