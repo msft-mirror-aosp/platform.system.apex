@@ -18,6 +18,7 @@
 #define ANDROID_APEXD_APEXD_UTILS_H_
 
 #include <android-base/chrono_utils.h>
+#include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android-base/result.h>
@@ -207,18 +208,17 @@ inline android::base::Result<std::vector<std::string>> GetDeUserDirs() {
 
 inline android::base::Result<std::vector<std::string>> FindFilesBySuffix(
     const std::string& path, const std::vector<std::string>& suffix_list) {
-  auto filter_fn =
-      [&suffix_list](const std::filesystem::directory_entry& entry) {
-        for (const std::string& suffix : suffix_list) {
-          std::error_code ec;
-          auto name = entry.path().filename().string();
-          if (entry.is_regular_file(ec) &&
-              android::base::EndsWith(name, suffix)) {
-            return true;  // suffix matches, take.
-          }
-        }
-        return false;
-      };
+  auto filter_fn = [&suffix_list](
+                       const std::filesystem::directory_entry& entry) {
+    for (const std::string& suffix : suffix_list) {
+      std::error_code ec;
+      auto name = entry.path().filename().string();
+      if (entry.is_regular_file(ec) && android::base::EndsWith(name, suffix)) {
+        return true;  // suffix matches, take.
+      }
+    }
+    return false;
+  };
   return ReadDir(path, filter_fn);
 }
 
@@ -347,6 +347,14 @@ inline android::base::Result<std::string> GetfileconPath(
   std::string ret(ctx);
   freecon(ctx);
   return ret;
+}
+
+inline void TouchFile(const std::string& dir, const std::string& filename) {
+  namespace fs = std::filesystem;
+  auto file = fs::path(dir) / filename;
+  if (!android::base::WriteStringToFile("", file)) {
+    PLOG(ERROR) << "Failed to create " << file;
+  }
 }
 
 // Adapter for a single-valued span

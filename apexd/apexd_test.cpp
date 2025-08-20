@@ -209,6 +209,7 @@ class ApexdUnitTest : public ::testing::Test {
         kTestActiveApexSelinuxCtx,
         {{partition_, brand_new_config_dir_}}, /* brand_new_apex_config_dirs */
         flags::mount_before_data(),
+        false,
         metadata_config_dir_.c_str(),
     };
   }
