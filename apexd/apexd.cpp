@@ -93,7 +93,6 @@
 #include "apexd_verity.h"
 #include "com_android_apex.h"
 #include "com_android_apex_flags.h"
-#include "interval.h"
 
 namespace flags = com::android::apex::flags;
 namespace fs = std::filesystem;
@@ -372,13 +371,6 @@ bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
     return false;
   }
   return true;
-}
-
-[[maybe_unused]] void CreateMetadataConfigFile(const std::string& filename) {
-  auto config_file = fs::path(gConfig->metadata_config_dir) / filename;
-  if (!WriteStringToFile("", config_file)) {
-    PLOG(ERROR) << "Failed to create " << config_file;
-  }
 }
 
 Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex) {
@@ -2558,7 +2550,8 @@ void OnStart() {
     // the device never goes back to the migration state even if OnStart() fails
     // to complete.
     if (IsMountBeforeDataEnabled()) {
-      CreateMetadataConfigFile("mount_before_data");
+      android::apex::TouchFile(gConfig->metadata_config_dir,
+                               "mount_before_data");
     }
   }
 
@@ -2874,7 +2867,8 @@ void BootCompletedCleanup() REQUIRES(!gInstallLock) {
   if constexpr (flags::mount_before_data()) {
     // Mark "migration done" by creating /metadata/apex/config/mount_before_data
     if (IsMountBeforeDataEnabled() || CanMountBeforeDataOnNextBoot()) {
-      CreateMetadataConfigFile("mount_before_data");
+      android::apex::TouchFile(gConfig->metadata_config_dir,
+                               "mount_before_data");
     }
   }
 }

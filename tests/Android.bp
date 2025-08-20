@@ -128,8 +128,8 @@ prebuilt_etc {
 }
 
 java_test_host {
-    name: "apex_rollback_tests",
-    srcs: ["src/**/ApexRollbackTests.java"],
+    name: "apex_revert_tests",
+    srcs: ["src/**/ApexRevertTests.java"],
     libs: [
         "tradefed",
         "truth",
@@ -138,7 +138,7 @@ java_test_host {
         "frameworks-base-hostutils",
         "cts-install-lib-host",
     ],
-    test_config: "apex-rollback-tests.xml",
+    test_config: "apex-revert-tests.xml",
     test_suites: ["general-tests"],
 
     data: [
