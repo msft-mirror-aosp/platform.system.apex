@@ -3547,5 +3547,20 @@ void SaveChangedActiveApexes(
 
 ApexSessionManager* GetSessionManager() { return gSessionManager; }
 
+void RebootImpl() {
+  LOG(INFO) << "Rebooting device";
+  if (android_reboot(ANDROID_RB_RESTART2, 0, nullptr) != 0) {
+    LOG(ERROR) << "Failed to reboot device";
+  }
+  // Wait for reboot to complete as we expect this to be a terminal
+  // command. Crash apexd if reboot does not complete even after
+  // waiting an arbitrary significant amount of time.
+  std::this_thread::sleep_for(std::chrono::seconds(120));
+  LOG(FATAL) << "Device did not reboot within 120 seconds";
+}
+
+// Use the real implementation by default. Unit tests need to override it.
+void (*Reboot)() = &RebootImpl;
+
 }  // namespace apex
 }  // namespace android
