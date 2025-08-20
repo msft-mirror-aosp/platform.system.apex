@@ -172,7 +172,7 @@ public class ApexRevertTests extends BaseHostJUnit4Test {
 
         ITestDevice device = getDevice();
         assertThat(device.setProperty("persist.debug.trigger_reboot_after_activation",
-                "com.android.apex.cts.shim@2.apex")).isTrue();
+                "com.android.apex.cts.shim@2")).isTrue();
         assertThat(device.setProperty("debug.trigger_reboot_once_after_activation",
                 "1")).isTrue();
 
@@ -214,7 +214,7 @@ public class ApexRevertTests extends BaseHostJUnit4Test {
 
         ITestDevice device = getDevice();
         assertThat(device.setProperty("persist.debug.trigger_reboot_after_activation",
-                "com.android.apex.cts.shim@2.apex")).isTrue();
+                "com.android.apex.cts.shim@2")).isTrue();
         assertThat(device.setProperty("persist.debug.trigger_reboot_twice_after_activation",
                 "1")).isTrue();
         String error = mHostUtils.installStagedPackage(apexFile);
@@ -256,7 +256,7 @@ public class ApexRevertTests extends BaseHostJUnit4Test {
 
         ITestDevice device = getDevice();
         assertThat(device.setProperty("persist.debug.trigger_reboot_after_activation",
-                "com.android.apex.cts.shim@2.apex")).isTrue();
+                "com.android.apex.cts.shim@2")).isTrue();
         assertThat(device.setProperty("debug.trigger_reboot_once_after_activation",
                 "1")).isTrue();
         String error = mHostUtils.installStagedPackage(apexFile);
