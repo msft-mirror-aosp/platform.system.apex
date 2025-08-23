@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <filesystem>
 #include <type_traits>
 
 #include "apex_image_list.pb.h"
@@ -667,6 +668,27 @@ std::string ApexImageManager::GetApexListFile(ApexListType list_type) const {
 
 std::string ApexImageManager::GetApexStorageMetadataPath() const {
   return metadata_dir_ + "/apex.img.metadata";
+}
+
+Result<void> ApexImageManager::BackupApexList() {
+  auto active_list = OR_RETURN(GetApexList(ApexListType::ACTIVE));
+  OR_RETURN(UpdateApexList(ApexListType::BACKUP, active_list));
+  LOG(INFO) << "Backed up the active set of APEX packages";
+  return {};
+}
+
+Result<void> ApexImageManager::RestoreApexList() {
+  auto backup_list_file = GetApexListFile(ApexListType::BACKUP);
+  if (!OR_RETURN(PathExists(backup_list_file))) {
+    return Error() << "Can't find backup file: " << backup_list_file;
+  }
+  auto active_list_file = GetApexListFile(ApexListType::ACTIVE);
+  if (rename(backup_list_file.c_str(), active_list_file.c_str()) == -1) {
+    return ErrnoError() << "Fail to rename " << backup_list_file << " to "
+                        << active_list_file;
+  }
+  LOG(INFO) << "Restored the active set of APEX packages";
+  return {};
 }
 
 Result<void> ApexImageManager::UpdateApexList(

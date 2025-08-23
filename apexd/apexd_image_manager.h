@@ -97,6 +97,11 @@ class ApexImageManager {
   base::Result<void> UnmapImageIfExists(const std::string& image);
   base::Result<std::vector<Interval>> GetImageExtents(const std::string& image);
 
+  // Creates a backup of the current ACTIVE apex list
+  base::Result<void> BackupApexList();
+  // Restores the ACTIVE apex list from the last backup
+  base::Result<void> RestoreApexList();
+
   base::Result<void> UpdateApexList(ApexListType list_type,
                                     const std::vector<ApexListEntry>& entries);
   base::Result<std::vector<ApexListEntry>> GetApexList(

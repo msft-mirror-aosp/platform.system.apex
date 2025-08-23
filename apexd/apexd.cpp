@@ -101,6 +101,7 @@ using android::base::boot_clock;
 using android::base::ConsumePrefix;
 using android::base::ErrnoError;
 using android::base::Error;
+using android::base::GetBoolProperty;
 using android::base::GetProperty;
 using android::base::Join;
 using android::base::ParseUint;
@@ -565,6 +566,38 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   LOG(VERBOSE) << "Successfully mounted package " << full_path << " on "
                << mount_point << " duration=" << time_elapsed;
   return apex_data;
+}
+
+// Run test hook commands specified by the sysprop for testing.
+//
+// The sysprop value may have a list of commands separated by |.
+// Available commands are
+// - sleep_ms <ms>: sleep(ms)
+// - error <message>: return Error()
+Result<void> RunTestHookCommands(const std::string& sysprop) {
+  auto hook_commands = GetProperty(sysprop, "");
+  if (!hook_commands.empty()) {
+    // Clear the sysprop so that the command runs only once
+    SetProperty(sysprop, "");
+
+    for (auto command : base::Split(hook_commands, "|")) {
+      if (command.empty()) {
+        continue;
+      }
+      LOG(INFO) << "Running " << command;
+      auto args = base::Split(command, " ");
+      uint32_t num = 0;
+      if (args[0] == "sleep_ms" && args.size() == 2 &&
+          ParseUint(args[1], &num)) {
+        usleep(num * 1000);
+      } else if (args[0] == "error" && args.size() == 2) {
+        return Error() << args[1];
+      } else {
+        LOG(ERROR) << "Invalid command: " << command;
+      }
+    }
+  }
+  return {};
 }
 
 }  // namespace
@@ -2043,11 +2076,34 @@ Result<void> UnstagePackages(const std::vector<std::string>& paths) {
   return {};
 }
 
+void MarkSessions(std::vector<ApexSession>& sessions,
+                  SessionState::State state) {
+  for (auto& session : sessions) {
+    auto st = session.UpdateStateAndCommit(state);
+    LOG(DEBUG) << "Marking " << session << " as "
+               << SessionState_State_Name(state);
+    if (!st.ok()) {
+      LOG(WARNING) << "Failed to mark session " << session << " as "
+                   << SessionState_State_Name(state) << ": " << st.error();
+    }
+  }
+}
+
 /**
  * During apex installation, staged sessions located in
- * /metadata/apex/sessions mutate the active sessions in /data/apex/active. If
- * some error occurs during installation of apex, we need to revert
- * /data/apex/active to its original state and reboot.
+ * /metadata/apex/sessions mutate the active set of APEXes. If some error occurs
+ * during installation, we need to revert the active set of APEXes to its
+ * original state and reboot.
+ *
+ * For example, if the active set of APEXes are kept in /data/apex/active, the
+ * directory should be backed up on staging, and restored here. In case FS
+ * checkpointing is supported, the backup/restore can be skipped because
+ * reboot will restore the /data partition to the original state.
+ *
+ * With mount_before_data, the /data partition is not changed during
+ * installation. Instead, the list of active APEXes is kept in /metadata/apex.
+ * The list should be backed up on staging, and restored here. FS checkpointing
+ * doesn't matter.
  *
  * Also, we need to put staged sessions in /metadata/apex/sessions in
  * REVERTED state so that they do not get activated on next reboot.
@@ -2069,6 +2125,9 @@ Result<void> RevertActiveSessions(const std::string& crashing_native_process,
     return Error() << "Revert requested, when there are no active sessions.";
   }
 
+  // Before proceeding the actual revert, let's mark active sessions as
+  // REVERT_IN_PROGRESS so that even if the revert fails we can resume revert
+  // on next reboot and avoid reapplying the active sessions.
   for (auto& session : active_sessions) {
     if (!crashing_native_process.empty()) {
       session.SetCrashingNativeProcess(crashing_native_process);
@@ -2084,18 +2143,19 @@ Result<void> RevertActiveSessions(const std::string& crashing_native_process,
     }
   }
 
-  if (!gSupportsFsCheckpoints) {
-    auto restore_status = RestoreActivePackages();
-    if (!restore_status.ok()) {
-      for (auto& session : active_sessions) {
-        auto st = session.UpdateStateAndCommit(SessionState::REVERT_FAILED);
-        LOG(DEBUG) << "Marking " << session << " as failed to revert";
-        if (!st.ok()) {
-          LOG(WARNING) << "Failed to mark session " << session
-                       << " as failed to revert : " << st.error();
-        }
-      }
-      return restore_status;
+  // Revert the active set of APEXes now!
+
+  if (IsMountBeforeDataEnabled()) {
+    auto st = GetImageManager()->RestoreApexList();
+    if (!st.ok()) {
+      MarkSessions(active_sessions, SessionState::REVERT_FAILED);
+      return st;
+    }
+  } else if (!gSupportsFsCheckpoints) {
+    auto st = RestoreActivePackages();
+    if (!st.ok()) {
+      MarkSessions(active_sessions, SessionState::REVERT_FAILED);
+      return st;
     }
   } else {
     LOG(INFO) << "Not restoring active packages in checkpoint mode.";
@@ -2107,13 +2167,9 @@ Result<void> RevertActiveSessions(const std::string& crashing_native_process,
       // pre-restore snapshot.
       RestoreDePreRestoreSnapshotsIfPresent(session);
     }
-
-    auto status = session.UpdateStateAndCommit(SessionState::REVERTED);
-    if (!status.ok()) {
-      LOG(WARNING) << "Failed to mark session " << session
-                   << " as reverted : " << status.error();
-    }
   }
+
+  MarkSessions(active_sessions, SessionState::REVERTED);
 
   return {};
 }
@@ -2567,7 +2623,15 @@ void OnStart() {
       LOG(INFO) << "Exceeded number of session retries ("
                 << kNumRetriesWhenCheckpointingEnabled
                 << "). Starting a revert";
-      RevertActiveSessions("", "");
+      if (auto st = RevertActiveSessions("", ""); st.ok()) {
+        // After reverting the active sessions and restoring the active APEXes,
+        // need to reboot to activate the restored active APEXes.
+        if (IsMountBeforeDataEnabled()) {
+          Reboot();
+        }
+      } else {
+        LOG(ERROR) << "Revert failed: " << st.error();
+      }
     }
   }
 
@@ -2633,12 +2697,10 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
                    << " rollback and enabled for rollback.";
   }
 
-  if (!gSupportsFsCheckpoints) {
-    Result<void> backup_status = BackupActivePackages();
-    if (!backup_status.ok()) {
-      // Do not proceed with staged install without backup
-      return backup_status.error();
-    }
+  if (IsMountBeforeDataEnabled()) {
+    OR_RETURN(GetImageManager()->BackupApexList());
+  } else if (!gSupportsFsCheckpoints) {
+    OR_RETURN(BackupActivePackages());
   }
 
   auto ret =
@@ -2651,6 +2713,12 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   std::vector<std::string> apex_images;
   if (IsMountBeforeDataEnabled()) {
     apex_images = OR_RETURN(GetImageManager()->PinApexFiles(ret));
+  }
+
+  // Run test commands only when installing Shim APEX on a debuggable device.
+  if (GetBoolProperty("ro.debuggable", false) &&
+      std::ranges::any_of(ret, &shim::IsShimApex)) {
+    OR_RETURN(RunTestHookCommands("apexd.test_hook.submit_staged_session"));
   }
 
   // The incoming session is now verified by apexd. From now on, apexd keeps
@@ -3546,6 +3614,21 @@ void SaveChangedActiveApexes(
 }
 
 ApexSessionManager* GetSessionManager() { return gSessionManager; }
+
+void RebootImpl() {
+  LOG(INFO) << "Rebooting device";
+  if (android_reboot(ANDROID_RB_RESTART2, 0, nullptr) != 0) {
+    LOG(ERROR) << "Failed to reboot device";
+  }
+  // Wait for reboot to complete as we expect this to be a terminal
+  // command. Crash apexd if reboot does not complete even after
+  // waiting an arbitrary significant amount of time.
+  std::this_thread::sleep_for(std::chrono::seconds(120));
+  LOG(FATAL) << "Device did not reboot within 120 seconds";
+}
+
+// Use the real implementation by default. Unit tests need to override it.
+void (*Reboot)() = &RebootImpl;
 
 }  // namespace apex
 }  // namespace android

@@ -139,6 +139,8 @@ static Result<ApexFile> GetActivePackage(const std::string& packageName) {
          << "Cannot find matching package for: " << packageName;
 }
 
+static void RebootForTest() { LOG(INFO) << "Rebooting device"; }
+
 // A very basic mock of CheckpointInterface.
 class MockCheckpointInterface : public CheckpointInterface {
  public:
@@ -352,12 +354,14 @@ class ApexdUnitTest : public ::testing::Test {
     InitializeImageManager(image_manager_.get());
 
     SetProperty(kTestApexdChangedActiveApexesSysprop, "");
+    Reboot = &RebootForTest;
   }
 
   void TearDown() override {
     DeleteDirContent(GetSessionsDir());
     // Reset vold; some tests changing this might affect other tests.
     InitializeVold(nullptr);
+    Reboot = &RebootImpl;
   }
 
  protected:
