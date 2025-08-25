@@ -124,6 +124,8 @@ android::base::Result<void> ActivatePackage(const std::string& full_path)
 android::base::Result<void> DeactivatePackage(const std::string& full_path)
     WARN_UNUSED;
 
+android::base::Result<void> BackupActiveApexes();
+
 std::vector<ApexFile> GetActivePackages();
 
 std::vector<ApexFile> GetFactoryPackages();
