@@ -4270,23 +4270,22 @@ struct SpyMetrics : Metrics {
 };
 
 TEST_F(ApexdMountTest, SendEventOnSubmitStagedSession) {
-  if (IsMountBeforeDataEnabled()) GTEST_SKIP() << "mount_before_data enabled";
-
-  MockCheckpointInterface checkpoint_interface;
-  checkpoint_interface.SetSupportsCheckpoint(true);
-  InitializeVold(&checkpoint_interface);
-
-  InitMetrics(std::make_unique<SpyMetrics>());
-
+  // Prepare a vendor APEX.
   std::string preinstalled_apex =
       AddPreInstalledApex("com.android.apex.vendor.foo.apex");
-
-  // Test APEX is a "vendor" APEX. Preinstalled partition should be vendor.
   ASSERT_RESULT_OK(ApexFileRepository::GetInstance().AddPreInstalledApex(
       {{ApexPartition::Vendor, GetBuiltInDir()}}));
 
-  OnStart();
+  // Prepare /apex/apex-info-list.xml for checkvintf to run.
+  // Note that checkvintf result is used in assertions below.
+  auto apex = ApexFile::Open(preinstalled_apex);
+  ASSERT_THAT(apex, Ok());
+  EmitApexInfoList(std::vector{std::cref(*apex)}, /*is_bootstrap=*/false);
 
+  // Install SpyMetrics
+  InitMetrics(std::make_unique<SpyMetrics>());
+
+  // Call SubmitStagedSession with a new APEX with vintf_fragment
   PrepareStagedSession("com.android.apex.vendor.foo.with_vintf.apex", 239);
   ASSERT_RESULT_OK(SubmitStagedSession(239, {}, false, false, -1));
 
