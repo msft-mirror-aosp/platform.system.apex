@@ -1019,6 +1019,11 @@ Result<void> UnmountPackage(const ApexFile& apex, bool deferred,
 
 void SetConfig(const ApexdConfig& config) { gConfig = config; }
 
+const ApexdConfig& GetConfig() {
+  CHECK(gConfig.has_value()) << "Call SetConfig() first";
+  return *gConfig;
+}
+
 Result<void> MountPackage(const ApexFile& apex, const std::string& mount_point,
                           int32_t loop_id, const std::string& device_name,
                           bool reuse_device) {
@@ -2182,13 +2187,32 @@ Result<void> RevertActiveSessionsAndReboot(
     return status;
   }
   LOG(ERROR) << "Successfully reverted. Time to reboot device.";
-  if (gInFsCheckpointMode) {
-    Result<void> res = gVoldService->AbortChanges(
-        "apexd_initiated" /* message */, false /* retry */);
-    if (!res.ok()) {
-      LOG(ERROR) << res.error();
+
+  // Before reboot, need to abort the checkpoint mode if it is.
+
+  // In case `vold` service is available, use it.
+  if (gVoldService) {
+    // If the device is in FS checkpoint mode, let's abort it and reboot so that
+    // the device to be in "needsRollback" mode.
+    if (gInFsCheckpointMode) {
+      auto result = gVoldService->AbortChanges(/*message=*/"apexd_initiated",
+                                               /*retry=*/false);
+      if (!result.ok()) {
+        LOG(ERROR) << result.error();
+      }
+    }
+  } else if (IsMountBeforeDataEnabled()) {
+    // This is the case when apexd-bootstrap fails to activate new APEXes.
+    // Even if the filesystem supports checkpointing and the device is in the
+    // checkpoint mode, apexd-bootstrap can't delegate "abortChanges" to vold
+    // because vold hasn't started. apexd-bootstrap must therefore perform it
+    // on its own.
+    auto result = AbortChanges();
+    if (!result.ok()) {
+      LOG(ERROR) << "Failed to abort checkpoint: " << result.error();
     }
   }
+
   Reboot();
   return {};
 }
@@ -3617,7 +3641,7 @@ ApexSessionManager* GetSessionManager() { return gSessionManager; }
 
 void RebootImpl() {
   LOG(INFO) << "Rebooting device";
-  if (android_reboot(ANDROID_RB_RESTART2, 0, nullptr) != 0) {
+  if (android_reboot(ANDROID_RB_RESTART2, 0, "apexd_initiated") != 0) {
     LOG(ERROR) << "Failed to reboot device";
   }
   // Wait for reboot to complete as we expect this to be a terminal

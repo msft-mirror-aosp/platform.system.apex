@@ -125,5 +125,7 @@ static const std::unordered_map<ApexPartition, std::string>
         {ApexPartition::Odm, kBrandNewApexConfigOdmDir},
 };
 
+static constexpr const char* kCheckpointFile = "/metadata/vold/checkpoint";
+
 }  // namespace apex
 }  // namespace android

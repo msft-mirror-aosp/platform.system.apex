@@ -58,6 +58,9 @@ struct ApexdConfig {
 
   std::unordered_map<ApexPartition, std::string> brand_new_apex_config_dirs;
 
+  // Path to the checkpoint file managed by vold: /metadata/vold/checkpoint
+  const char* checkpoint_file;
+
   // TODO(b/381173074) True in tests for now. Will be configured as true if
   // - new device (ro.vendor.api_level >= 202504 (TBD))
   // - or, upgrading device with migration done (e.g. flag in /metadata/apex)
@@ -77,6 +80,7 @@ static const ApexdConfig kDefaultConfig = {
     kVmPayloadMetadataPartitionProp,
     "u:object_r:staging_data_file",
     kBrandNewApexConfigDirs,
+    kCheckpointFile,
     false, /* mount_before_data */
     false, /* migration_mode */
     kMetadataConfigDir,
@@ -85,6 +89,7 @@ static const ApexdConfig kDefaultConfig = {
 class CheckpointInterface;
 
 void SetConfig(const ApexdConfig& config);
+const ApexdConfig& GetConfig();
 
 // Exposed only for testing.
 android::base::Result<void> Unmount(
