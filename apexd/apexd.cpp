@@ -445,7 +445,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   };
   auto scope_guard = android::base::make_scope_guard(deleter);
   if (!IsEmptyDirectory(mount_point)) {
-    return ErrnoError() << mount_point << " is not empty";
+    return Error() << mount_point << " is not empty";
   }
 
   const std::string& full_path = apex.GetPath();
