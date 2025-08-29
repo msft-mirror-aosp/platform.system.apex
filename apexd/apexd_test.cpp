@@ -3826,6 +3826,8 @@ TEST_F(ApexActivationFailureTests, StagedSessionRevertsWhenInFsRollbackMode) {
   auto apex_session = CreateStagedSession("apex.apexd_test.apex", 123);
   ASSERT_RESULT_OK(apex_session);
   apex_session->UpdateStateAndCommit(SessionState::STAGED);
+  // Revert requires a backup
+  ASSERT_THAT(BackupActiveApexes(), Ok());
 
   OnStart();
 
@@ -4050,6 +4052,8 @@ TEST_F(ApexdUnitTest, RevertStoresCrashingNativeProcess) {
   ASSERT_THAT(apex_session, Ok());
   ASSERT_THAT(apex_session->UpdateStateAndCommit(SessionState::ACTIVATED),
               Ok());
+  // RevertActiveSessions() assumes BackupActiveApexes() is called.
+  ASSERT_THAT(BackupActiveApexes(), Ok());
 
   ASSERT_THAT(RevertActiveSessions("test_process", ""), Ok());
   apex_session = GetSessionManager()->GetSession(1543);
