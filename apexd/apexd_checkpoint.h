@@ -37,6 +37,11 @@ class CheckpointInterface {
                                                    bool retry) = 0;
 };
 
+// With mount_before_data, apexd-bootstrap should be able to "abortChanges"
+// while vold hasn't started yet. apexd-bootstrap performs it as an exception.
+// This should be in sync with cp_abortChanges in system/vold/Checkpoint.cpp.
+base::Result<void> AbortChanges();
+
 }  // namespace apex
 }  // namespace android
 

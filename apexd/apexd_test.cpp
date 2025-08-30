@@ -198,6 +198,7 @@ class ApexdUnitTest : public ::testing::Test {
         ApexImageManager::Create(metadata_images_dir_, data_images_dir_);
     metadata_config_dir_ = StringPrintf("%s/metadata-config", td_.path);
     brand_new_config_dir_ = StringPrintf("%s/brand-new-config", td_.path);
+    checkpoint_file_ = StringPrintf("%s/checkpoint", td_.path);
 
     config_ = ApexdConfig{
         kTestApexdStatusSysprop,
@@ -210,6 +211,7 @@ class ApexdUnitTest : public ::testing::Test {
         kTestVmPayloadMetadataPartitionProp,
         kTestActiveApexSelinuxCtx,
         {{partition_, brand_new_config_dir_}}, /* brand_new_apex_config_dirs */
+        checkpoint_file_.c_str(),
         flags::mount_before_data(),
         false,
         metadata_config_dir_.c_str(),
@@ -380,10 +382,13 @@ class ApexdUnitTest : public ::testing::Test {
 
   std::string metadata_images_dir_;
   std::string data_images_dir_;
+
   std::unique_ptr<ApexImageManager> image_manager_;
 
   std::string metadata_config_dir_;
   std::string brand_new_config_dir_;
+
+  std::string checkpoint_file_;
 
   ApexdConfig config_;
 };
@@ -4733,6 +4738,12 @@ class MountBeforeDataTest : public ApexdMountTest {
     DeleteDirContent(staged_session_dir_);
     InitializeVold(nullptr);
   }
+
+  void StagePackage(const std::string& test_apex, int session_id) {
+    PrepareStagedSession(test_apex, session_id);
+    ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+    ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+  }
 };
 
 TEST_F(MountBeforeDataTest, ActivatePinnedApex) {
@@ -5072,6 +5083,30 @@ TEST_F(MountBeforeDataTest, UnstagePackages) {
   // Now v1 is activated.
   ASSERT_THAT(GetApexMounts(),
               Contains("/apex/com.android.apex.test_package@1"));
+}
+
+TEST_F(MountBeforeDataTest, AbortChangesOnActivationFailure) {
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Set checkpointing
+  ASSERT_TRUE(base::WriteStringToFile("3", checkpoint_file_));
+
+  // Stage com.android.apex.test_package@2
+  auto session_id = 42;
+  StagePackage("apex.apexd_test_v2.apex", session_id);
+  SimulateReboot();
+
+  // Create a mount-point directory with a dummy file in it so that
+  // the activation fails.
+  ASSERT_THAT(mkdir("/apex/com.android.apex.test_package@2", 0755), Eq(0));
+  TouchFile("/apex/com.android.apex.test_package@2", "dummy");
+
+  // Note that failure is recovered by fallback to preinstalled.
+  ASSERT_THAT(OnBootstrap(), Eq(0));
+
+  std::string content;
+  ASSERT_TRUE(base::ReadFileToString(checkpoint_file_, &content));
+  ASSERT_EQ(content, "0");
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
