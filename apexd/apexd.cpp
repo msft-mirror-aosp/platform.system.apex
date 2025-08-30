@@ -445,7 +445,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   };
   auto scope_guard = android::base::make_scope_guard(deleter);
   if (!IsEmptyDirectory(mount_point)) {
-    return ErrnoError() << mount_point << " is not empty";
+    return Error() << mount_point << " is not empty";
   }
 
   const std::string& full_path = apex.GetPath();
@@ -2697,11 +2697,11 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
                    << " rollback and enabled for rollback.";
   }
 
-  if (IsMountBeforeDataEnabled()) {
-    OR_RETURN(GetImageManager()->BackupApexList());
-  } else if (!gSupportsFsCheckpoints) {
-    OR_RETURN(BackupActivePackages());
-  }
+  // Create a backup of the current ACTIVE APEXes or update the existing backup.
+  // This could be called just before applying staged sessions in
+  // ProcessSessions() but we want to put as much as possible in
+  // SubmitStagedSession() to avoid fail-and-recover during boot.
+  OR_RETURN(BackupActiveApexes());
 
   auto ret =
       OR_RETURN(OpenApexFilesInSessionDirs(session_id, child_session_ids));
@@ -3610,6 +3610,16 @@ void SaveChangedActiveApexes(
   if (!SetProperty(gConfig->apexd_changed_active_apexes_sysprop, content)) {
     LOG(ERROR) << "Failed to set "
                << gConfig->apexd_changed_active_apexes_sysprop;
+  }
+}
+
+Result<void> BackupActiveApexes() {
+  if (IsMountBeforeDataEnabled()) {
+    return GetImageManager()->BackupApexList();
+  } else if (!gSupportsFsCheckpoints) {
+    return BackupActivePackages();
+  } else {
+    return {};
   }
 }
 

@@ -17,5 +17,6 @@
 prebuilt_etc {
     name: "apexd.mainline_patch_level_2",
     src: "com.google.android.mainline.patchlevel.2.xml",
+    sub_dir: "sysconfig",
     filename_from_src: true,
 }
