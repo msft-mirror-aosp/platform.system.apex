@@ -41,12 +41,21 @@ namespace fs = std::filesystem;
 using android::base::Basename;
 using android::base::Join;
 using android::base::StringPrintf;
+using android::base::testing::HasError;
 using android::base::testing::Ok;
+using android::base::testing::WithMessage;
+using ::testing::HasSubstr;
 using ::testing::Not;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
 
 // TODO(b/170327382): add unit tests for apexd_utils.h
+
+TEST(ApexdUtilTest, GetSubdirsReturnsErrorWithNonExistingDir) {
+  TemporaryDir td;
+  ASSERT_THAT(GetSubdirs(std::string(td.path) + "/non-existing"),
+              HasError(WithMessage(HasSubstr("No such file or directory"))));
+}
 
 TEST(ApexdUtilTest, DeleteDirContent) {
   TemporaryDir root_dir;
