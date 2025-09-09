@@ -1754,7 +1754,7 @@ void RestorePreRestoreSnapshotsIfPresent(const std::string& base_dir,
   auto pre_restore_snapshot_path =
       StringPrintf("%s/%s/%d%s", base_dir.c_str(), kApexSnapshotSubDir,
                    session.GetRollbackId(), kPreRestoreSuffix);
-  if (PathExists(pre_restore_snapshot_path).ok()) {
+  if (auto st = PathExists(pre_restore_snapshot_path); st.ok() && st.value()) {
     for (const auto& apex_name : session.GetApexNames()) {
       Result<void> result = RestoreDataDirectory(
           base_dir, session.GetRollbackId(), apex_name, true /* pre_restore */);
@@ -1773,6 +1773,7 @@ void RestoreDePreRestoreSnapshotsIfPresent(const ApexSession& session) {
   if (!user_dirs.ok()) {
     LOG(ERROR) << "Error reading user dirs to restore pre-restore snapshots"
                << user_dirs.error();
+    return;
   }
 
   for (const auto& user_dir : *user_dirs) {
@@ -1798,6 +1799,7 @@ void DeleteDePreRestoreSnapshots(const ApexSession& session) {
   if (!user_dirs.ok()) {
     LOG(ERROR) << "Error reading user dirs to delete pre-restore snapshots"
                << user_dirs.error();
+    return;
   }
 
   for (const auto& user_dir : *user_dirs) {
