@@ -58,7 +58,7 @@ android::base::Result<void> WalkDir(const std::string& path, Fn fn) {
   }
   if (ec) {
     return android::base::Error(android::base::Errno(ec.value()))
-           << "Can't open " << path << " for reading : " << ec.message();
+           << "Can't open " << path << " for reading";
   }
   return {};
 }

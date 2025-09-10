@@ -2166,6 +2166,20 @@ Result<void> RevertActiveSessions(const std::string& crashing_native_process,
     LOG(INFO) << "Not restoring active packages in checkpoint mode.";
   }
 
+  // Installing a rollback means restoring the apexdata (DE_sys/DE_n) as well.
+  // In case of reverting a rollback, the restored apexdata should be reverted.
+  // This is done automatically for devices with FS checkpointing. Otherwise,
+  // the apexdata should be manually snapshotted (aka, pre-restore snapshot),
+  // and restored when reverting.
+  //
+  // In case of mount-before-data, RevertActiveSessions() can be invoked in
+  // either apexd-bootstrap (before /data) or apexd (after /data). apexd works
+  // fine for both cases: When it's called in apexd-bootstrap, the apexdata is
+  // not restored yet, hence nothing to revert. When it's called in apexd, it
+  // works just as expected. Btw, RestoreDePreRestoreSnapshotsIfPresent() will
+  // emit some error messages (with no harm) when it's called during
+  // apexd-bootstrap because there's no /data yet.
+
   for (auto& session : active_sessions) {
     if (!gSupportsFsCheckpoints && session.IsRollback()) {
       // If snapshots have already been restored, undo that by restoring the
