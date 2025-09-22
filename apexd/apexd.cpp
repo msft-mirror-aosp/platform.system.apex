@@ -359,6 +359,8 @@ Result<loop::LoopbackDeviceUniqueFd> CreateLoopForApex(const ApexFile& apex,
 
 bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
 
+bool UsesPinnedApex() { return gConfig->uses_pinned_apex; }
+
 [[maybe_unused]] bool CanMountBeforeDataOnNextBoot() {
   // If there's no data apex files in /data/apex/active and no capex files, then
   // apexd-bootstrap can mount ALL apexes (preinstalled and pinned data apexes).
@@ -456,7 +458,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   loop::LoopbackDeviceUniqueFd loop;
   DmDevice linear_dev;
 
-  if (IsMountBeforeDataEnabled() && GetImageManager()->IsPinnedApex(apex)) {
+  if (UsesPinnedApex() && GetImageManager()->IsPinnedApex(apex)) {
     linear_dev = OR_RETURN(CreateDmLinearForPayload(apex));
     block_device = linear_dev.GetDevPath();
   } else {
@@ -1371,7 +1373,7 @@ Result<void> AbortStagedSession(int session_id) REQUIRES(!gInstallLock) {
     case SessionState::VERIFIED:
       [[fallthrough]];
     case SessionState::STAGED:
-      if (IsMountBeforeDataEnabled()) {
+      if (UsesPinnedApex()) {
         for (const auto& image : session->GetApexImages()) {
           auto result = GetImageManager()->DeleteImage(image);
           if (!result.ok()) {
@@ -1821,7 +1823,7 @@ Result<std::vector<std::string>> TryActivateStagedSession(
            << "Cannot install apex session if not in fs-checkpoint mode";
   }
 
-  if (IsMountBeforeDataEnabled()) {
+  if (UsesPinnedApex()) {
     if (session.GetApexImages().empty()) {
       return Error() << "No apex found in session";
     }
@@ -2152,7 +2154,7 @@ Result<void> RevertActiveSessions(const std::string& crashing_native_process,
 
   // Revert the active set of APEXes now!
 
-  if (IsMountBeforeDataEnabled()) {
+  if (UsesPinnedApex()) {
     auto st = GetImageManager()->RestoreApexList();
     if (!st.ok()) {
       MarkSessions(active_sessions, SessionState::REVERT_FAILED);
@@ -2281,7 +2283,6 @@ void ProcessSessions(ActivationContext& ctx) {
 }
 
 std::vector<ApexFile> ScanDataApexFiles(ApexImageManager* manager) {
-  CHECK(IsMountBeforeDataEnabled());
   auto image_list = manager->GetApexList(ApexListType::ACTIVE);
   if (!image_list.ok()) {
     LOG(ERROR) << "Failed to get active image list : " << image_list.error();
@@ -2620,6 +2621,11 @@ void ActivateApexesOnStart() {
   // them to /data/apex/active first.
   ProcessSessions(ctx);
 
+  if (UsesPinnedApex()) {
+    auto data_apexes = ScanDataApexFiles(GetImageManager());
+    ApexFileRepository::GetInstance().AddDataApexFiles(std::move(data_apexes));
+  }
+
   auto& instance = ApexFileRepository::GetInstance();
   if (auto status = instance.AddDataApex(gConfig->active_apex_data_dir);
       !status.ok()) {
@@ -2751,7 +2757,7 @@ Result<std::vector<ApexFile>> SubmitStagedSession(
   event.AddHals(result.apex_hals);
 
   std::vector<std::string> apex_images;
-  if (IsMountBeforeDataEnabled()) {
+  if (UsesPinnedApex()) {
     apex_images = OR_RETURN(GetImageManager()->PinApexFiles(ret));
   }
 
@@ -2974,7 +2980,7 @@ void BootCompletedCleanup() REQUIRES(!gInstallLock) {
 
   if constexpr (flags::mount_before_data()) {
     // Mark "migration done" by creating /metadata/apex/config/mount_before_data
-    if (IsMountBeforeDataEnabled() || CanMountBeforeDataOnNextBoot()) {
+    if (CanMountBeforeDataOnNextBoot()) {
       android::apex::TouchFile(gConfig->metadata_config_dir,
                                "mount_before_data");
     }
@@ -3277,7 +3283,7 @@ int OnOtaChrootBootstrap(bool also_include_staged_apexes) {
     }
   }
 
-  if constexpr (flags::mount_before_data()) {
+  if (UsesPinnedApex()) {
     auto data_apexes = ScanDataApexFiles(GetImageManager());
     instance.AddDataApexFiles(std::move(data_apexes));
   }
@@ -3536,7 +3542,7 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
 
   // 4. Put the new file in "active" as |target_file|
   std::string target_file;
-  if (IsMountBeforeDataEnabled()) {
+  if (UsesPinnedApex()) {
     auto image_manager = GetImageManager();
     // Pin the new file first.
     auto image = OR_RETURN(image_manager->PinApexFiles(Single(*temp_apex)))[0];
@@ -3654,7 +3660,7 @@ void SaveChangedActiveApexes(
 }
 
 Result<void> BackupActiveApexes() {
-  if (IsMountBeforeDataEnabled()) {
+  if (UsesPinnedApex()) {
     return GetImageManager()->BackupApexList();
   } else if (!gSupportsFsCheckpoints) {
     return BackupActivePackages();

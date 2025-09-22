@@ -509,6 +509,7 @@ cc_test {
         ":apex.apexd_test_f2fs_no_inst_key",
         ":apex.apexd_test_nocode",
         ":apex.apexd_test_v2",
+        ":apex.apexd_test_v3",
         ":apex.corrupted_b146895998",
         ":gen_key_mismatch_apex",
         ":gen_key_mismatch_apex_v2",

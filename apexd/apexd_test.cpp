@@ -213,7 +213,7 @@ class ApexdUnitTest : public ::testing::Test {
         {{partition_, brand_new_config_dir_}}, /* brand_new_apex_config_dirs */
         checkpoint_file_.c_str(),
         flags::mount_before_data(),
-        false,
+        flags::mount_before_data(), /* uses_pinned_apex */
         metadata_config_dir_.c_str(),
     };
   }
@@ -866,6 +866,11 @@ class ApexdMountTest : public ApexdUnitTest {
     DeactivateAllPackages();
     InitMetrics({});  // reset
     ApexdUnitTest::TearDown();
+
+    // Unmap dm-linear devices mapped by ApexImageManager
+    for (const auto& image : image_manager_->GetAllImages()) {
+      image_manager_->UnmapImageIfExists(image);
+    }
   }
 
   void DeactivateAllPackages() {
@@ -923,6 +928,20 @@ class ApexdMountTest : public ApexdUnitTest {
 
     std::ofstream out(metadata_partition);
     ASSERT_THAT(android::microdroid::WriteMetadata(metadata, out), Ok());
+  }
+
+  void SimulateReboot() {
+    DeactivateAllPackages();
+    ApexFileRepository::GetInstance().Reset();
+    // Staged apexes in /data/app-staging are not accessible
+    DeleteDirContent(staged_session_dir_);
+    InitializeVold(nullptr);
+  }
+
+  void StagePackage(const std::string& test_apex, int session_id) {
+    PrepareStagedSession(test_apex, session_id);
+    ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+    ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
   }
 
  private:
@@ -4711,38 +4730,132 @@ TEST_F(SubmitStagedSessionTest, SuccessWithMultiSession) {
               ElementsAre(child_session1_id, child_session2_id));
 }
 
+// Test cases specific to migration to mount_before_data
+class MountBeforeDataMigrationTest : public ApexdMountTest {
+ protected:
+  void SetUp() override {
+    // When mount_before_data is false while uses_pinned_apex is true,
+    // apexd runs in "migration" mode. In migration mode, apexd-bootstrap
+    // activates only bootstrap APEXes from preinstalled APEXes and apexd
+    // activates all APEXes including /data/apex/active and pinned APEXes.
+    // Incoming APEXes are pinned using ApexImageManager.
+    config_.mount_before_data = false;
+    config_.uses_pinned_apex = true;
+    ApexdMountTest::SetUp();
+  }
+};
+
+TEST_F(MountBeforeDataMigrationTest,
+       OnBootstrapActivatesOnlyPreinstalledBootstrap) {
+  AddPreInstalledApex("apex.apexd_bootstrap_test.apex");
+  AddPreInstalledApex("apex.apexd_test.apex");
+  ASSERT_EQ(0, OnBootstrap());
+
+  std::vector<std::string> mounts{
+      "/apex/com.android.apex.bootstrap_test_package@1",
+      "/apex/com.android.apex.bootstrap_test_package"};
+  ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
+}
+
+TEST_F(MountBeforeDataMigrationTest, OnStartActivateAllApexes) {
+  AddPreInstalledApex("apex.apexd_bootstrap_test.apex");
+  AddPreInstalledApex("apex.apexd_test.apex");
+  AddPreInstalledApex("apex.apexd_test_different_app.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+  OnStart();
+
+  std::vector<std::string> mounts{
+      "/apex/com.android.apex.test_package@1",
+      "/apex/com.android.apex.test_package",
+      "/apex/com.android.apex.test_package_2@1",
+      "/apex/com.android.apex.test_package_2",
+      "/apex/com.android.apex.bootstrap_test_package@1",
+      "/apex/com.android.apex.bootstrap_test_package"};
+  ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
+}
+
+TEST_F(MountBeforeDataMigrationTest, OnStartActivatesApexInDataApexActive) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  AddDataApex("apex.apexd_test_v2.apex");
+
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+  OnStart();
+
+  std::vector<std::string> mounts{"/apex/com.android.apex.test_package@2",
+                                  "/apex/com.android.apex.test_package"};
+  ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
+}
+
+TEST_F(MountBeforeDataMigrationTest, OnStartActivatesPinnedApexes) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  AddDataApex("apex.apexd_test_v2.apex");
+  AddPinnedDataApex("apex.apexd_test_v3.apex");
+
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+  OnStart();
+
+  std::vector<std::string> mounts{"/apex/com.android.apex.test_package@3",
+                                  "/apex/com.android.apex.test_package"};
+  ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
+}
+
+TEST_F(MountBeforeDataMigrationTest, SubmitStagedSessionShouldPinApex) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test_v2.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+
+  auto session = GetSessionManager()->GetSession(session_id);
+  ASSERT_THAT(session->GetApexImages(),
+              Pointwise(Eq(), image_manager_->GetAllImages()));
+  ASSERT_THAT(
+      image_manager_->GetAllImages(),
+      Eq(std::vector<std::string>{"com.android.apex.test_pack_0.apex"}));
+}
+
+TEST_F(MountBeforeDataMigrationTest,
+       ActivatingStagedSessionShouldDeleteDataApex) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  auto data_apex_path = AddDataApex("apex.apexd_test_v2.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test_v3.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  SimulateReboot();
+
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+  OnStart();
+
+  std::vector<std::string> mounts{"/apex/com.android.apex.test_package@3",
+                                  "/apex/com.android.apex.test_package"};
+  ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
+
+  BootCompletedCleanup();
+  ASSERT_THAT(PathExists(data_apex_path), HasValue(false));
+}
+
 // Test cases specific to mount_before_data
 class MountBeforeDataTest : public ApexdMountTest {
  protected:
   void SetUp() override {
     config_.mount_before_data = true;
+    config_.uses_pinned_apex = true;
     ApexdMountTest::SetUp();
 
     // preinstalled APEXes
     AddPreInstalledApex("apex.apexd_test.apex");
     AddPreInstalledApex("apex.apexd_test_different_app.apex");
-  }
-
-  void TearDown() override {
-    ApexdMountTest::TearDown();
-    // Unmap dm-linear devices mapped by ApexImageManager
-    for (const auto& image : image_manager_->GetAllImages()) {
-      image_manager_->UnmapImageIfExists(image);
-    }
-  }
-
-  void SimulateReboot() {
-    DeactivateAllPackages();
-    ApexFileRepository::GetInstance().Reset();
-    // Staged apexes in /data/app-staging are not accessible
-    DeleteDirContent(staged_session_dir_);
-    InitializeVold(nullptr);
-  }
-
-  void StagePackage(const std::string& test_apex, int session_id) {
-    PrepareStagedSession(test_apex, session_id);
-    ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
-    ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
   }
 };
 

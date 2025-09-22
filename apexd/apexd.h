@@ -61,11 +61,10 @@ struct ApexdConfig {
   // Path to the checkpoint file managed by vold: /metadata/vold/checkpoint
   const char* checkpoint_file;
 
-  // TODO(b/381173074) True in tests for now. Will be configured as true if
-  // - new device (ro.vendor.api_level >= 202504 (TBD))
-  // - or, upgrading device with migration done (e.g. flag in /metadata/apex)
+  // True if ALL apexes can be mounted in apexd-bootstrap (before /data)
   bool mount_before_data;
-  bool migration_mode;
+  // True if APEXes are pinned using ApexImageManager on installation.
+  bool uses_pinned_apex;
   const char* metadata_config_dir;
 };
 
@@ -82,7 +81,7 @@ static const ApexdConfig kDefaultConfig = {
     kBrandNewApexConfigDirs,
     kCheckpointFile,
     false, /* mount_before_data */
-    false, /* migration_mode */
+    false, /* uses_pinned_apex */
     kMetadataConfigDir,
 };
 

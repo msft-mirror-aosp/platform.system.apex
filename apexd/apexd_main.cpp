@@ -140,10 +140,9 @@ int main(int argc, char** argv) {
 
   auto config = android::apex::kDefaultConfig;
   if constexpr (flags::mount_before_data()) {
-    config.migration_mode = true;
+    config.uses_pinned_apex = true;
     if (android::base::GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
       config.mount_before_data = true;
-      config.migration_mode = false;
     }
   }
   android::apex::SetConfig(config);

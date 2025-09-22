@@ -41,7 +41,7 @@ static const android::apex::ApexdConfig kMicrodroidConfig = {
     {},      /* brand_new_apex_config_dirs */
     nullptr, /* checkpoint_file */
     false,   /* mount_before_data */
-    false,   /* migration_mode */
+    false,   /* uses_pinned_apex */
     nullptr, /* metadata_config_dir */
 };
 
