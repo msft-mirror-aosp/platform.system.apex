@@ -4845,6 +4845,32 @@ TEST_F(MountBeforeDataMigrationTest,
   ASSERT_THAT(PathExists(data_apex_path), HasValue(false));
 }
 
+TEST_F(MountBeforeDataMigrationTest,
+       ActivatingStagedSessionShouldDeleteDataApex_Downgrade) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  auto data_apex_path = AddDataApex("apex.apexd_test_v3.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+
+  auto session_id = 42;
+  PrepareStagedSession("apex.apexd_test_v2.apex", session_id);
+  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+  ASSERT_THAT(MarkStagedSessionReady(session_id), Ok());
+
+  SimulateReboot();
+
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+  OnStart();
+
+  std::vector<std::string> mounts{"/apex/com.android.apex.test_package@2",
+                                  "/apex/com.android.apex.test_package"};
+  ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
+
+  BootCompletedCleanup();
+  ASSERT_THAT(PathExists(data_apex_path), HasValue(false));
+}
+
 // Test cases specific to mount_before_data
 class MountBeforeDataTest : public ApexdMountTest {
  protected:

@@ -1864,6 +1864,14 @@ Result<std::vector<std::string>> TryActivateStagedSession(
     // Let's keep mapped devices because they needs to be mapped as "active" in
     // ScanDataApexFiles().
     unmap_devices.Disable();
+
+    // Remove the previously active APEXes in /data/apex/active even when
+    // APEXes are installed using ApexImageManager. This can happen for OTA
+    // upgraded devices.
+    if (!IsMountBeforeDataEnabled()) {
+      OR_RETURN(RemovePreviouslyActiveApexFiles(apex_names_in_session, {}));
+    }
+
     return apex_names_in_session;
   } else {
     auto apexes = OR_RETURN(ScanSessionApexFiles(session));
