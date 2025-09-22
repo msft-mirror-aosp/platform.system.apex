@@ -2048,7 +2048,9 @@ Result<void> UnstagePackages(const std::vector<std::string>& paths) {
   }
   LOG(DEBUG) << "UnstagePackages() for " << Join(paths, ',');
 
-  std::vector<ApexFile> apex_files;
+  auto image_manager = GetImageManager();
+  std::vector<ApexFile> pinned_apexes;
+  std::vector<std::string> data_apexes;
   // Ensure the input paths are APEX files, but not pre-installed.
   for (const std::string& path : paths) {
     auto apex = ApexFile::Open(path);
@@ -2058,20 +2060,23 @@ Result<void> UnstagePackages(const std::vector<std::string>& paths) {
     if (ApexFileRepository::GetInstance().IsPreInstalledApex(*apex)) {
       return Error() << "Can't uninstall pre-installed apex " << path;
     }
-    apex_files.emplace_back(std::move(*apex));
+    if (UsesPinnedApex() && image_manager->IsPinnedApex(*apex)) {
+      pinned_apexes.emplace_back(std::move(*apex));
+    } else {
+      data_apexes.emplace_back(path);
+    }
   }
 
   // For now, UnstagePackages() is only for tests and callers should call
   // reboot() immediately.
   // TODO(b/384040968) Implement a proper "uninstall". Until then, we just
   // unlink/remove the input APEX paths.
-  if (IsMountBeforeDataEnabled()) {
+  if (UsesPinnedApex() && !pinned_apexes.empty()) {
     // Removing image names from the ACTIVE list is enough. After reboot, the
     // actual images will be removed as part of boot-completion cleanup.
-    auto image_manager = GetImageManager();
     auto active_list =
         OR_RETURN(image_manager->GetApexList(ApexListType::ACTIVE));
-    for (const auto& apex_file : apex_files) {
+    for (const auto& apex_file : pinned_apexes) {
       auto image = image_manager->FindPinnedApex(apex_file);
       if (!image) {
         return Error() << "Can't uninstall: image not found: "
@@ -2082,8 +2087,10 @@ Result<void> UnstagePackages(const std::vector<std::string>& paths) {
       });
     }
     OR_RETURN(image_manager->UpdateApexList(ApexListType::ACTIVE, active_list));
-  } else {
-    for (const std::string& path : paths) {
+  }
+
+  if (!data_apexes.empty()) {
+    for (const std::string& path : data_apexes) {
       if (unlink(path.c_str()) != 0) {
         return ErrnoError() << "Can't unlink " << path;
       }

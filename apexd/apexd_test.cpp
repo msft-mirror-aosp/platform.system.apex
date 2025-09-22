@@ -4871,6 +4871,33 @@ TEST_F(MountBeforeDataMigrationTest,
   ASSERT_THAT(PathExists(data_apex_path), HasValue(false));
 }
 
+TEST_F(MountBeforeDataMigrationTest, UnstagePackages) {
+  AddPreInstalledApex("apex.apexd_test.apex");
+  AddPreInstalledApex("apex.apexd_test_different_app.apex");
+  auto data1 = AddDataApex("apex.apexd_test.apex");
+  auto data2 = AddPinnedDataApex("apex.apexd_test_different_app.apex");
+
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+  OnStart();
+
+  ASSERT_THAT(PathExists(data1), HasValue(true));
+  ASSERT_THAT(image_manager_->GetApexList(ApexListType::ACTIVE),
+              HasValue(std::vector<ApexListEntry>{
+                  {data2, "com.android.apex.test_package_2"}}));
+
+  std::vector<std::string> paths;
+  GetApexDatabaseForTesting().ForallMountedApexes(
+      [&](auto, auto mount_data, auto) {
+        paths.push_back(mount_data.full_path);
+      });
+  ASSERT_THAT(UnstagePackages(paths), Ok());
+
+  ASSERT_THAT(PathExists(data1), HasValue(false));
+  ASSERT_THAT(image_manager_->GetApexList(ApexListType::ACTIVE),
+              HasValue(IsEmpty()));
+}
+
 // Test cases specific to mount_before_data
 class MountBeforeDataTest : public ApexdMountTest {
  protected:
