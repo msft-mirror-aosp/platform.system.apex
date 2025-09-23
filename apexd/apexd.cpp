@@ -849,6 +849,9 @@ Result<VerificationResult> VerifyPackagesStagedInstall(
 }
 
 Result<void> DeleteBackup() {
+  if (UsesPinnedApex()) {
+    return GetImageManager()->UpdateApexList(ApexListType::BACKUP, {});
+  }
   auto exists = PathExists(std::string(kApexBackupDir));
   if (!exists.ok()) {
     return Error() << "Can't clean " << kApexBackupDir << " : "

@@ -141,6 +141,10 @@ static Result<ApexFile> GetActivePackage(const std::string& packageName) {
 
 static void RebootForTest() { LOG(INFO) << "Rebooting device"; }
 
+static std::ostream& operator<<(std::ostream& out, const ApexListEntry& entry) {
+  return out << "{" << entry.image_name << ", " << entry.apex_name << "}";
+}
+
 // A very basic mock of CheckpointInterface.
 class MockCheckpointInterface : public CheckpointInterface {
  public:
@@ -5191,6 +5195,36 @@ TEST_F(MountBeforeDataTest, BootCompletedCleanup_RemovesInactiveDataApexes) {
   ASSERT_THAT(PathExists(data_apex), HasValue(false));
   ASSERT_THAT(image_manager_->GetAllImages(),
               UnorderedElementsAre(pinned->at(0)));
+}
+
+TEST_F(MountBeforeDataTest, MarkStagedSessionSuccessful) {
+  AddPinnedDataApex("apex.apexd_test_v2.apex");
+  ASSERT_EQ(0, OnBootstrap());
+
+  // Stage com.android.apex.test_package@3
+  auto session_id = 42;
+  StagePackage("apex.apexd_test_v3.apex", session_id);
+
+  // APEX List is backed up
+  ASSERT_THAT(image_manager_->GetApexList(ApexListType::BACKUP),
+              HasValue(UnorderedElementsAre(
+                  ApexListEntry{"com.android.apex.test_pack_0.apex",
+                                "com.android.apex.test_package"})));
+
+  SimulateReboot();
+
+  ASSERT_THAT(OnBootstrap(), Eq(0));
+
+  ASSERT_THAT(MarkStagedSessionSuccessful(session_id), Ok());
+
+  // Staged session should be succeeded.
+  auto session = GetSessionManager()->GetSession(session_id);
+  ASSERT_THAT(session, Ok());
+  ASSERT_EQ(session->GetState(), SessionState::SUCCESS);
+
+  // Backup should be cleared.
+  ASSERT_THAT(image_manager_->GetApexList(ApexListType::BACKUP),
+              HasValue(IsEmpty()));
 }
 
 TEST_F(MountBeforeDataTest, BootCompletedCleanup_CreatesConfigFile) {
