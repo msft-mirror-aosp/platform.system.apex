@@ -72,7 +72,6 @@ static constexpr const char* kOtaApexPackageSuffix = ".ota.apex";
 static constexpr const char* kDmLinearApexSuffix = ".apex";
 static constexpr const char* kDmLinearPayloadSuffix = ".payload";
 
-static constexpr const char* kManifestFilenameJson = "apex_manifest.json";
 static constexpr const char* kManifestFilenamePb = "apex_manifest.pb";
 
 static constexpr const char* kApexInfoList = "/apex/apex-info-list.xml";
