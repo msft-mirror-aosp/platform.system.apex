@@ -282,9 +282,11 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
 
         File apexFile = mHostUtils.getTestFile(apex_filename);
 
-        // Try to install it, we should get an error
         String error = mHostUtils.installRebootlessPackage(apexFile);
         assertThat(error).isNull();
+
+        getDevice().uninstallPackage("com.android.hardware.wifi");
+        getDevice().reboot();
     }
 
     /**
