@@ -754,7 +754,11 @@ cc_library_static {
 genrule {
     name: "statslog_apex.h",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_apex.h --module apex --namespace stats,apex --bootstrap",
+    cmd: "$(location stats-log-api-gen) " +
+        "--header $(genDir)/statslog_apex.h " +
+        "--module apex " +
+        "--namespace stats,apex " +
+        "--interface bootstrap",
     out: [
         "statslog_apex.h",
     ],
@@ -763,7 +767,12 @@ genrule {
 genrule {
     name: "statslog_apex.cpp",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_apex.cpp --module apex --namespace stats,apex --importHeader statslog_apex.h --bootstrap",
+    cmd: "$(location stats-log-api-gen) " +
+        "--cpp $(genDir)/statslog_apex.cpp " +
+        "--module apex " +
+        "--namespace stats,apex " +
+        "--importHeader statslog_apex.h " +
+        "--interface bootstrap",
     out: [
         "statslog_apex.cpp",
     ],
