@@ -1034,6 +1034,9 @@ TEST_F(ApexServiceTest, DeleteFinalizedSessions) {
 }
 
 TEST_F(ApexServiceTest, BackupActivePackages) {
+  if (GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+    GTEST_SKIP() << "Backup dir is not used with mount-before-data";
+  }
   if (supports_fs_checkpointing_) {
     GTEST_SKIP() << "Can't run if filesystem checkpointing is enabled";
   }
@@ -1074,6 +1077,9 @@ TEST_F(ApexServiceTest, BackupActivePackages) {
 }
 
 TEST_F(ApexServiceTest, BackupActivePackagesClearsPreviousBackup) {
+  if (GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+    GTEST_SKIP() << "Backup dir is not used with mount-before-data";
+  }
   if (supports_fs_checkpointing_) {
     GTEST_SKIP() << "Can't run if filesystem checkpointing is enabled";
   }
@@ -1120,6 +1126,9 @@ TEST_F(ApexServiceTest, BackupActivePackagesClearsPreviousBackup) {
 }
 
 TEST_F(ApexServiceTest, BackupActivePackagesZeroActivePackages) {
+  if (GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+    GTEST_SKIP() << "Backup dir is not used with mount-before-data";
+  }
   if (supports_fs_checkpointing_) {
     GTEST_SKIP() << "Can't run if filesystem checkpointing is enabled";
   }
@@ -1149,6 +1158,9 @@ TEST_F(ApexServiceTest, BackupActivePackagesZeroActivePackages) {
 }
 
 TEST_F(ApexServiceTest, ActivePackagesDirEmpty) {
+  if (GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+    GTEST_SKIP() << "/data/apex/active dir is not used with mount-before-data";
+  }
   PrepareTestApexForInstall installer(GetTestFile("apex.apexd_test_v2.apex"),
                                       "/data/app-staging/session_41",
                                       "staging_data_file");
@@ -1293,6 +1305,12 @@ TEST_F(ApexServiceRevertTest, RevertFailsNoActivePackagesFolder) {
 }
 
 TEST_F(ApexServiceRevertTest, MarkStagedSessionSuccessfulCleanupBackup) {
+  if (GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+    GTEST_SKIP() << "Backup dir is not used with mount-before-data";
+  }
+  if (supports_fs_checkpointing_) {
+    GTEST_SKIP() << "Can't run if filesystem checkpointing is enabled";
+  }
   PrepareBackup({GetTestFile("apex.apexd_test.apex"),
                  GetTestFile("apex.apexd_test_different_app.apex")});
 
@@ -1306,6 +1324,9 @@ TEST_F(ApexServiceRevertTest, MarkStagedSessionSuccessfulCleanupBackup) {
 }
 
 TEST_F(ApexServiceRevertTest, ResumesRevert) {
+  if (GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+    GTEST_SKIP() << "/data/apex/active dir is not used with mount-before-data";
+  }
   if (supports_fs_checkpointing_) {
     GTEST_SKIP() << "Can't run if filesystem checkpointing is enabled";
   }

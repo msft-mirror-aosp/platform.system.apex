@@ -529,7 +529,7 @@ apex {
 
 java_genrule {
     name: "com.android.apex.cts.shim.v2_no_pb",
-    srcs: [":com.android.apex.cts.shim.v2_legacy"],
+    srcs: [":com.android.apex.cts.shim.v2"],
     out: ["com.android.apex.cts.shim.v2_no_pb.apex"],
     tools: ["zip2zip"],
     cmd: "$(location zip2zip) -i $(in) -x apex_manifest.pb -o $(out)",
