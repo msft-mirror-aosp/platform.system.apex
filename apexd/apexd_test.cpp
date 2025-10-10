@@ -50,6 +50,7 @@
 #include "apexd_image_manager.h"
 #include "apexd_loop.h"
 #include "apexd_metrics.h"
+#include "apexd_private.h"
 #include "apexd_session.h"
 #include "apexd_test_utils.h"
 #include "apexd_utils.h"
@@ -848,6 +849,15 @@ TEST_F(ApexdUnitTest, GetStagedApexFilesWithChildren) {
       StringPrintf("%s/apex.apexd_test.apex", GetStagedDir(125).c_str()));
   ASSERT_THAT(*result, UnorderedElementsAre(ApexFileEq(*child_apex_file_1),
                                             ApexFileEq(*child_apex_file_2)));
+}
+
+TEST_F(ApexdUnitTest, LogApexRootInfo) {
+  CaptureStderr();
+  apexd_private::LogDirectoryStat(kApexRoot);
+  apexd_private::LogProcMounts();
+  auto capture = GetCapturedStderr();
+  ASSERT_THAT(capture, HasSubstr("stat() for /apex: mode=40755 uid=0 gid=0"));
+  ASSERT_THAT(capture, HasSubstr("/proc/mounts: tmpfs /apex tmpfs rw"));
 }
 
 // A test fixture to use for tests that mount/unmount apexes.

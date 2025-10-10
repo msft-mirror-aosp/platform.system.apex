@@ -45,6 +45,9 @@ std::string GetActiveMountPoint(const ::apex::proto::ApexManifest& manifest);
 android::base::Result<void> BindMount(const std::string& target,
                                       const std::string& source);
 
+void LogDirectoryStat(const std::string& path);
+void LogProcMounts();
+
 }  // namespace apexd_private
 }  // namespace apex
 }  // namespace android
