@@ -873,18 +873,28 @@ class ApexdMountTest : public ApexdUnitTest {
     ApexdUnitTest::SetUp();
     GetApexDatabaseForTesting().Reset();
     ASSERT_THAT(SetUpApexTestEnvironment(), Ok());
+
+    EXPECT_TRUE(DeviceMapper::Instance().GetAvailableDevices(&dm_devices_));
   }
 
   void TearDown() override {
     SetBlockApexEnabled(false);
     DeactivateAllPackages();
     InitMetrics({});  // reset
-    ApexdUnitTest::TearDown();
 
     // Unmap dm-linear devices mapped by ApexImageManager
     for (const auto& image : image_manager_->GetAllImages()) {
       image_manager_->UnmapImageIfExists(image);
     }
+
+    ApexdUnitTest::TearDown();
+
+    // Should not leak temporary verity devices regardless of success.
+    // Why EXPECT? Needs to call TearDown() for unmounting even when something
+    // goes wrong with the test.
+    std::vector<DeviceMapper::DmBlockDevice> devices;
+    EXPECT_TRUE(DeviceMapper::Instance().GetAvailableDevices(&devices));
+    ASSERT_THAT(dm_devices_, Eq(devices));
   }
 
   void DeactivateAllPackages() {
@@ -968,6 +978,8 @@ class ApexdMountTest : public ApexdUnitTest {
   // switches to the original mount namespace while block apexes are mounted
   // in test-purpose mount namespace.
   std::vector<BlockApex> block_apexes_;
+
+  std::vector<DeviceMapper::DmBlockDevice> dm_devices_;
 };
 
 TEST_F(ApexdMountTest, CalculateSizeForCompressedApexEmptyList) {
@@ -4600,19 +4612,6 @@ class SubmitStagedSessionTest : public ApexdMountTest {
 
     OnStart();
   }
-
-  void TearDown() override {
-    // Should not leak temporary verity devices regardless of success.
-    // Why EXPECT? Needs to call TearDown() for unmounting even when something
-    // goes wrong with the test.
-    std::vector<DeviceMapper::DmBlockDevice> devices;
-    EXPECT_TRUE(DeviceMapper::Instance().GetAvailableDevices(&devices));
-    for (const auto& device : devices) {
-      EXPECT_THAT(device.name(), Not(EndsWith(".tmp")));
-    }
-
-    ApexdMountTest::TearDown();
-  }
 };
 
 TEST_F(SubmitStagedSessionTest, SimpleSuccess) {
@@ -4769,6 +4768,17 @@ TEST_F(MountBeforeDataMigrationTest,
       "/apex/com.android.apex.bootstrap_test_package@1",
       "/apex/com.android.apex.bootstrap_test_package"};
   ASSERT_THAT(GetApexMounts(), UnorderedElementsAreArray(mounts));
+
+  // In migration mode, OnBootstrap() pre-creates device-mapper devices for
+  // later use in apexd OnStart().
+  auto& dm = DeviceMapper::Instance();
+  ASSERT_EQ(dm::DmDeviceState::SUSPENDED,
+            dm.GetState("com.android.apex.bootstrap_test_package"));
+  ASSERT_EQ(dm::DmDeviceState::SUSPENDED,
+            dm.GetState("com.android.apex.test_package"));
+  // delete them as tear-down
+  dm.DeleteDevice("com.android.apex.bootstrap_test_package");
+  dm.DeleteDevice("com.android.apex.test_package");
 }
 
 TEST_F(MountBeforeDataMigrationTest, OnStartActivateAllApexes) {
@@ -4895,6 +4905,21 @@ TEST_F(MountBeforeDataMigrationTest, UnstagePackages) {
       {{GetPartition(), GetBuiltInDir()}});
   OnStart();
 
+  // Since the backing files/devices are removed, TearDown() can't deactivate
+  // them. They need to be destroyed manually in this testcase.
+  auto apex1 = ApexFile::Open(data1);
+  auto apex2 = ApexFile::Open(*image_manager_->GetMappedPath(data2));
+  auto deactivate = base::make_scope_guard([&]() {
+    ASSERT_THAT(apex1, Ok());
+    ASSERT_THAT(apexd_private::UnmountPackage(*apex1, /*deferred=*/false,
+                                              /*detach=*/true),
+                Ok());
+    ASSERT_THAT(apex2, Ok());
+    ASSERT_THAT(apexd_private::UnmountPackage(*apex2, /*deferred=*/false,
+                                              /*detach=*/true),
+                Ok());
+  });
+
   ASSERT_THAT(PathExists(data1), HasValue(true));
   ASSERT_THAT(image_manager_->GetApexList(ApexListType::ACTIVE),
               HasValue(std::vector<ApexListEntry>{
@@ -4907,6 +4932,9 @@ TEST_F(MountBeforeDataMigrationTest, UnstagePackages) {
       });
   ASSERT_THAT(UnstagePackages(paths), Ok());
 
+  // UnstagePackages() deletes the backing files/devices, and the APEX mounts
+  // remain (they'll be gone after reboot because backing files/devices are
+  // gone).
   ASSERT_THAT(PathExists(data1), HasValue(false));
   ASSERT_THAT(image_manager_->GetApexList(ApexListType::ACTIVE),
               HasValue(IsEmpty()));

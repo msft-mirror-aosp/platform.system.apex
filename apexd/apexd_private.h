@@ -34,6 +34,9 @@ static constexpr int kMkdirMode = 0755;
 
 namespace apexd_private {
 
+base::Result<void> UnmountPackage(const ApexFile& apex, bool deferred,
+                                  bool detach_mount_point);
+
 base::Result<void> CheckBundledPublicKeyMatchesPreinstalled(
     const ApexFile& apex);
 

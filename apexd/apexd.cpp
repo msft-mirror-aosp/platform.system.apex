@@ -966,6 +966,10 @@ Result<void> RestoreActivePackages() {
   return {};
 }
 
+}  // namespace
+
+namespace apexd_private {
+
 Result<void> UnmountPackage(const ApexFile& apex, bool deferred,
                             bool detach_mount_point) {
   LOG(INFO) << "Unmounting " << GetPackageId(apex.GetManifest())
@@ -1020,7 +1024,7 @@ Result<void> UnmountPackage(const ApexFile& apex, bool deferred,
   return Unmount(*data, deferred);
 }
 
-}  // namespace
+}  // namespace apexd_private
 
 void SetConfig(const ApexdConfig& config) { gConfig = config; }
 
@@ -1201,8 +1205,9 @@ Result<void> DeactivatePackage(const std::string& full_path) {
     return apex_file.error();
   }
 
-  return UnmountPackage(*apex_file,
-                        /*deferred=*/false, /*detach_mount_point=*/false);
+  return apexd_private::UnmountPackage(*apex_file,
+                                       /*deferred=*/false,
+                                       /*detach_mount_point=*/false);
 }
 
 Result<std::vector<std::string>> ScanApexFilesInSessionDirs(
@@ -3549,9 +3554,9 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   std::vector<base::ScopeGuard<std::function<void()>>> guards;
 
   // 3. Unmount currently active APEX.
-  OR_RETURN(UnmountPackage(*cur_apex,
-                           /*deferred=*/true,
-                           /*detach_mount_point=*/force));
+  OR_RETURN(apexd_private::UnmountPackage(*cur_apex,
+                                          /*deferred=*/true,
+                                          /*detach_mount_point=*/force));
   // Re-activate the current apex on error.
   guards.emplace_back(base::make_scope_guard([&]() {
     // We can't really rely on the fact that dm-verity device backing up
