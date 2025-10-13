@@ -2958,6 +2958,14 @@ void RemoveInactiveDataApex() {
                  << st.error();
     }
   }
+
+  // Finally, remove unreferenced pinned images (leaks).
+  if (UsesPinnedApex()) {
+    if (auto st = image_manager->RemoveUnreferencedImages(); !st.ok()) {
+      LOG(ERROR) << "Failed to remove unreferenced pinned APEX images: "
+                 << st.error();
+    }
+  }
 }
 
 bool IsApexDevice(const std::string& dev_name) {

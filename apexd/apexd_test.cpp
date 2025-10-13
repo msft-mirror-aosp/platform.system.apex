@@ -5197,6 +5197,23 @@ TEST_F(MountBeforeDataTest, BootCompletedCleanup_RemovesInactiveDataApexes) {
               UnorderedElementsAre(pinned->at(0)));
 }
 
+TEST_F(MountBeforeDataTest, BootCompletedCleanup_RemovesPinnedApexLeaks) {
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test_v2.apex"));
+  ASSERT_THAT(apex, Ok());
+  auto pinned = image_manager_->PinApexFiles(std::vector{*apex});
+  ASSERT_THAT(pinned, HasValue(SizeIs(1)));
+
+  // Simulate the leak by removing the metadata file.
+  std::string metadata_file = metadata_images_dir_ + "/apex.img.metadata";
+  ASSERT_EQ(0, unlink(metadata_file.c_str()));
+
+  ASSERT_EQ(0, OnBootstrap());
+  BootCompletedCleanup();
+
+  ASSERT_THAT(ReadDir(data_images_dir_, [](auto) { return true; }),
+              HasValue(IsEmpty()));
+}
+
 TEST_F(MountBeforeDataTest, MarkStagedSessionSuccessful) {
   AddPinnedDataApex("apex.apexd_test_v2.apex");
   ASSERT_EQ(0, OnBootstrap());

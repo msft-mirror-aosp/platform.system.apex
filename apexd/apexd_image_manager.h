@@ -75,6 +75,7 @@ class ApexImageManager {
   base::Result<void> DeleteImage(const std::string& image);
   base::Result<void> UnmapAndDeleteImage(const std::string& image);
   std::vector<std::string> GetAllImages() const;
+  base::Result<void> RemoveUnreferencedImages() const;
 
   // True if the apex is backed by a dm-linear device created by
   // ApexImageManager
