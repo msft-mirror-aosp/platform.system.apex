@@ -87,6 +87,7 @@ apex {
     installable: false,
     allowed_files: "default_shim_allowed_list.txt",
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -103,6 +104,7 @@ apex {
     installable: false,
     allowed_files: "default_shim_allowed_list.txt",
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -116,6 +118,7 @@ apex {
     installable: false,
     allowed_files: "default_shim_allowed_list.txt",
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -128,6 +131,7 @@ apex {
     installable: false,
     allowed_files: "default_shim_allowed_list.txt",
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -146,6 +150,7 @@ apex {
     allowed_files: "default_shim_allowed_list.txt",
     test_only_unsigned_payload: true,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 override_apex {
@@ -180,6 +185,7 @@ apex {
     prebuilts: ["empty_hash"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 prebuilt_etc {
@@ -202,6 +208,7 @@ apex {
     ],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 prebuilt_etc {
@@ -225,6 +232,7 @@ apex {
     ],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -236,6 +244,7 @@ apex {
     prebuilts: ["hash_of_dev_null"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -247,6 +256,7 @@ apex {
     prebuilts: ["hash_of_dev_null"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 java_genrule {
@@ -312,6 +322,7 @@ apex {
     ],
     allowed_files: "default_shim_allowed_list.txt",
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 genrule {
@@ -344,6 +355,7 @@ apex {
     prebuilts: ["hash_of_dev_null"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -357,6 +369,7 @@ apex {
     installable: false,
     certificate: ":com.android.apex.cts.shim.debug.cert",
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 android_app_certificate {
@@ -525,11 +538,12 @@ apex {
     installable: false,
     min_sdk_version: "29",
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 java_genrule {
     name: "com.android.apex.cts.shim.v2_no_pb",
-    srcs: [":com.android.apex.cts.shim.v2_legacy"],
+    srcs: [":com.android.apex.cts.shim.v2"],
     out: ["com.android.apex.cts.shim.v2_no_pb.apex"],
     tools: ["zip2zip"],
     cmd: "$(location zip2zip) -i $(in) -x apex_manifest.pb -o $(out)",
@@ -550,6 +564,7 @@ apex {
         "CtsShimPriv",
     ],
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 // Apex shim with apk-in-apex that targets sdk P
@@ -563,6 +578,7 @@ apex {
     apps: ["CtsShimTargetPSdk"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 // Apex shim with unsigned apk
@@ -587,6 +603,7 @@ apex {
     prebuilts: ["hash_of_dev_null"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -597,6 +614,7 @@ apex {
     prebuilts: ["hash_of_dev_null"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 // Apex shim with upgraded apk-in-apexes
@@ -613,6 +631,7 @@ apex {
     ],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -624,6 +643,7 @@ apex {
     prebuilts: ["hash_of_dev_null"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -635,6 +655,7 @@ apex {
     prebuilts: ["hash_of_dev_null"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 apex {
@@ -646,6 +667,7 @@ apex {
     prebuilts: ["hash_of_dev_null"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }
 
 // Apex shim for running a new app in an apex
@@ -658,4 +680,5 @@ apex {
     apps: ["CtsShimAddApkToApex"],
     installable: false,
     updatable: false,
+    payload_fs_type: "ext4",
 }

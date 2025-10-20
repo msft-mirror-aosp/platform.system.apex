@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <filesystem>
 #include <type_traits>
 
 #include "apex_image_list.pb.h"
@@ -560,6 +561,35 @@ std::vector<std::string> ApexImageManager::GetAllImages() const {
   return images;
 }
 
+Result<void> ApexImageManager::RemoveUnreferencedImages() const {
+  // Pinned files use ".apex" suffix
+  auto image_files =
+      OR_RETURN(FindFilesBySuffix(data_dir_, {kDmLinearApexSuffix}));
+
+  // Remove the pinned image files if it's not in the list of pinned images.
+  auto all_images = GetAllImages();
+  for (const auto& image_file : image_files) {
+    auto name = base::Basename(image_file);
+    if (std::ranges::contains(all_images, name)) {
+      continue;
+    }
+    std::string err;
+    if (!SplitFiemap::RemoveSplitFiles(image_file, &err)) {
+      return Error() << "Failed to delete " << image_file << ": " << err;
+    }
+  }
+
+  // In case the device uses the single/shared pinned image file (apex.img),
+  // remove it only when the list of pinned images is empty.
+  if (all_images.empty()) {
+    std::string err;
+    if (!base::RemoveFileIfExists(data_dir_ + "/apex.img", &err)) {
+      return Error() << "Failed to delete apex.img: " << err;
+    }
+  }
+  return {};
+}
+
 std::optional<std::string> ApexImageManager::FindPinnedApex(
     const ApexFile& apex) const {
   // Get the dm-device name first. Note that dm-linear devices created for APEX
@@ -667,6 +697,27 @@ std::string ApexImageManager::GetApexListFile(ApexListType list_type) const {
 
 std::string ApexImageManager::GetApexStorageMetadataPath() const {
   return metadata_dir_ + "/apex.img.metadata";
+}
+
+Result<void> ApexImageManager::BackupApexList() {
+  auto active_list = OR_RETURN(GetApexList(ApexListType::ACTIVE));
+  OR_RETURN(UpdateApexList(ApexListType::BACKUP, active_list));
+  LOG(INFO) << "Backed up the active set of APEX packages";
+  return {};
+}
+
+Result<void> ApexImageManager::RestoreApexList() {
+  auto backup_list_file = GetApexListFile(ApexListType::BACKUP);
+  if (!OR_RETURN(PathExists(backup_list_file))) {
+    return Error() << "Can't find backup file: " << backup_list_file;
+  }
+  auto active_list_file = GetApexListFile(ApexListType::ACTIVE);
+  if (rename(backup_list_file.c_str(), active_list_file.c_str()) == -1) {
+    return ErrnoError() << "Fail to rename " << backup_list_file << " to "
+                        << active_list_file;
+  }
+  LOG(INFO) << "Restored the active set of APEX packages";
+  return {};
 }
 
 Result<void> ApexImageManager::UpdateApexList(

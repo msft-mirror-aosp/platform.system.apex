@@ -140,21 +140,17 @@ int main(int argc, char** argv) {
 
   auto config = android::apex::kDefaultConfig;
   if constexpr (flags::mount_before_data()) {
+    config.uses_pinned_apex = true;
     if (android::base::GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
       config.mount_before_data = true;
     }
   }
   android::apex::SetConfig(config);
 
-  // Two flags are used here:
-  // * sysprop flag `apexd.config.brand_new_apex`: used to control the feature
-  //   usage in individual targets
-  // * AConfig flag `enable_brand_new_apex`: used to advance the feature to
-  //   different release stages, and applies to all targets.
-  if constexpr (flags::enable_brand_new_apex()) {
-    if (android::base::GetBoolProperty("apexd.config.brand_new_apex", false)) {
-      android::apex::ApexFileRepository::EnableBrandNewApex();
-    }
+  // The sysprop flag `apexd.config.brand_new_apex` is used to control the
+  // feature usage in individual targets.
+  if (android::base::GetBoolProperty("apexd.config.brand_new_apex", false)) {
+    android::apex::ApexFileRepository::EnableBrandNewApex();
   }
 
   android::apex::ApexdLifecycle& lifecycle =

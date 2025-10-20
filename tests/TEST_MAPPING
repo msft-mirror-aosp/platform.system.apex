@@ -13,7 +13,7 @@
   "presubmit-large": [
     // TODO(b/190710217): uncomment this.
     //{
-    //  "name": "apex_rollback_tests"
+    //  "name": "apex_revert_tests"
     //},
     {
       "name": "sdkextensions_e2e_tests"

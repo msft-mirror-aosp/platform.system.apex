@@ -16,20 +16,42 @@
 
 #include "apexd_private.h"
 
+#include <android-base/file.h>
+#include <android-base/logging.h>
+#include <android-base/macros.h>
+#include <android-base/strings.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 
-#include <android-base/logging.h>
-#include <android-base/macros.h>
-
-#include "string_log.h"
-
 using android::base::ErrnoError;
+using android::base::Error;
 using android::base::Result;
 
 namespace android {
 namespace apex {
 namespace apexd_private {
+
+void LogDirectoryStat(const std::string& path) {
+  struct stat sb;
+  if (stat(path.c_str(), &sb) != 0) {
+    PLOG(ERROR) << "Could not stat directory " << path;
+  } else {
+    LOG(ERROR) << "stat() for " << path << ": mode=" << std::oct << sb.st_mode
+               << " uid=" << std::dec << sb.st_uid << " gid=" << sb.st_gid;
+  }
+}
+
+void LogProcMounts() {
+  std::string mounts;
+  if (!base::ReadFileToString("/proc/mounts", &mounts,
+                              /*follow_symlinks=*/true)) {
+    PLOG(ERROR) << "Could not read /proc/mounts";
+  } else {
+    for (const auto& line : base::Split(mounts, "\n")) {
+      LOG(ERROR) << "/proc/mounts: " << line;
+    }
+  }
+}
 
 Result<void> BindMount(const std::string& target, const std::string& source) {
   LOG(VERBOSE) << "Creating bind-mount for " << target << " for " << source;
@@ -68,7 +90,16 @@ Result<void> BindMount(const std::string& target, const std::string& source) {
     if (!exists) {
       LOG(VERBOSE) << "Creating mountpoint " << target;
       if (mkdir(target.c_str(), kMkdirMode) != 0) {
-        return ErrnoError() << "Could not create mountpoint " << target;
+        auto saved_errno = errno;
+
+        // We've found mkdir() fails with EACCES occasionally with no obvious
+        // reason. Let's log more information on error for better analysis.
+        // TODO(b/434773246) clean up logs
+        PLOG(ERROR) << "mkdir() for " << target << " failed";
+        LogDirectoryStat(base::Dirname(target));
+        LogProcMounts();
+
+        return Error(saved_errno) << "Could not create mountpoint " << target;
       }
     };
     // Unmount any active bind-mount.

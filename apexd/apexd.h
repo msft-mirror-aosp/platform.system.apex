@@ -58,10 +58,13 @@ struct ApexdConfig {
 
   std::unordered_map<ApexPartition, std::string> brand_new_apex_config_dirs;
 
-  // TODO(b/381173074) True in tests for now. Will be configured as true if
-  // - new device (ro.vendor.api_level >= 202504 (TBD))
-  // - or, upgrading device with migration done (e.g. flag in /metadata/apex)
+  // Path to the checkpoint file managed by vold: /metadata/vold/checkpoint
+  const char* checkpoint_file;
+
+  // True if ALL apexes can be mounted in apexd-bootstrap (before /data)
   bool mount_before_data;
+  // True if APEXes are pinned using ApexImageManager on installation.
+  bool uses_pinned_apex;
   const char* metadata_config_dir;
 };
 
@@ -76,13 +79,16 @@ static const ApexdConfig kDefaultConfig = {
     kVmPayloadMetadataPartitionProp,
     "u:object_r:staging_data_file",
     kBrandNewApexConfigDirs,
+    kCheckpointFile,
     false, /* mount_before_data */
+    false, /* uses_pinned_apex */
     kMetadataConfigDir,
 };
 
 class CheckpointInterface;
 
 void SetConfig(const ApexdConfig& config);
+const ApexdConfig& GetConfig();
 
 // Exposed only for testing.
 android::base::Result<void> Unmount(
@@ -121,6 +127,8 @@ android::base::Result<void> ActivatePackage(const std::string& full_path)
     WARN_UNUSED;
 android::base::Result<void> DeactivatePackage(const std::string& full_path)
     WARN_UNUSED;
+
+android::base::Result<void> BackupActiveApexes();
 
 std::vector<ApexFile> GetActivePackages();
 

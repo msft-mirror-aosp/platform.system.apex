@@ -75,6 +75,7 @@ class ApexImageManager {
   base::Result<void> DeleteImage(const std::string& image);
   base::Result<void> UnmapAndDeleteImage(const std::string& image);
   std::vector<std::string> GetAllImages() const;
+  base::Result<void> RemoveUnreferencedImages() const;
 
   // True if the apex is backed by a dm-linear device created by
   // ApexImageManager
@@ -96,6 +97,11 @@ class ApexImageManager {
   base::Result<void> UnmapImage(const std::string& image);
   base::Result<void> UnmapImageIfExists(const std::string& image);
   base::Result<std::vector<Interval>> GetImageExtents(const std::string& image);
+
+  // Creates a backup of the current ACTIVE apex list
+  base::Result<void> BackupApexList();
+  // Restores the ACTIVE apex list from the last backup
+  base::Result<void> RestoreApexList();
 
   base::Result<void> UpdateApexList(ApexListType list_type,
                                     const std::vector<ApexListEntry>& entries);

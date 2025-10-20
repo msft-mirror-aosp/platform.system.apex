@@ -31,6 +31,8 @@ import com.android.tradefed.device.ITestDevice.ApexInfo;
 import com.android.tradefed.testtype.DeviceJUnit4ClassRunner;
 import com.android.tradefed.testtype.junit4.BaseHostJUnit4Test;
 
+import com.google.common.truth.Correspondence;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -45,7 +47,7 @@ import java.util.Set;
  * Test for automatic recovery of apex update that causes boot loop.
  */
 @RunWith(DeviceJUnit4ClassRunner.class)
-public class ApexRollbackTests extends BaseHostJUnit4Test {
+public class ApexRevertTests extends BaseHostJUnit4Test {
     private final InstallUtilsHost mHostUtils = new InstallUtilsHost(this);
     @Rule
     public AbandonSessionsRule mHostTestRule = new AbandonSessionsRule(this);
@@ -55,6 +57,12 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
     private static boolean sCheckedIfCrashingProcessExists = false;
     private static boolean sAlreadyCrashingProcessExists = false;
     private static String sCrashingProcess;
+
+    static final Correspondence<ApexInfo, ApexInfo> APEX_INFO_COMPARE =
+            Correspondence.from(
+                    (ApexInfo a, ApexInfo b) ->
+                            a.name.equals(b.name) && a.versionCode == b.versionCode,
+                    "is equal to");
 
     @Before
     public void setUp() throws Exception {
@@ -138,13 +146,17 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
         ApexInfo ctsShimV1 = new ApexInfo("com.android.apex.cts.shim", 1L);
         ApexInfo ctsShimV2 = new ApexInfo("com.android.apex.cts.shim", 2L);
         Set<ApexInfo> activatedApexes = device.getActiveApexes();
-        assertThat(activatedApexes).contains(ctsShimV1);
-        assertThat(activatedApexes).doesNotContain(ctsShimV2);
+        assertThat(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .contains(ctsShimV1);
+        assertThat(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .doesNotContain(ctsShimV2);
 
         // Assert that a session has failed with the expected reason
-        String sessionInfo = device.executeShellCommand("cmd -w apexservice getStagedSessionInfo "
-                    + sessionIdToCheck);
-        assertThat(sessionInfo).contains("revertReason: zygote");
+        String sessionInfo = getStagedSession(sessionIdToCheck);
+        assertThat(sessionInfo).contains("isFailed = true");
+        assertThat(sessionInfo).contains("crashing native process: zygote");
     }
 
     /**
@@ -160,7 +172,7 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
 
         ITestDevice device = getDevice();
         assertThat(device.setProperty("persist.debug.trigger_reboot_after_activation",
-                "com.android.apex.cts.shim@2.apex")).isTrue();
+                "com.android.apex.cts.shim@2")).isTrue();
         assertThat(device.setProperty("debug.trigger_reboot_once_after_activation",
                 "1")).isTrue();
 
@@ -181,8 +193,12 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
         assertThat(stagedSessionInfo).contains("isApplied = true");
 
         Set<ApexInfo> activatedApexes = device.getActiveApexes();
-        assertThat(activatedApexes).contains(ctsShimV2);
-        assertThat(activatedApexes).doesNotContain(ctsShimV1);
+        assertThat(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .contains(ctsShimV2);
+        assertThat(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .doesNotContain(ctsShimV1);
     }
 
     /**
@@ -198,7 +214,7 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
 
         ITestDevice device = getDevice();
         assertThat(device.setProperty("persist.debug.trigger_reboot_after_activation",
-                "com.android.apex.cts.shim@2.apex")).isTrue();
+                "com.android.apex.cts.shim@2")).isTrue();
         assertThat(device.setProperty("persist.debug.trigger_reboot_twice_after_activation",
                 "1")).isTrue();
         String error = mHostUtils.installStagedPackage(apexFile);
@@ -219,8 +235,12 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
         assertThat(stagedSessionInfo).contains("isFailed = true");
 
         Set<ApexInfo> activatedApexes = device.getActiveApexes();
-        assertThat(activatedApexes).contains(ctsShimV1);
-        assertThat(activatedApexes).doesNotContain(ctsShimV2);
+        assertThat(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .contains(ctsShimV1);
+        assertThat(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .doesNotContain(ctsShimV2);
     }
 
     /**
@@ -236,7 +256,7 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
 
         ITestDevice device = getDevice();
         assertThat(device.setProperty("persist.debug.trigger_reboot_after_activation",
-                "com.android.apex.cts.shim@2.apex")).isTrue();
+                "com.android.apex.cts.shim@2")).isTrue();
         assertThat(device.setProperty("debug.trigger_reboot_once_after_activation",
                 "1")).isTrue();
         String error = mHostUtils.installStagedPackage(apexFile);
@@ -257,8 +277,12 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
         assertThat(stagedSessionInfo).contains("isApplied = true");
 
         Set<ApexInfo> activatedApexes = device.getActiveApexes();
-        assertThat(activatedApexes).contains(ctsShimV2);
-        assertThat(activatedApexes).doesNotContain(ctsShimV1);
+        assertThat(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .contains(ctsShimV2);
+        assertThat(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .doesNotContain(ctsShimV1);
     }
 
     /**
@@ -357,8 +381,12 @@ public class ApexRollbackTests extends BaseHostJUnit4Test {
         final ApexInfo ctsShimV1 = new ApexInfo("com.android.apex.cts.shim", 1L);
         final ApexInfo ctsShimV2 = new ApexInfo("com.android.apex.cts.shim", 2L);
         final Set<ApexInfo> activatedApexes = device.getActiveApexes();
-        assertThat(activatedApexes).contains(ctsShimV1);
-        assertThat(activatedApexes).doesNotContain(ctsShimV2);
+        assertThat(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .contains(ctsShimV1);
+        assertThat(activatedApexes)
+                .comparingElementsUsing(APEX_INFO_COMPARE)
+                .doesNotContain(ctsShimV2);
 
         // Assert that a session has failed with the expected reason
         final String stagedSessionString = getStagedSession(sessionIdToCheck);

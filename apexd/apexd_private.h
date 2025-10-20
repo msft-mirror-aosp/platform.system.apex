@@ -34,6 +34,9 @@ static constexpr int kMkdirMode = 0755;
 
 namespace apexd_private {
 
+base::Result<void> UnmountPackage(const ApexFile& apex, bool deferred,
+                                  bool detach_mount_point);
+
 base::Result<void> CheckBundledPublicKeyMatchesPreinstalled(
     const ApexFile& apex);
 
@@ -44,6 +47,9 @@ std::string GetActiveMountPoint(const ::apex::proto::ApexManifest& manifest);
 
 android::base::Result<void> BindMount(const std::string& target,
                                       const std::string& source);
+
+void LogDirectoryStat(const std::string& path);
+void LogProcMounts();
 
 }  // namespace apexd_private
 }  // namespace apex

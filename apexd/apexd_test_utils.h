@@ -519,3 +519,16 @@ inline void PrintTo(const ApexInfo& apex, std::ostream* os) {
 }  // namespace apex
 }  // namespace android
 }  // namespace com
+
+namespace android::dm {
+
+inline void PrintTo(const DeviceMapper::DmBlockDevice& bd, std::ostream* os) {
+  *os << "dm{" << bd.name() << "," << bd.Major() << ":" << bd.Minor() << "}";
+}
+
+inline bool operator==(const DeviceMapper::DmBlockDevice& lhs,
+                       const DeviceMapper::DmBlockDevice& rhs) {
+  return lhs.name() == rhs.name();
+}
+
+}  // namespace android::dm

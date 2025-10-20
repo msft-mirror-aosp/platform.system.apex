@@ -150,6 +150,7 @@ cc_binary {
         "libapexd",
         "libapexservice",
     ],
+    required: ["apexd-lsof.sh"],
     init_rc: ["apexd.rc"],
     // Just like the init, apexd should be able to run without
     // any APEX activated. To do so, it uses the bootstrap linker
@@ -201,8 +202,9 @@ cc_library_static {
         "apex_classpath.cpp",
         "apex_database.cpp",
         "apex_file_repository.cpp",
-        "apexd_brand_new_verifier.cpp",
         "apexd.cpp",
+        "apexd_brand_new_verifier.cpp",
+        "apexd_checkpoint.cpp",
         "apexd_dm.cpp",
         "apexd_image_manager.cpp",
         "apexd_lifecycle.cpp",
@@ -507,6 +509,7 @@ cc_test {
         ":apex.apexd_test_f2fs_no_inst_key",
         ":apex.apexd_test_nocode",
         ":apex.apexd_test_v2",
+        ":apex.apexd_test_v3",
         ":apex.corrupted_b146895998",
         ":gen_key_mismatch_apex",
         ":gen_key_mismatch_apex_v2",
@@ -723,6 +726,7 @@ cc_defaults {
         "liblog",
     ],
     static_libs: [
+        "android.os.statsbootstrap_aidl-cpp",
         "libstatsbootstrap",
     ],
 }
@@ -750,7 +754,11 @@ cc_library_static {
 genrule {
     name: "statslog_apex.h",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_apex.h --module apex --namespace stats,apex --bootstrap",
+    cmd: "$(location stats-log-api-gen) " +
+        "--header $(genDir)/statslog_apex.h " +
+        "--module apex " +
+        "--namespace stats,apex " +
+        "--interface bootstrap",
     out: [
         "statslog_apex.h",
     ],
@@ -759,7 +767,12 @@ genrule {
 genrule {
     name: "statslog_apex.cpp",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_apex.cpp --module apex --namespace stats,apex --importHeader statslog_apex.h --bootstrap",
+    cmd: "$(location stats-log-api-gen) " +
+        "--cpp $(genDir)/statslog_apex.cpp " +
+        "--module apex " +
+        "--namespace stats,apex " +
+        "--importHeader statslog_apex.h " +
+        "--interface bootstrap",
     out: [
         "statslog_apex.cpp",
     ],

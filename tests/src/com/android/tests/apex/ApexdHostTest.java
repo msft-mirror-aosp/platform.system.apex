@@ -89,6 +89,8 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
     public void testOrphanedApexIsNotActivated() throws Exception {
         assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
         assumeTrue("Device requires root", getDevice().isAdbRoot());
+        assumeFalse("Device uses mount-before-data", isMountBeforeDataEnabled());
+
         try {
             assertThat(getDevice().pushFile(mHostUtils.getTestFile("apex.apexd_test_v2.apex"),
                     "/data/apex/active/apexd_test_v2.apex")).isTrue();
@@ -105,10 +107,13 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
             getDevice().executeShellV2Command("rm /data/apex/active/apexd_test_v2.apex");
         }
     }
+
     @Test
     public void testApexWithoutPbIsNotActivated() throws Exception {
         assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
         assumeTrue("Device requires root", getDevice().isAdbRoot());
+        assumeFalse("Device uses mount-before-data", isMountBeforeDataEnabled());
+
         final String testApexFile = "com.android.apex.cts.shim.v2_no_pb.apex";
         try {
             assertThat(getDevice().pushFile(mHostUtils.getTestFile(testApexFile),
@@ -124,88 +129,6 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
                     Duration.ofMinutes(3));
         } finally {
             getDevice().executeShellV2Command("rm /data/apex/active/" + testApexFile);
-        }
-    }
-
-    @Test
-    public void testApexWithoutPbIsNotActivated_ProductPartitionHasOlderVersion()
-            throws Exception {
-        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
-        assumeTrue("Device requires root", getDevice().isAdbRoot());
-
-        try {
-            getDevice().remountSystemWritable();
-            // In case remount requires a reboot, wait for boot to complete.
-            assertWithMessage("Timed out waiting for device to boot").that(
-                    getDevice().waitForBootComplete(Duration.ofMinutes(2).toMillis())).isTrue();
-
-            final File v1 = mHostUtils.getTestFile("apex.apexd_test.apex");
-            getDevice().pushFile(v1, "/product/apex/apex.apexd_test.apex");
-
-            final File v2_no_pb = mHostUtils.getTestFile("apex.apexd_test_v2_no_pb.apex");
-            getDevice().pushFile(v2_no_pb, "/data/apex/active/apex.apexd_test_v2_no_pb.apex");
-
-            getDevice().reboot();
-            assertWithMessage("Timed out waiting for device to boot").that(
-                    getDevice().waitForBootComplete(Duration.ofMinutes(2).toMillis())).isTrue();
-
-            final Set<ITestDevice.ApexInfo> activeApexes = getDevice().getActiveApexes();
-            assertThat(activeApexes).contains(new ITestDevice.ApexInfo(
-                    "com.android.apex.test_package", 1L));
-            assertThat(activeApexes).doesNotContain(new ITestDevice.ApexInfo(
-                    "com.android.apex.test_package", 2L));
-
-            // v2_no_pb should be deleted
-            mHostUtils.waitForFileDeleted("/data/apex/active/apex.apexd_test_v2_no_pb.apex",
-                    Duration.ofMinutes(3));
-        } finally {
-            getDevice().remountSystemWritable();
-            assertWithMessage("Timed out waiting for device to boot").that(
-                    getDevice().waitForBootComplete(Duration.ofMinutes(2).toMillis())).isTrue();
-
-            getDevice().executeShellV2Command("rm /product/apex/apex.apexd_test.apex");
-            getDevice().executeShellV2Command("rm /data/apex/active/apex.apexd_test_v2_no_pb.apex");
-        }
-    }
-
-    @Test
-    public void testApexWithoutPbIsNotActivated_ProductPartitionHasNewerVersion()
-            throws Exception {
-        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
-        assumeTrue("Device requires root", getDevice().isAdbRoot());
-
-        try {
-            getDevice().remountSystemWritable();
-            // In case remount requires a reboot, wait for boot to complete.
-            assertWithMessage("Timed out waiting for device to boot").that(
-                    getDevice().waitForBootComplete(Duration.ofMinutes(2).toMillis())).isTrue();
-
-            final File v3 = mHostUtils.getTestFile("apex.apexd_test_v3.apex");
-            getDevice().pushFile(v3, "/product/apex/apex.apexd_test_v3.apex");
-
-            final File v2_no_pb = mHostUtils.getTestFile("apex.apexd_test_v2_no_pb.apex");
-            getDevice().pushFile(v2_no_pb, "/data/apex/active/apex.apexd_test_v2_no_pb.apex");
-
-            getDevice().reboot();
-            assertWithMessage("Timed out waiting for device to boot").that(
-                    getDevice().waitForBootComplete(Duration.ofMinutes(2).toMillis())).isTrue();
-
-            final Set<ITestDevice.ApexInfo> activeApexes = getDevice().getActiveApexes();
-            assertThat(activeApexes).contains(new ITestDevice.ApexInfo(
-                    "com.android.apex.test_package", 3L));
-            assertThat(activeApexes).doesNotContain(new ITestDevice.ApexInfo(
-                    "com.android.apex.test_package", 2L));
-
-            // v2_no_pb should be deleted
-            mHostUtils.waitForFileDeleted("/data/apex/active/apex.apexd_test_v2_no_pb.apex",
-                    Duration.ofMinutes(3));
-        } finally {
-            getDevice().remountSystemWritable();
-            assertWithMessage("Timed out waiting for device to boot").that(
-                    getDevice().waitForBootComplete(Duration.ofMinutes(2).toMillis())).isTrue();
-
-            getDevice().executeShellV2Command("rm /product/apex/apex.apexd_test_v3.apex");
-            getDevice().executeShellV2Command("rm /data/apex/active/apex.apexd_test_v2_no_pb.apex");
         }
     }
 
@@ -359,9 +282,11 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
 
         File apexFile = mHostUtils.getTestFile(apex_filename);
 
-        // Try to install it, we should get an error
         String error = mHostUtils.installRebootlessPackage(apexFile);
         assertThat(error).isNull();
+
+        getDevice().uninstallPackage("com.android.hardware.wifi");
+        getDevice().reboot();
     }
 
     /**
