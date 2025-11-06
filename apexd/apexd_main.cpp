@@ -140,9 +140,14 @@ int main(int argc, char** argv) {
 
   auto config = android::apex::kDefaultConfig;
   if constexpr (flags::mount_before_data()) {
-    config.uses_pinned_apex = true;
-    if (android::base::GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
-      config.mount_before_data = true;
+    // Pinned APEX requires FIEMAP support.
+    if (android::base::GetBoolProperty("apexd.config.use_fiemap", true)) {
+      config.uses_pinned_apex = true;
+      // We can mount APEXes in a single round only when the init process starts
+      // with a single mount namespace.
+      if (android::base::GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
+        config.mount_before_data = true;
+      }
     }
   }
   android::apex::SetConfig(config);

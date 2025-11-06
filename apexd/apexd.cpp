@@ -362,6 +362,11 @@ bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
 bool UsesPinnedApex() { return gConfig->uses_pinned_apex; }
 
 [[maybe_unused]] bool CanMountBeforeDataOnNextBoot() {
+  // Can't mount APEXes before /data without FIEMAP support
+  if (!base::GetBoolProperty("apexd.config.use_fiemap", true)) {
+    return false;
+  }
+
   // If there's no data apex files in /data/apex/active and no capex files, then
   // apexd-bootstrap can mount ALL apexes (preinstalled and pinned data apexes).
   if (!IsEmptyDirectory(gConfig->active_apex_data_dir)) {
