@@ -1836,6 +1836,11 @@ Result<std::vector<std::string>> TryActivateStagedSession(
            << "Cannot install apex session if not in fs-checkpoint mode";
   }
 
+  if (IsMountBeforeDataEnabled() && !InCheckpointMode()) {
+    return Error()
+           << "Cannot install apex session if not in fs-checkpoint mode";
+  }
+
   if (UsesPinnedApex()) {
     if (session.GetApexImages().empty()) {
       return Error() << "No apex found in session";

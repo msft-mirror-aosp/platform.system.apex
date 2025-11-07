@@ -58,4 +58,11 @@ Result<void> AbortChanges() {
   return {};
 }
 
+bool InCheckpointMode() {
+  CHECK(GetConfig().mount_before_data);
+  auto checkpoint_file = GetConfig().checkpoint_file;
+  std::string content;
+  return base::ReadFileToString(checkpoint_file, &content) && content != "0";
+}
+
 }  // namespace android::apex

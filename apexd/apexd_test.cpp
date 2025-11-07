@@ -317,6 +317,9 @@ class ApexdUnitTest : public ::testing::Test {
 
   std::string PrepareStagedSession(const std::string& apex_name,
                                    int session_id) {
+    // Set checkpoint mode
+    base::WriteStringToFile("3", checkpoint_file_);
+
     auto session_dir = GetStagedDir(session_id);
     CreateDirIfNeeded(session_dir, 0755);
     fs::copy(GetTestFile(apex_name), session_dir);
@@ -5342,9 +5345,6 @@ TEST_F(MountBeforeDataTest, UnstagePackages) {
 
 TEST_F(MountBeforeDataTest, AbortChangesOnActivationFailure) {
   ASSERT_EQ(0, OnBootstrap());
-
-  // Set checkpointing
-  ASSERT_TRUE(base::WriteStringToFile("3", checkpoint_file_));
 
   // Stage com.android.apex.test_package@2
   auto session_id = 42;
