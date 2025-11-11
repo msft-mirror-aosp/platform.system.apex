@@ -361,6 +361,8 @@ bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
 
 bool UsesPinnedApex() { return gConfig->uses_pinned_apex; }
 
+bool IsFileBackedMountEnabled() { return gConfig->file_backed_mount; }
+
 [[maybe_unused]] bool CanMountBeforeDataOnNextBoot() {
   // If there's no data apex files in /data/apex/active and no capex files, then
   // apexd-bootstrap can mount ALL apexes (preinstalled and pinned data apexes).
@@ -470,6 +472,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
 
   // Step 2. Create a block device for the payload
 
+  std::string mount_options;
   std::string mount_device;
   loop::LoopbackDeviceUniqueFd loop;
   DmDevice linear_dev;
@@ -478,6 +481,10 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   if (UsesPinnedApex() && GetImageManager()->IsPinnedApex(apex)) {
     linear_dev = OR_RETURN(CreateDmLinearForPayload(apex));
     mount_device = linear_dev.GetDevPath();
+  } else if (IsFileBackedMountEnabled() && fs_type == "erofs" &&
+             !mount_on_verity) {
+    mount_options = std::format("fsoffset={}", *apex.GetImageOffset());
+    mount_device = apex.GetPath();
   } else {
     loop = OR_RETURN(CreateLoopForApex(apex, loop_id));
     mount_device = loop.name;
@@ -540,7 +547,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
   }
 
   if (mount(mount_device.c_str(), mount_point.c_str(), fs_type.c_str(),
-            mount_flags, nullptr) != 0) {
+            mount_flags, mount_options.c_str()) != 0) {
     return ErrnoError() << "Mounting failed for package " << full_path;
   }
 

@@ -18,9 +18,11 @@
 
 #include <android-base/macros.h>
 #include <android-base/result-gmock.h>
+#include <android-base/strings.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <string>
 #include <tuple>
 
@@ -29,6 +31,8 @@ using android::base::Result;
 using android::base::testing::HasError;
 using android::base::testing::Ok;
 using android::base::testing::WithMessage;
+
+namespace fs = std::filesystem;
 
 namespace android {
 namespace apex {
@@ -66,6 +70,68 @@ bool ContainsPackage(const MountedApexDatabase& db, const std::string& package,
         }
       });
   return found;
+}
+
+TEST(ApexDatabaseTest, ParseMountInfoValid) {
+  const std::string mount_info_line =
+      "/dev/block/loop12 /apex/com.android.foo@1234 erofs ro,dirsync 0 0";
+  auto mount_info = ParseMountInfo(mount_info_line);
+  ASSERT_TRUE(mount_info.has_value());
+  EXPECT_EQ(mount_info->device, "/dev/block/loop12");
+  EXPECT_EQ(mount_info->mount_point, "/apex/com.android.foo@1234");
+  EXPECT_EQ(mount_info->fs, "erofs");
+  EXPECT_EQ(mount_info->mount_options, "ro,dirsync");
+}
+
+TEST(ApexDatabaseTest, ParseMountInfoInvalid) {
+  const std::string mount_info_line =
+      "/dev/block/loop12 /apex/com.android.foo@1234 erofs";
+  auto mount_info = ParseMountInfo(mount_info_line);
+  ASSERT_FALSE(mount_info.has_value());
+}
+
+TEST(ApexDatabaseTest, ParseMountInfoEmpty) {
+  const std::string mount_info_line = "";
+  auto mount_info = ParseMountInfo(mount_info_line);
+  ASSERT_FALSE(mount_info.has_value());
+}
+
+TEST(ApexDatabaseTest, ResolveMountInfoFileBackedSuccess) {
+  MountInfo info;
+  info.device = "/system/apex/com.android.foo.apex";
+  info.mount_point = "/apex/com.android.foo";
+  info.fs = "erofs";
+  info.mount_options = "ro,fsoffset=4096";
+
+  auto result = ResolveMountInfo(info);
+  ASSERT_THAT(result, Ok());
+  EXPECT_EQ(result->full_path, "/system/apex/com.android.foo.apex");
+  EXPECT_EQ(result->mount_point, "/apex/com.android.foo");
+}
+
+TEST(ApexDatabaseTest, ResolveMountInfoFileBackedWrongFs) {
+  MountInfo info;
+  info.device = "/system/apex/com.android.foo.apex";
+  info.mount_point = "/apex/com.android.foo";
+  info.fs = "ext4";
+  info.mount_options = "ro,fsoffset=4096";
+
+  auto result = ResolveMountInfo(info);
+  ASSERT_THAT(result, HasError(WithMessage(testing::HasSubstr(
+                          "File-backed mount is supported for erofs"))));
+}
+
+TEST(ApexDatabaseTest, ResolveMountInfoFileBackedMissingOffset) {
+  MountInfo info;
+  info.device = "/system/apex/com.android.foo.apex";
+  info.mount_point = "/apex/com.android.foo";
+  info.fs = "erofs";
+  info.mount_options = "ro";
+
+  auto result = ResolveMountInfo(info);
+  ASSERT_THAT(
+      result,
+      HasError(WithMessage(testing::HasSubstr("Fsoffset= option is missing"))));
 }
 
 TEST(ApexDatabaseTest, AddRemovedMountedApex) {

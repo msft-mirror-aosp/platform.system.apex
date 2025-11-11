@@ -116,6 +116,11 @@ void InstallSelinuxLogging() {
   selinux_set_callback(SELINUX_CB_LOG, cb);
 }
 
+[[maybe_unused]] bool GetFileBackedMountEnabled() {
+  return android::base::GetBoolProperty(
+      "ro.apexd.config.erofs_file_backed_mount", false);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -144,6 +149,9 @@ int main(int argc, char** argv) {
     if (android::base::GetIntProperty("ro.init.mnt_ns.count", 2) == 1) {
       config.mount_before_data = true;
     }
+  }
+  if constexpr (flags::erofs_file_backed_mount()) {
+    config.file_backed_mount = GetFileBackedMountEnabled();
   }
   android::apex::SetConfig(config);
 
