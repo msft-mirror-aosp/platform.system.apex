@@ -25,6 +25,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -104,12 +105,26 @@ class BlockDevice {
   }
 };
 
-std::pair<fs::path, fs::path> ParseMountInfo(const std::string& mount_info) {
+// The struct MountInfo represents a single entry from /proc/mounts.
+// For example, a line like
+// /dev/block/loop12 /apex/com.android.foo@1234 erofs ro,dirsync 0 0
+// will be parsed into
+// device: "/dev/block/loop12"
+// mount_point: "/apex/com.android.foo@1234"
+struct MountInfo {
+  fs::path device;
+  fs::path mount_point;
+};
+
+std::optional<MountInfo> ParseMountInfo(const std::string& mount_info) {
   const auto& tokens = Split(mount_info, " ");
-  if (tokens.size() < 2) {
-    return std::make_pair("", "");
+  if (tokens.size() < 4) {
+    return std::nullopt;
   }
-  return std::make_pair(tokens[0], tokens[1]);
+  return MountInfo{
+      .device = tokens[0],
+      .mount_point = tokens[1],
+  };
 }
 
 std::pair<std::string, int> ParseMountPoint(const std::string& mount_point) {
@@ -195,11 +210,11 @@ std::string ReplaceSuffix(std::string_view str, std::string_view old_suffix,
   return std::string(str);
 }
 
-Result<MountedApexData> ResolveMountInfo(const BlockDevice& block,
-                                         const std::string& mount_point) {
+Result<MountedApexData> ResolveMountInfo(const MountInfo& mount_info) {
   MountedApexData result;
-  result.mount_point = mount_point;
+  result.mount_point = mount_info.mount_point;
 
+  BlockDevice block{mount_info.device};
   // Now, see if it is dm-verity or loop mounted
   switch (block.GetType()) {
     case LoopDevice: {
@@ -271,9 +286,13 @@ void MountedApexDatabase::PopulateFromMounts()
   std::string line;
   std::lock_guard lock(mounted_apexes_mutex_);
   while (std::getline(mounts, line)) {
-    auto [block, mount_point] = ParseMountInfo(line);
-    // TODO(b/158469914): distinguish between temp and non-temp mounts
-    if (fs::path(mount_point).parent_path() != kApexRoot) {
+    auto mount_info_opt = ParseMountInfo(line);
+    if (!mount_info_opt) {
+      continue;
+    }
+    const auto& mount_info = *mount_info_opt;
+    const auto& mount_point = mount_info.mount_point;
+    if (mount_point.parent_path() != kApexRoot) {
       continue;
     }
     if (IsActiveMountPoint(mount_point)) {
@@ -282,7 +301,7 @@ void MountedApexDatabase::PopulateFromMounts()
     if (IsTempMountPoint(mount_point)) {
       continue;
     }
-    auto mount_data = ResolveMountInfo(BlockDevice(block), mount_point);
+    auto mount_data = ResolveMountInfo(mount_info);
     if (!mount_data.ok()) {
       LOG(WARNING) << "Can't resolve mount info " << mount_data.error();
       continue;
