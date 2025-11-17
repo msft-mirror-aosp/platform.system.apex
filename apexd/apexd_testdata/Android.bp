@@ -54,8 +54,8 @@ apex {
     prebuilts: ["sample_prebuilt_file"],
     key: "com.android.apex.test_package.key",
     installable: false,
+    updatable: false,
     payload_fs_type: "ext4", // many tests rely on this to be 'ext4'
-    min_sdk_version: "29", // test requires hashtree to be present.
 }
 
 apex {
@@ -76,7 +76,7 @@ apex {
     prebuilts: ["sample_prebuilt_file"],
     key: "com.android.apex.test_package.key",
     installable: false,
-    min_sdk_version: "29", // test requires hashtree to be present.
+    updatable: false,
 }
 
 apex {
@@ -441,8 +441,6 @@ apex {
         // Add a random file (1M) for corruption to be effective
         "sample_big_prebuilt_file",
     ],
-    // TODO(ioffe): we should have a separate field to hashtree presence.
-    min_sdk_version: "29", // test requires hashtree to be present.
 }
 
 apex {
@@ -452,8 +450,6 @@ apex {
     key: "com.android.apex.test_package.key",
     installable: false,
     updatable: false,
-    // TODO(ioffe): we should have a separate field to hashtree presence.
-    min_sdk_version: "29", // test requires hashtree to be present.
 }
 
 apex {
@@ -520,8 +516,6 @@ apex {
     installable: false,
     updatable: false,
     apps: ["AppInRebootlessApex"],
-    // TODO(ioffe): we should have a separate field to hashtree presence.
-    min_sdk_version: "29", // test requires hashtree to be present.
 }
 
 apex {
@@ -532,13 +526,11 @@ apex {
     installable: false,
     updatable: false,
     apps: ["PrivAppInRebootlessApex"],
-    // TODO(ioffe): we should have a separate field to hashtree presence.
-    min_sdk_version: "29", // test requires hashtree to be present.
 }
 
 android_app {
     name: "AppInRebootlessApex",
-    sdk_version: "29",
+    sdk_version: "current",
     manifest: "AppInRebootlessApex_AndroidManifest.xml",
     apex_available: [
         "test.rebootless_apex_app_in_apex",
@@ -547,7 +539,7 @@ android_app {
 
 android_app {
     name: "PrivAppInRebootlessApex",
-    sdk_version: "29",
+    sdk_version: "current",
     privileged: true,
     manifest: "AppInRebootlessApex_AndroidManifest.xml",
     apex_available: [

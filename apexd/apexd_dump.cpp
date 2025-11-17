@@ -43,6 +43,14 @@ std::string JoinValues(const auto& values) {
   return result;
 }
 
+void DumpConfig(std::ostream& out) {
+  const auto& config = GetConfig();
+  out << "config:";
+  out << " mount_before_data=" << std::boolalpha << config.mount_before_data;
+  out << " uses_pinned_apex=" << std::boolalpha << config.uses_pinned_apex;
+  out << "\n";
+}
+
 void DumpSessions(std::ostream& out) {
   auto manager = ApexSessionManager::Create(GetSessionsDir());
   for (const auto& session : manager->GetSessions()) {
@@ -79,8 +87,12 @@ void DumpSessions(std::ostream& out) {
 
 int OnDump(const std::vector<std::string>& args) {
   bool dump_all = args.empty();
+  bool dump_config = std::ranges::contains(args, "config");
   bool dump_sessions = std::ranges::contains(args, "sessions");
 
+  if (dump_all || dump_config) {
+    DumpConfig(std::cout);
+  }
   if (dump_all || dump_sessions) {
     DumpSessions(std::cout);
   }

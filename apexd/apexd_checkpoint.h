@@ -42,6 +42,12 @@ class CheckpointInterface {
 // This should be in sync with cp_abortChanges in system/vold/Checkpoint.cpp.
 base::Result<void> AbortChanges();
 
+// With mount_before_data, apexd-bootstrap should be able to check if the device
+// is in checkpoint mode while vold hasn't started yet. apexd-bootstrap performs
+// it as an exception.
+// This should be in sync with cp_needsCheckpoint in system/vold/Checkpoint.cpp.
+bool InCheckpointMode();
+
 }  // namespace apex
 }  // namespace android
 
