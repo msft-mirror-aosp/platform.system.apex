@@ -105,28 +105,6 @@ class BlockDevice {
   }
 };
 
-// The struct MountInfo represents a single entry from /proc/mounts.
-// For example, a line like
-// /dev/block/loop12 /apex/com.android.foo@1234 erofs ro,dirsync 0 0
-// will be parsed into
-// device: "/dev/block/loop12"
-// mount_point: "/apex/com.android.foo@1234"
-struct MountInfo {
-  fs::path device;
-  fs::path mount_point;
-};
-
-std::optional<MountInfo> ParseMountInfo(const std::string& mount_info) {
-  const auto& tokens = Split(mount_info, " ");
-  if (tokens.size() < 4) {
-    return std::nullopt;
-  }
-  return MountInfo{
-      .device = tokens[0],
-      .mount_point = tokens[1],
-  };
-}
-
 std::pair<std::string, int> ParseMountPoint(const std::string& mount_point) {
   auto package_id = fs::path(mount_point).filename();
   auto split = Split(package_id, "@");
@@ -210,9 +188,43 @@ std::string ReplaceSuffix(std::string_view str, std::string_view old_suffix,
   return std::string(str);
 }
 
+bool IsBlockDevice(const fs::path& device) {
+  return StartsWith(device.native(), kDevBlock.native());
+}
+
+}  // namespace
+
+std::optional<MountInfo> ParseMountInfo(const std::string& mount_info) {
+  const auto& tokens = Split(mount_info, " ");
+  if (tokens.size() < 4) {
+    return std::nullopt;
+  }
+  return MountInfo{
+      .device = tokens[0],
+      .mount_point = tokens[1],
+      .fs = tokens[2],
+      .mount_options = tokens[3],
+  };
+}
+
 Result<MountedApexData> ResolveMountInfo(const MountInfo& mount_info) {
   MountedApexData result;
   result.mount_point = mount_info.mount_point;
+
+  // At this point, mount_info.device is either block device or plain apex file.
+  if (!IsBlockDevice(mount_info.device)) {
+    // File-backed mount erofs apex file
+    if (mount_info.fs != "erofs") {
+      return Error() << "File-backed mount is supported for erofs, but not "
+                     << mount_info.fs;
+    }
+    if (mount_info.mount_options.find("fsoffset=") == std::string::npos) {
+      return Error()
+             << "Fsoffset= option is missing for erofs file-backed mount";
+    }
+    result.full_path = mount_info.device;
+    return result;
+  }
 
   BlockDevice block{mount_info.device};
   // Now, see if it is dm-verity or loop mounted
@@ -257,13 +269,12 @@ Result<MountedApexData> ResolveMountInfo(const MountInfo& mount_info) {
   return result;
 }
 
-}  // namespace
-
 // Parses active APEX mounts from /proc/mounts and populates the DB.
 //
 // /apex/<package-id> can be mounted from
 // - /dev/block/loopX : loop device
 // - /dev/block/dm-X : dm-verity
+// - /system/apex/com.android.foo.apex : EROFS file-backed mount
 //
 // (For more information about APEX mounts, please refer to MountPackageImpl())
 //
@@ -275,6 +286,9 @@ Result<MountedApexData> ResolveMountInfo(const MountInfo& mount_info) {
 // - Loop device is backed by an APEX file (e.g. /data/apex/active/foo.apex)
 // - Dm-linear device is created on top of userdata partition which represents
 //   the APEX payload
+//
+// In case of EROFS file-backed mount, the original APEX can be read from
+// /proc/mounts directly.
 //
 // Need to read /proc/mounts on startup since apexd can start
 // at any time (It's a lazy service).

@@ -218,7 +218,8 @@ class ApexdUnitTest : public ::testing::Test {
         {{partition_, brand_new_config_dir_}}, /* brand_new_apex_config_dirs */
         checkpoint_file_.c_str(),
         flags::mount_before_data(),
-        flags::mount_before_data(), /* uses_pinned_apex */
+        flags::mount_before_data(),       /* uses_pinned_apex */
+        flags::erofs_file_backed_mount(), /* file_backed_mount */
         metadata_config_dir_.c_str(),
     };
   }
@@ -873,6 +874,7 @@ class ApexdMountTest : public ApexdUnitTest {
 
  protected:
   void SetUp() override {
+    config_.file_backed_mount = false;
     ApexdUnitTest::SetUp();
     GetApexDatabaseForTesting().Reset();
     ASSERT_THAT(SetUpApexTestEnvironment(), Ok());
