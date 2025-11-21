@@ -30,6 +30,7 @@
 #include "apexd_image_manager.h"
 #include "apexd_lifecycle.h"
 #include "apexd_metrics_stats.h"
+#include "apexd_mount.h"
 #include "apexservice.h"
 #include "com_android_apex_flags.h"
 
@@ -116,11 +117,6 @@ void InstallSelinuxLogging() {
   selinux_set_callback(SELINUX_CB_LOG, cb);
 }
 
-[[maybe_unused]] bool GetFileBackedMountEnabled() {
-  return android::base::GetBoolProperty(
-      "ro.apexd.config.erofs_file_backed_mount", false);
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -156,7 +152,7 @@ int main(int argc, char** argv) {
     }
   }
   if constexpr (flags::erofs_file_backed_mount()) {
-    config.file_backed_mount = GetFileBackedMountEnabled();
+    config.file_backed_mount = android::apex::GetFileBackedMountEnabled();
   }
   android::apex::SetConfig(config);
 

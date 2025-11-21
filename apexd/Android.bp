@@ -150,7 +150,10 @@ cc_binary {
         "libapexd",
         "libapexservice",
     ],
-    required: ["apexd-lsof.sh"],
+    required: [
+        "apexd-lsof.sh",
+        "apexd_test_mount_empty_erofs_image",
+    ],
     init_rc: ["apexd.rc"],
     // Just like the init, apexd should be able to run without
     // any APEX activated. To do so, it uses the bootstrap linker
@@ -210,6 +213,7 @@ cc_library_static {
         "apexd_lifecycle.cpp",
         "apexd_loop.cpp",
         "apexd_metrics.cpp",
+        "apexd_mount.cpp",
         "apexd_private.cpp",
         "apexd_session.cpp",
         "apexd_verity.cpp",
@@ -715,6 +719,21 @@ xsd_config {
     gen_writer: true,
     tinyxml: true,
     root_elements: ["apex-info-list"],
+}
+
+genrule {
+    name: "gen_apexd_test_mount_empty_erofs_image",
+    tools: ["mkfs.erofs"],
+    out: ["empty_erofs.img"],
+    cmd: "mkdir -p $(genDir)/dummy_root && " +
+        "$(location mkfs.erofs) -T 0 -U 00000000-0000-0000-0000-000000000000 $(out) $(genDir)/dummy_root",
+}
+
+prebuilt_etc {
+    name: "apexd_test_mount_empty_erofs_image",
+    src: ":gen_apexd_test_mount_empty_erofs_image",
+    filename: "empty_erofs.img",
+    sub_dir: "apexd",
 }
 
 cc_defaults {
