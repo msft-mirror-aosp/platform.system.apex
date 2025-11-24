@@ -65,6 +65,8 @@ struct ApexdConfig {
   bool mount_before_data;
   // True if APEXes are pinned using ApexImageManager on installation.
   bool uses_pinned_apex;
+  // True if preinstalled EROFS APEXes can be file-backed mount.
+  bool file_backed_mount;
   const char* metadata_config_dir;
 };
 
@@ -82,6 +84,7 @@ static const ApexdConfig kDefaultConfig = {
     kCheckpointFile,
     false, /* mount_before_data */
     false, /* uses_pinned_apex */
+    false, /* file_backed_mount */
     kMetadataConfigDir,
 };
 

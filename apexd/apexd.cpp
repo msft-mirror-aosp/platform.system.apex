@@ -361,6 +361,8 @@ bool IsMountBeforeDataEnabled() { return gConfig->mount_before_data; }
 
 bool UsesPinnedApex() { return gConfig->uses_pinned_apex; }
 
+bool IsFileBackedMountEnabled() { return gConfig->file_backed_mount; }
+
 [[maybe_unused]] bool CanMountBeforeDataOnNextBoot() {
   // Can't mount APEXes before /data without FIEMAP support
   if (!base::GetBoolProperty("apexd.config.use_fiemap", true)) {
@@ -416,6 +418,10 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     return Error() << "Cannot directly mount compressed APEX "
                    << apex.GetPath();
   }
+  if (!apex.GetFsType()) {
+    return Error() << "Cannot mount package without FsType for APEX "
+                   << apex.GetPath();
+  }
 
   // Steps to mount an APEX file:
   //
@@ -455,41 +461,9 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     return Error() << mount_point << " is not empty";
   }
 
-  const std::string& full_path = apex.GetPath();
-
-  // Step 2. Create a block device for the payload
-
-  std::string block_device;
-  loop::LoopbackDeviceUniqueFd loop;
-  DmDevice linear_dev;
-
-  if (UsesPinnedApex() && GetImageManager()->IsPinnedApex(apex)) {
-    linear_dev = OR_RETURN(CreateDmLinearForPayload(apex));
-    block_device = linear_dev.GetDevPath();
-  } else {
-    loop = OR_RETURN(CreateLoopForApex(apex, loop_id));
-    block_device = loop.name;
-  }
-
-  // Step 3. Wrap the block device with dm-verity (optional)
-
-  auto verity_data = apex.VerifyApexVerity(apex.GetBundledPublicKey());
-  if (!verity_data.ok()) {
-    return Error() << "Failed to verify Apex Verity data for " << full_path
-                   << ": " << verity_data.error();
-  }
-
   auto& instance = ApexFileRepository::GetInstance();
-  if (instance.IsBlockApex(apex)) {
-    auto root_digest = instance.GetBlockApexRootDigest(apex.GetPath());
-    if (root_digest.has_value() &&
-        root_digest.value() != verity_data->root_digest) {
-      return Error() << "Failed to verify Apex Verity data for " << full_path
-                     << ": root digest (" << verity_data->root_digest
-                     << ") mismatches with the one (" << root_digest.value()
-                     << ") specified in config";
-    }
-  }
+
+  const std::string& full_path = apex.GetPath();
 
   // for APEXes in immutable partitions, we don't need to mount them on
   // dm-verity because they are already in the dm-verity protected partition;
@@ -501,10 +475,49 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                // block apexes are from host
                                instance.IsBlockApex(apex);
 
+  // Step 2. Create a block device for the payload
+
+  std::string mount_options;
+  std::string mount_device;
+  loop::LoopbackDeviceUniqueFd loop;
+  DmDevice linear_dev;
+  std::string fs_type = apex.GetFsType().value();
+
+  if (UsesPinnedApex() && GetImageManager()->IsPinnedApex(apex)) {
+    linear_dev = OR_RETURN(CreateDmLinearForPayload(apex));
+    mount_device = linear_dev.GetDevPath();
+  } else if (IsFileBackedMountEnabled() && fs_type == "erofs" &&
+             !mount_on_verity) {
+    mount_options = std::format("fsoffset={}", *apex.GetImageOffset());
+    mount_device = apex.GetPath();
+  } else {
+    loop = OR_RETURN(CreateLoopForApex(apex, loop_id));
+    mount_device = loop.name;
+  }
+
+  // Step 3. Wrap the block device with dm-verity (optional)
+
+  auto verity_data = apex.VerifyApexVerity(apex.GetBundledPublicKey());
+  if (!verity_data.ok()) {
+    return Error() << "Failed to verify Apex Verity data for " << full_path
+                   << ": " << verity_data.error();
+  }
+
+  if (instance.IsBlockApex(apex)) {
+    auto root_digest = instance.GetBlockApexRootDigest(apex.GetPath());
+    if (root_digest.has_value() &&
+        root_digest.value() != verity_data->root_digest) {
+      return Error() << "Failed to verify Apex Verity data for " << full_path
+                     << ": root digest (" << verity_data->root_digest
+                     << ") mismatches with the one (" << root_digest.value()
+                     << ") specified in config";
+    }
+  }
+
   DmDevice verity_dev;
   if (mount_on_verity) {
     auto verity_table =
-        CreateVerityTable(*verity_data, block_device,
+        CreateVerityTable(*verity_data, mount_device,
                           /* restart_on_corruption = */ !verify_image);
     Result<DmDevice> verity_dev_res =
         CreateDmDevice(device_name, *verity_table, reuse_device);
@@ -515,7 +528,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                    << st.error();
       }
       return Error() << "Failed to create dm-verity for path=" << full_path
-                     << " block=" << block_device << ": "
+                     << " block=" << mount_device << ": "
                      << verity_dev_res.error();
     }
     verity_dev = std::move(*verity_dev_res);
@@ -528,7 +541,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
                                  (*verity_data).desc->image_size));
     }
 
-    block_device = verity_dev.GetDevPath();
+    mount_device = verity_dev.GetDevPath();
   }
 
   // Step 4. Mount the payload filesystem at the mount point
@@ -538,11 +551,8 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     mount_flags |= MS_NOEXEC;
   }
 
-  if (!apex.GetFsType()) {
-    return Error() << "Cannot mount package without FsType";
-  }
-  if (mount(block_device.c_str(), mount_point.c_str(),
-            apex.GetFsType().value().c_str(), mount_flags, nullptr) != 0) {
+  if (mount(mount_device.c_str(), mount_point.c_str(), fs_type.c_str(),
+            mount_flags, mount_options.c_str()) != 0) {
     return ErrnoError() << "Mounting failed for package " << full_path;
   }
 

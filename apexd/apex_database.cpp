@@ -25,6 +25,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -103,14 +104,6 @@ class BlockDevice {
     return slaves;
   }
 };
-
-std::pair<fs::path, fs::path> ParseMountInfo(const std::string& mount_info) {
-  const auto& tokens = Split(mount_info, " ");
-  if (tokens.size() < 2) {
-    return std::make_pair("", "");
-  }
-  return std::make_pair(tokens[0], tokens[1]);
-}
 
 std::pair<std::string, int> ParseMountPoint(const std::string& mount_point) {
   auto package_id = fs::path(mount_point).filename();
@@ -195,11 +188,45 @@ std::string ReplaceSuffix(std::string_view str, std::string_view old_suffix,
   return std::string(str);
 }
 
-Result<MountedApexData> ResolveMountInfo(const BlockDevice& block,
-                                         const std::string& mount_point) {
-  MountedApexData result;
-  result.mount_point = mount_point;
+bool IsBlockDevice(const fs::path& device) {
+  return StartsWith(device.native(), kDevBlock.native());
+}
 
+}  // namespace
+
+std::optional<MountInfo> ParseMountInfo(const std::string& mount_info) {
+  const auto& tokens = Split(mount_info, " ");
+  if (tokens.size() < 4) {
+    return std::nullopt;
+  }
+  return MountInfo{
+      .device = tokens[0],
+      .mount_point = tokens[1],
+      .fs = tokens[2],
+      .mount_options = tokens[3],
+  };
+}
+
+Result<MountedApexData> ResolveMountInfo(const MountInfo& mount_info) {
+  MountedApexData result;
+  result.mount_point = mount_info.mount_point;
+
+  // At this point, mount_info.device is either block device or plain apex file.
+  if (!IsBlockDevice(mount_info.device)) {
+    // File-backed mount erofs apex file
+    if (mount_info.fs != "erofs") {
+      return Error() << "File-backed mount is supported for erofs, but not "
+                     << mount_info.fs;
+    }
+    if (mount_info.mount_options.find("fsoffset=") == std::string::npos) {
+      return Error()
+             << "Fsoffset= option is missing for erofs file-backed mount";
+    }
+    result.full_path = mount_info.device;
+    return result;
+  }
+
+  BlockDevice block{mount_info.device};
   // Now, see if it is dm-verity or loop mounted
   switch (block.GetType()) {
     case LoopDevice: {
@@ -242,13 +269,12 @@ Result<MountedApexData> ResolveMountInfo(const BlockDevice& block,
   return result;
 }
 
-}  // namespace
-
 // Parses active APEX mounts from /proc/mounts and populates the DB.
 //
 // /apex/<package-id> can be mounted from
 // - /dev/block/loopX : loop device
 // - /dev/block/dm-X : dm-verity
+// - /system/apex/com.android.foo.apex : EROFS file-backed mount
 //
 // (For more information about APEX mounts, please refer to MountPackageImpl())
 //
@@ -261,6 +287,9 @@ Result<MountedApexData> ResolveMountInfo(const BlockDevice& block,
 // - Dm-linear device is created on top of userdata partition which represents
 //   the APEX payload
 //
+// In case of EROFS file-backed mount, the original APEX can be read from
+// /proc/mounts directly.
+//
 // Need to read /proc/mounts on startup since apexd can start
 // at any time (It's a lazy service).
 void MountedApexDatabase::PopulateFromMounts()
@@ -271,9 +300,13 @@ void MountedApexDatabase::PopulateFromMounts()
   std::string line;
   std::lock_guard lock(mounted_apexes_mutex_);
   while (std::getline(mounts, line)) {
-    auto [block, mount_point] = ParseMountInfo(line);
-    // TODO(b/158469914): distinguish between temp and non-temp mounts
-    if (fs::path(mount_point).parent_path() != kApexRoot) {
+    auto mount_info_opt = ParseMountInfo(line);
+    if (!mount_info_opt) {
+      continue;
+    }
+    const auto& mount_info = *mount_info_opt;
+    const auto& mount_point = mount_info.mount_point;
+    if (mount_point.parent_path() != kApexRoot) {
       continue;
     }
     if (IsActiveMountPoint(mount_point)) {
@@ -282,7 +315,7 @@ void MountedApexDatabase::PopulateFromMounts()
     if (IsTempMountPoint(mount_point)) {
       continue;
     }
-    auto mount_data = ResolveMountInfo(BlockDevice(block), mount_point);
+    auto mount_data = ResolveMountInfo(mount_info);
     if (!mount_data.ok()) {
       LOG(WARNING) << "Can't resolve mount info " << mount_data.error();
       continue;

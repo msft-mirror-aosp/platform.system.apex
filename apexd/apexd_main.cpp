@@ -30,6 +30,7 @@
 #include "apexd_image_manager.h"
 #include "apexd_lifecycle.h"
 #include "apexd_metrics_stats.h"
+#include "apexd_mount.h"
 #include "apexservice.h"
 #include "com_android_apex_flags.h"
 
@@ -149,6 +150,9 @@ int main(int argc, char** argv) {
         config.mount_before_data = true;
       }
     }
+  }
+  if constexpr (flags::erofs_file_backed_mount()) {
+    config.file_backed_mount = android::apex::GetFileBackedMountEnabled();
   }
   android::apex::SetConfig(config);
 
