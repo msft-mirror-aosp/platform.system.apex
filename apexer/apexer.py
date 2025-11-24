@@ -21,6 +21,7 @@ Typical usage: apexer input_dir output.apex
 
 import apex_build_info_pb2
 import argparse
+import filecmp
 import hashlib
 import os
 import pkgutil
@@ -768,6 +769,23 @@ def CreateAndroidManifestXml(args, work_dir, manifest_apex):
   return android_manifest_file
 
 
+def ValidatePubkey(args, work_dir):
+  extracted_pubkey = os.path.join(work_dir, 'pubkey.tmp')
+  cmd = ['avbtool']
+  cmd.append('extract_public_key')
+  cmd.extend(['--key', args.key])
+  cmd.extend(['--output', extracted_pubkey])
+  RunCommand(cmd, args.verbose)
+  is_same = filecmp.cmp(extracted_pubkey, args.pubkey)
+  os.remove(extracted_pubkey)
+  if not is_same:
+    print(args.pubkey + '(pubkey) doesn\'t match with ' + args.key + '(key).')
+    print('Please update pubkey: avbtool extract_public_key --key ' +
+          args.key + ' --output ' + args.pubkey)
+    return False
+  return True
+
+
 def CreateApex(args, work_dir):
   if not ValidateArgs(args):
     return False
@@ -829,6 +847,8 @@ def CreateApex(args, work_dir):
 
   # copy the public key, if specified
   if args.pubkey:
+    if not ValidatePubkey(args, work_dir):
+      return False
     shutil.copyfile(args.pubkey, os.path.join(content_dir, 'apex_pubkey'))
 
   if args.include_build_info:
