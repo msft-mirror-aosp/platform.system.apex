@@ -182,8 +182,6 @@ class MountedApexDatabase {
   // Note: using std::maps to
   //         a) so we do not have to worry about iterator invalidation.
   //         b) do not have to const_cast (over std::set)
-  // TODO(b/158467745): This structure (and functions) need to be guarded by
-  //   locks.
   std::map<std::string, std::set<MountedApexData>> mounted_apexes_
       GUARDED_BY(mounted_apexes_mutex_);
 
