@@ -51,4 +51,13 @@ message ApexBuildInfo {
 
   // Value of --payload_fs_type passed at build time.
   string payload_fs_type = 10;
+
+  // Value of --erofs_compressor passed at build time.
+  string erofs_compressor = 11;
+
+  // Content of the hints file passed via --erofs_compress_hints at build time.
+  bytes erofs_compress_hints = 12;
+
+  // Value of --erofs_pcluster_size passed at build time.
+  string erofs_pcluster_size = 13;
 }

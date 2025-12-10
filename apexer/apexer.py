@@ -112,6 +112,21 @@ def ParseArgs(argv):
       choices=['ext4', 'f2fs', 'erofs'],
       help='type of filesystem being used for payload image "ext4", "f2fs" or "erofs"')
   parser.add_argument(
+      '--erofs_compressor',
+      metavar='COMPRESSOR',
+      required=False,
+      help='compressor and compression level passed to mkfs.erofs. e.g. (lz4hc,9)')
+  parser.add_argument(
+      '--erofs_compress_hints',
+      metavar='HINTS_FILE',
+      required=False,
+      help='per-file compression strategy for mkfs.erofs')
+  parser.add_argument(
+      '--erofs_pcluster_size',
+      metavar='PCLUSTER_SIZE',
+      required=False,
+      help='the size of compress physical cluster in bytes for mkfs.erofs')
+  parser.add_argument(
       '--override_apk_package_name',
       required=False,
       help='package name of the APK container. Default is the apex name in --manifest.'
@@ -402,6 +417,21 @@ def ValidateArgs(args):
     else:
       args.payload_fs_type = 'ext4'
 
+  if args.payload_fs_type == 'erofs':
+    if not args.erofs_compressor:
+      if build_info and build_info.erofs_compressor:
+        args.erofs_compressor = build_info.erofs_compressor
+
+    if not args.erofs_compress_hints:
+      if build_info and build_info.erofs_compress_hints:
+        with tempfile.NamedTemporaryFile(delete=False) as temp:
+          temp.write(build_info.erofs_compress_hints)
+          args.erofs_compress_hints = temp.name
+
+    if not args.erofs_pcluster_size:
+      if build_info and build_info.erofs_pcluster_size:
+        args.erofs_pcluster_size = build_info.erofs_pcluster_size
+
   return True
 
 
@@ -436,6 +466,17 @@ def GenerateBuildInfo(args):
 
   if args.payload_type == 'image':
     build_info.payload_fs_type = args.payload_fs_type
+
+  if args.payload_fs_type == 'erofs':
+    if args.erofs_compressor:
+      build_info.erofs_compressor = args.erofs_compressor
+
+    if args.erofs_compress_hints:
+      with open(args.erofs_compress_hints, 'rb') as f:
+        build_info.erofs_compress_hints = f.read()
+
+    if args.erofs_pcluster_size:
+      build_info.erofs_pcluster_size = args.erofs_pcluster_size
 
   return build_info
 
@@ -636,7 +677,21 @@ def CreateImageErofs(args, work_dir, manifests_dir, img_file):
   RunCommand(cmd, args.verbose)
 
   cmd = ['mkfs.erofs']
-  cmd.extend(['-z', 'lz4hc'])
+
+  compressor = 'lz4hc'
+  if args.erofs_compressor:
+    compressor = args.erofs_compressor
+  if compressor != 'none':
+    cmd.extend(['-z', compressor])
+
+  if args.erofs_compress_hints:
+    cmd.extend(['--compress-hints', args.erofs_compress_hints])
+
+  pcluster_size = '4096'
+  if args.erofs_pcluster_size:
+    pcluster_size = args.erofs_pcluster_size
+  cmd.extend(['-C', pcluster_size])
+
   cmd.extend(['--fs-config-file', args.canned_fs_config])
   cmd.extend(['--file-contexts', args.file_contexts])
   uu = str(uuid.uuid5(uuid.NAMESPACE_URL, 'www.android.com'))
