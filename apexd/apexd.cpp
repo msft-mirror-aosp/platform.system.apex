@@ -635,11 +635,21 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
   }
 
   // Try to free up the device-mapper devices.
+  // TODO(b/467824824) This may fail because of EBUSY when the mountpoint is
+  // still being used by different processes (especially those running in a
+  // spawned mount namespace, e.g. zygote)
+  // Let's log errors and move on.
   if (!data.verity_name.empty()) {
-    OR_RETURN(DeleteDmDevice(data.verity_name, deferred));
+    if (auto st = DeleteDmDevice(data.verity_name, deferred); !st.ok()) {
+      LOG(ERROR) << "Failed to delete DM device " << data.verity_name << ": "
+                 << st.error();
+    }
   }
   if (!data.linear_name.empty()) {
-    OR_RETURN(DeleteDmDevice(data.linear_name, deferred));
+    if (auto st = DeleteDmDevice(data.linear_name, deferred); !st.ok()) {
+      LOG(ERROR) << "Failed to delete DM device " << data.linear_name << ": "
+                 << st.error();
+    }
   }
 
   // Since we now use LO_FLAGS_AUTOCLEAR when configuring loop devices, we don't
@@ -3028,6 +3038,9 @@ void BootCompletedCleanup() REQUIRES(!gInstallLock) {
   gSessionManager->DeleteFinalizedSessions();
   RemoveInactiveDataApex();
   DeleteUnusedVerityDevices();
+  if (UsesPinnedApex()) {
+    GetImageManager()->ClearDeletedImageNames();
+  }
 
   if constexpr (flags::mount_before_data()) {
     // Mark "migration done" by creating /metadata/apex/config/mount_before_data
