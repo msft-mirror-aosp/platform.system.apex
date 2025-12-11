@@ -583,7 +583,7 @@ Result<void> ApexImageManager::RemoveUnreferencedImages() const {
   // remove it only when the list of pinned images is empty.
   if (all_images.empty()) {
     std::string err;
-    if (!base::RemoveFileIfExists(data_dir_ + "/apex.img", &err)) {
+    if (!SplitFiemap::RemoveSplitFiles(data_dir_ + "/apex.img", &err)) {
       return Error() << "Failed to delete apex.img: " << err;
     }
   }
