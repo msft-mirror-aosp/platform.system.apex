@@ -53,4 +53,8 @@ message ApexStorageMetadata {
 
   // Allocation alignment in bytes
   fixed64 allocation_alignment = 2;
+
+  // Keep the list of deleted image names during this boot to avoid name
+  // conflicts. Will be cleared on next boot.
+  repeated string deleted_images = 3;
 }
