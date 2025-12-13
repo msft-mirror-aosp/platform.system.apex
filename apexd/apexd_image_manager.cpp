@@ -214,13 +214,14 @@ Result<void> ApexStorageMetadata_Save(const ApexStorageMetadata& metadata,
   return {};
 }
 
-std::vector<std::string> ApexStorageMetadata_GetAllImageNames(
+std::vector<std::string> ApexStorageMetadata_GetKnownImageNames(
     const ApexStorageMetadata& metadata) {
   std::vector<std::string> image_names;
-  image_names.reserve(metadata.images_size());
+  image_names.reserve(metadata.images_size() + metadata.deleted_images_size());
   for (const auto& image_info : metadata.images()) {
     image_names.emplace_back(image_info.image_name());
   }
+  image_names.append_range(metadata.deleted_images());
   return image_names;
 }
 
@@ -493,7 +494,7 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
   for (const auto& apex_file : apex_files) {
     // Get a unique "image" name from the apex name
     auto image_name =
-        AllocateNewName(ApexStorageMetadata_GetAllImageNames(metadata),
+        AllocateNewName(ApexStorageMetadata_GetKnownImageNames(metadata),
                         apex_file.GetManifest().name());
     new_images.emplace_back(image_name);
 
@@ -532,6 +533,13 @@ Result<void> ApexImageManager::DeleteImage(const std::string& image) {
   }
   // Erase the entry and save the updated metadata
   metadata.mutable_images()->erase(it);
+
+  // Keep the name of deleted image to avoid name conflicts during the current
+  // boot. Note that non-staged installation may fail to delete DM devices
+  // created for this image. In such a case, using that name for the new image
+  // will fail to create DM devices for the image. Deleted image names can be
+  // cleared on boot-completion.
+  metadata.add_deleted_images(image);
 
   if (HasApexStoragePerImage(metadata)) {
     auto storage_path = data_dir_ + "/" + image;
@@ -583,11 +591,26 @@ Result<void> ApexImageManager::RemoveUnreferencedImages() const {
   // remove it only when the list of pinned images is empty.
   if (all_images.empty()) {
     std::string err;
-    if (!base::RemoveFileIfExists(data_dir_ + "/apex.img", &err)) {
+    if (!SplitFiemap::RemoveSplitFiles(data_dir_ + "/apex.img", &err)) {
       return Error() << "Failed to delete apex.img: " << err;
     }
   }
   return {};
+}
+
+void ApexImageManager::ClearDeletedImageNames() const {
+  auto metadata_path = GetApexStorageMetadataPath();
+  auto metadata = ApexStorageMetadata_Load(metadata_path);
+  if (!metadata.ok()) {
+    LOG(ERROR) << "Failed to load APEX Storage Metadata: " << metadata.error();
+  }
+  if (metadata->deleted_images().empty()) {
+    return;
+  }
+  metadata->clear_deleted_images();
+  if (auto st = ApexStorageMetadata_Save(*metadata, metadata_path); !st.ok()) {
+    LOG(ERROR) << "Failed to save APEX Storage Metadata: " << st.error();
+  }
 }
 
 std::optional<std::string> ApexImageManager::FindPinnedApex(

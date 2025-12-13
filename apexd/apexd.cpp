@@ -635,11 +635,21 @@ Result<void> Unmount(const MountedApexData& data, bool deferred) {
   }
 
   // Try to free up the device-mapper devices.
+  // TODO(b/467824824) This may fail because of EBUSY when the mountpoint is
+  // still being used by different processes (especially those running in a
+  // spawned mount namespace, e.g. zygote)
+  // Let's log errors and move on.
   if (!data.verity_name.empty()) {
-    OR_RETURN(DeleteDmDevice(data.verity_name, deferred));
+    if (auto st = DeleteDmDevice(data.verity_name, deferred); !st.ok()) {
+      LOG(ERROR) << "Failed to delete DM device " << data.verity_name << ": "
+                 << st.error();
+    }
   }
   if (!data.linear_name.empty()) {
-    OR_RETURN(DeleteDmDevice(data.linear_name, deferred));
+    if (auto st = DeleteDmDevice(data.linear_name, deferred); !st.ok()) {
+      LOG(ERROR) << "Failed to delete DM device " << data.linear_name << ": "
+                 << st.error();
+    }
   }
 
   // Since we now use LO_FLAGS_AUTOCLEAR when configuring loop devices, we don't
@@ -3028,6 +3038,9 @@ void BootCompletedCleanup() REQUIRES(!gInstallLock) {
   gSessionManager->DeleteFinalizedSessions();
   RemoveInactiveDataApex();
   DeleteUnusedVerityDevices();
+  if (UsesPinnedApex()) {
+    GetImageManager()->ClearDeletedImageNames();
+  }
 
   if constexpr (flags::mount_before_data()) {
     // Mark "migration done" by creating /metadata/apex/config/mount_before_data
@@ -3533,6 +3546,7 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   if (!cur_apex.ok()) {
     return cur_apex.error();
   }
+  auto current_package = cur_apex->GetManifest().name();
 
   // Do a quick check if this APEX can be installed without a reboot.
   // Note that passing this check doesn't guarantee that APEX will be
@@ -3574,11 +3588,15 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   std::vector<base::ScopeGuard<std::function<void()>>> guards;
 
   // 3. Unmount currently active APEX.
+  LOG(INFO) << "Unmounting the current active: " << cur_apex->GetPath();
+
   OR_RETURN(apexd_private::UnmountPackage(*cur_apex,
                                           /*deferred=*/true,
                                           /*detach_mount_point=*/force));
   // Re-activate the current apex on error.
   guards.emplace_back(base::make_scope_guard([&]() {
+    LOG(ERROR) << "Re-mounting the original: " << cur_apex->GetPath();
+
     // We can't really rely on the fact that dm-verity device backing up
     // previously active APEX is still around. We need to create a new one.
     std::string old_new_id = GetPackageId(temp_apex->GetManifest()) + "_" +
@@ -3597,9 +3615,12 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     auto image_manager = GetImageManager();
     // Pin the new file first.
     auto image = OR_RETURN(image_manager->PinApexFiles(Single(*temp_apex)))[0];
+    LOG(ERROR) << "New APEX of " << current_package << " is copied from "
+               << temp_apex->GetPath() << " to the image " << image;
     guards.emplace_back(base::make_scope_guard([=]() {
+      LOG(ERROR) << "Deleting the image " << image << " of " << current_package;
       if (auto st = image_manager->DeleteImage(image); !st.ok()) {
-        LOG(ERROR) << st.error();
+        LOG(ERROR) << "Failed to delete the image: " << st.error();
       }
     }));
 
@@ -3620,9 +3641,11 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
 
     // Map the image so that we can access the pinned APEX
     target_file = OR_RETURN(image_manager->MapImage(image));
+    LOG(INFO) << "The APEX image " << image << " is mapped as " << target_file;
     guards.emplace_back(base::make_scope_guard([=]() {
+      LOG(ERROR) << "Unmapping " << image << "(" << target_file << ")";
       if (auto st = image_manager->UnmapImage(image); !st.ok()) {
-        LOG(ERROR) << st.error();
+        LOG(ERROR) << "Failed to unmap " << image << ": " << st.error();
       }
     }));
   } else {
@@ -3651,6 +3674,8 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   }
 
   // 5. And activate new one.
+  LOG(INFO) << "Activating the new APEX " << current_package << " from "
+            << new_apex->GetPath();
   auto activate_status =
       ActivatePackageImpl(*new_apex, loop::kFreeLoopId, new_id,
                           /* reuse_device= */ false);
@@ -3659,6 +3684,9 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   }
 
   // Accept the install. Disable all ScopeGuards.
+  LOG(INFO) << "Installation succeeded from " << package_path << " to "
+            << new_apex->GetPath();
+
   for (auto& guard : guards) guard.Disable();
 
   // 6. Now we can unlink old APEX if it's not pre-installed.
@@ -3675,6 +3703,7 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   }
 
   // 7. Update apex-info-list.xml
+  LOG(INFO) << "Updating apex-info-list.xml";
   auto active = GetActivePackages();
   std::vector<ApexFileRef> active_references;
   active_references.reserve(active.size());
