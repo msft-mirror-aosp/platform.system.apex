@@ -987,6 +987,79 @@ class ApexdMountTest : public ApexdUnitTest {
   std::vector<DeviceMapper::DmBlockDevice> dm_devices_;
 };
 
+TEST_F(ApexdMountTest, UnmountAndRemount_Preinstalled) {
+  std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+  ASSERT_THAT(ActivatePackage(file_path), Ok());
+
+  // Now, we've set up an active apex (preinstalled)
+
+  // DeactivatePackage() should be reversible via ActivatePackage() to recover
+  // from activation error during InstallPackage().
+
+  auto apex = GetActivePackage("test.apex.rebootless");
+  ASSERT_THAT(apex, Ok());
+  ASSERT_THAT(DeactivatePackage(apex->GetPath()), Ok());
+  ASSERT_THAT(ActivatePackage(apex->GetPath()), Ok());
+}
+
+TEST_F(ApexdMountTest, UnmountAndRemount_Updated) {
+  std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+  ASSERT_THAT(ActivatePackage(file_path), Ok());
+  ASSERT_THAT(InstallPackage(GetTestFile(("test.rebootless_apex_v1.apex")),
+                             /*force=*/false),
+              Ok());
+
+  // Now, we've set up an active APEX (updated).
+
+  // DeactivatePackage() should be reversible via ActivatePackage() to recover
+  // from activation error during InstallPackage().
+
+  auto apex = GetActivePackage("test.apex.rebootless");
+  ASSERT_THAT(apex, Ok());
+  ASSERT_THAT(DeactivatePackage(apex->GetPath()), Ok());
+  ASSERT_THAT(ActivatePackage(apex->GetPath()), Ok());
+}
+
+TEST_F(ApexdMountTest, UnmountAndRemount_Updated_PartialUnmount) {
+  std::string file_path = AddPreInstalledApex("test.rebootless_apex_v1.apex");
+  ApexFileRepository::GetInstance().AddPreInstalledApex(
+      {{GetPartition(), GetBuiltInDir()}});
+  ASSERT_THAT(ActivatePackage(file_path), Ok());
+  ASSERT_THAT(InstallPackage(GetTestFile(("test.rebootless_apex_v1.apex")),
+                             /*force=*/false),
+              Ok());
+
+  // Now, we've set up an active APEX (updated).
+
+  // DeactivatePackage() should be reversible via ActivatePackage() to recover
+  // from activation error during InstallPackage().
+
+  auto apex =
+      GetApexDatabaseForTesting().GetLatestMountedApex("test.apex.rebootless");
+  ASSERT_TRUE(apex.has_value());
+
+  // Hold the dm-verity device to trigger partial unmount
+  auto& dm = DeviceMapper::Instance();
+  std::string dev_path;
+  ASSERT_TRUE(dm.GetDmDevicePathByName(apex->verity_name, &dev_path));
+  unique_fd fd(open(dev_path.c_str(), O_RDONLY | O_CLOEXEC));
+  ASSERT_NE(-1, fd.get());
+  // Clean them up manually after test
+  auto cleaner = make_scope_guard([&]() {
+    fd.reset();
+    dm.DeleteDeviceIfExists(apex->verity_name, 1s);
+    dm.DeleteDeviceIfExists(apex->linear_name, 1s);  // mount_before_data
+  });
+
+  // Even when dm-verity is busy, Unmount/Remount should succeed.
+  ASSERT_THAT(DeactivatePackage(apex->full_path), Ok());
+  ASSERT_THAT(ActivatePackage(apex->full_path), Ok());
+}
+
 TEST_F(ApexdMountTest, CalculateSizeForCompressedApexEmptyList) {
   int64_t result = CalculateSizeForCompressedApex({});
   ASSERT_EQ(0LL, result);

@@ -393,13 +393,20 @@ Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex) {
   if (!image_name) {
     return Error() << "Not a pinned apex: " << apex.GetPath();
   }
+  auto device_name = *image_name + kDmLinearPayloadSuffix;
+  // Use the existing device if any. Note that an active mount is still used by
+  // other processes that are running in a cloned mount namespace (b/467824824).
+  // In such case, device-mapper devices used by the mount can't be deleted
+  // during the rebootless installation. Reusing the existing one should be
+  // okay because the device name for the APEX payload is derived from the image
+  // name, which is unique.
+  if (auto existing = GetDmDeviceByName(device_name); existing) {
+    return std::move(existing.value());
+  }
 
   auto extents = OR_RETURN(image_manager->GetImageExtents(*image_name));
-
   auto payload_extents =
       ApplyOffsetLength(extents, *apex.GetImageOffset(), *apex.GetImageSize());
-
-  auto device_name = *image_name + kDmLinearPayloadSuffix;
   auto dev =
       OR_RETURN(CreateDmLinear(device_name, kUserdataDevice, payload_extents,
                                /*read_only=*/false));
