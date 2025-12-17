@@ -66,4 +66,6 @@ base::Result<DmDevice> CreateDmDevice(const std::string& name,
 
 base::Result<void> DeleteDmDevice(const std::string& name, bool deferred);
 
+std::optional<DmDevice> GetDmDeviceByName(const std::string& name);
+
 }  // namespace android::apex
