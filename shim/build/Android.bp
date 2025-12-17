@@ -587,7 +587,8 @@ java_genrule {
     // Use shim.v2_rebootless to re-use same APEX in the rebootless update test case.
     srcs: [":com.android.apex.cts.shim.v2_rebootless"],
     out: ["com.android.apex.cts.shim.v2_unsigned_apk_container.apex"],
-    cmd: "cp -v $(in) $(out) && zip -d $(out) META-INF*",
+    cmd: "$(location zip2zip) -i $(in) -o $(out) -x 'META-INF/*'",
+    tools: ["zip2zip"],
     dist: {
         targets: ["com.android.apex.cts.shim.v2_unsigned_apk_container"],
         dest: "com.android.apex.cts.shim.v2_unsigned_apk_container.apex",
