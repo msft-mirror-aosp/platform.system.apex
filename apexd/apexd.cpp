@@ -2407,16 +2407,13 @@ int OnBootstrap() {
   bool revert_on_error = false;
 
   if (IsMountBeforeDataEnabled()) {
-    // Wait until coldboot is done. This is to avoid unnecessary polling when
-    // using/creating loop or device-mapper devices. Note that apexd relies on
-    // devices created by init process for faster activation. Their nodes are
-    // created by ueventd's coldboot. Hence, accessing them before coldboot is
-    // done causes polling, which can be much slower than waiting for coldboot.
-    // Similarly, before coldboot is done, ueventd can't handle a device
-    // creation. This will also cause polling the userspace node creation.
-    // Instead of racing with ueventd, let's wait until it finishes coldboot.
-    base::WaitForProperty("ro.cold_boot_done", "true",
-                          std::chrono::seconds(10));
+    // Data APEX is mapped as a dm-linear device on top of the block device
+    // backing /data (e.g. /dev/block/by-name/userdata). Hence, we need to make
+    // sure the block device is ready.
+    if (auto st = GetImageManager()->WaitForDataBlockDevice(); !st.ok()) {
+      LOG(ERROR) << st.error();
+      return 1;
+    }
 
     // Process sessions before scanning "active" data apexes because sessions
     // can change the list of active data apexes:

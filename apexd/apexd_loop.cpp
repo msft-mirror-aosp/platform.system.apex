@@ -30,7 +30,6 @@
 #include <libdm/dm.h>
 #include <linux/fs.h>
 #include <linux/loop.h>
-#include <string>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
@@ -42,8 +41,10 @@
 #include <array>
 #include <filesystem>
 #include <mutex>
+#include <string>
 #include <string_view>
 
+#include "apexd_private.h"
 #include "apexd_utils.h"
 
 using android::base::Basename;
@@ -447,8 +448,27 @@ static Result<LoopbackDeviceUniqueFd> ConfigureLoopDevice(
   }
 }
 
+static std::optional<dev_t> ReadLoopDevNum(int num) {
+  std::string str;
+  if (ReadFileToString(std::format("/sys/block/loop{}/dev", num), &str)) {
+    unsigned int major, minor;
+    if (sscanf(str.c_str(), "%u:%u", &major, &minor) == 2) {
+      return makedev(major, minor);
+    }
+  }
+  return std::nullopt;
+}
+
 static Result<EmptyLoopDevice> WaitForLoopDevice(int num) {
-  std::string device = StringPrintf("/dev/block/loop%d", num);
+  std::string device = std::format("/dev/block/loop{}", num);
+  // Let's make the node directly
+  if (access(device.c_str(), F_OK) != 0 && errno == ENOENT) {
+    if (auto dev = ReadLoopDevNum(num); dev) {
+      auto st = apexd_private::MakeBlockDeviceNode(device, 0600, *dev,
+                                                   "u:object_r:loop_device:s0");
+      if (!st.ok()) LOG(ERROR) << st.error();
+    }
+  }
 
   // apexd-bootstrap runs in parallel with ueventd to optimize boot time. In
   // rare cases apexd would try attempt to mount an apex before ueventd created
