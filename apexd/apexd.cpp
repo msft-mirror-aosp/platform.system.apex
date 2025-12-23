@@ -1527,6 +1527,7 @@ ActivationResult ActivateApexPackages(ActivationContext& ctx,
                                       ActivationMode mode, bool revert_on_error,
                                       bool fallback_on_error) {
   ATRACE_NAME("ActivateApexPackages");
+  base::Timer t;
   size_t apex_cnt = apexes.size();
   std::vector<Result<ApexFileRef>> results;
   results.reserve(apex_cnt);
@@ -1577,7 +1578,7 @@ ActivationResult ActivateApexPackages(ActivationContext& ctx,
     }
   }
   LOG(INFO) << "Activated " << activation_result.activated.size()
-            << " packages.";
+            << " packages. duration=" << t;
 
   if (!activation_result.ok()) {
     std::string error_message = StringPrintf("Failed to activate packages: %s",
@@ -2343,6 +2344,8 @@ void ProcessSessions(ActivationContext& ctx) {
 }
 
 std::vector<ApexFile> ScanDataApexFiles(ApexImageManager* manager) {
+  ATRACE_NAME("ScanDataApexFiles");
+  base::Timer t;
   auto image_list = manager->GetApexList(ApexListType::ACTIVE);
   if (!image_list.ok()) {
     LOG(ERROR) << "Failed to get active image list : " << image_list.error();
@@ -2365,6 +2368,8 @@ std::vector<ApexFile> ScanDataApexFiles(ApexImageManager* manager) {
     }
     apex_files.push_back(std::move(*apex_file));
   }
+  LOG(INFO) << "Successfully scanned " << apex_files.size()
+            << " data APEXes duration=" << t;
   return apex_files;
 }
 
