@@ -703,7 +703,7 @@ Result<void> ApexImageManager::UnmapImage(const std::string& image) {
 
 Result<void> ApexImageManager::UnmapImageIfExists(const std::string& image) {
   auto& dm = DeviceMapper::Instance();
-  if (!dm.DeleteDeviceIfExists(image)) {
+  if (!dm.DeleteDeviceIfExists(image, 1s)) {
     return Error() << "Failed to unmap image " << image;
   }
   return {};

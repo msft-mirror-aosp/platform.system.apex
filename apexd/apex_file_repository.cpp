@@ -232,6 +232,7 @@ ApexFileRepository& ApexFileRepository::GetInstance() {
 android::base::Result<void> ApexFileRepository::AddPreInstalledApex(
     const std::unordered_map<ApexPartition, std::string>&
         partition_to_prebuilt_dirs) {
+  base::Timer t;
   auto all_apex_paths =
       OR_RETURN(CollectPreInstalledApex(partition_to_prebuilt_dirs));
 
@@ -240,6 +241,8 @@ android::base::Result<void> ApexFileRepository::AddPreInstalledApex(
   for (auto&& [apex_file, partition] : apex_file_and_partition) {
     StorePreInstalledApex(std::move(apex_file), partition);
   }
+  LOG(INFO) << "Successfully scanned " << pre_installed_store_.size()
+            << " preinstalled APEXes duration=" << t;
   return {};
 }
 
