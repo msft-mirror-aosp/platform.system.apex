@@ -25,6 +25,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/mount.h>
+#include <unistd.h>  // For getpagesize()
 
 #include "apexd_utils.h"
 
@@ -63,6 +64,14 @@ bool GetFileBackedMountEnabled() {
   if (enabled != "") {
     return android::base::ParseBool(enabled) ==
            android::base::ParseBoolResult::kTrue;
+  }
+
+  // TODO(b/469875222): support 16k kernel
+  // Check if page size is 4k. If not, file-backed mount is currently not
+  // supported.
+  if (getpagesize() != 4096) {
+    android::base::SetProperty(kFileBackedMountRuntimeProp, "false");
+    return false;
   }
 
   // Test mount to see if the device supports file-backed mount by specifying
