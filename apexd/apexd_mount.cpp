@@ -94,8 +94,8 @@ bool GetFileBackedMountEnabled() {
 
   android::base::SetProperty(kFileBackedMountRuntimeProp, "true");
 
-  // Try to umount. It returns error if not mounted (e.g. mount failed),
-  // which is fine.
+  // Try to umount. It's fine if this fails because the mount might not have
+  // succeeded in the first place.
   if (umount2(kApexTestMountFolder, MNT_DETACH)) {
     PLOG(ERROR) << "Failed to umount " << kApexTestMountFolder;
   }
