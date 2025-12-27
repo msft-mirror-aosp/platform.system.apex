@@ -25,6 +25,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/mount.h>
+#include <unistd.h>  // For getpagesize()
 
 #include "apexd_utils.h"
 
@@ -55,8 +56,11 @@ static constexpr const char* kTestMountImage =
 bool GetFileBackedMountEnabled() {
   auto enabled = android::base::GetProperty(kFileBackedMountProp, "");
   if (enabled != "") {
-    return android::base::ParseBool(enabled) ==
-           android::base::ParseBoolResult::kTrue;
+    bool result = android::base::ParseBool(enabled) ==
+                  android::base::ParseBoolResult::kTrue;
+    LOG(INFO) << "File-backed mount is " << (result ? "enabled" : "disabled")
+              << " via property " << kFileBackedMountProp;
+    return result;
   }
 
   enabled = android::base::GetProperty(kFileBackedMountRuntimeProp, "");
@@ -65,11 +69,23 @@ bool GetFileBackedMountEnabled() {
            android::base::ParseBoolResult::kTrue;
   }
 
+  // TODO(b/469875222): support 16k kernel
+  // Check if page size is 4k. If not, file-backed mount is currently not
+  // supported.
+  if (getpagesize() != 4096) {
+    LOG(ERROR) << "File-backed mount is only supported on devices with 4k page "
+                  "size. Current page size: "
+               << getpagesize();
+    android::base::SetProperty(kFileBackedMountRuntimeProp, "false");
+    return false;
+  }
+
   // Test mount to see if the device supports file-backed mount by specifying
   // `fsoffset=` when mounting
   auto create_dir_result = CreateDirIfNeeded(kApexTestMountFolder, 0755);
   if (!create_dir_result.ok()) {
-    LOG(ERROR) << "Failed to create the folder for test mounting "
+    LOG(ERROR) << "File-backed mount is disabled because fail to create the "
+                  "folder for test mounting "
                << kApexTestMountFolder
                << " , error: " << create_dir_result.error();
     android::base::SetProperty(kFileBackedMountRuntimeProp, "false");
@@ -89,17 +105,20 @@ bool GetFileBackedMountEnabled() {
   if (mount(kTestMountImage, kApexTestMountFolder, "erofs", mount_flags,
             "fsoffset=0")) {
     android::base::SetProperty(kFileBackedMountRuntimeProp, "false");
+    PLOG(INFO)
+        << "File-backed mount is disabled due to test mount failure (mount)";
     return false;
   }
 
   android::base::SetProperty(kFileBackedMountRuntimeProp, "true");
 
-  // Try to umount. It returns error if not mounted (e.g. mount failed),
-  // which is fine.
+  // Try to umount. It's fine if this fails because the mount might not have
+  // succeeded in the first place.
   if (umount2(kApexTestMountFolder, MNT_DETACH)) {
     PLOG(ERROR) << "Failed to umount " << kApexTestMountFolder;
   }
 
+  LOG(INFO) << "File-backed mount is enabled (detected via test mount)";
   return true;
 }
 

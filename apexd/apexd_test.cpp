@@ -50,6 +50,7 @@
 #include "apexd_image_manager.h"
 #include "apexd_loop.h"
 #include "apexd_metrics.h"
+#include "apexd_mount.h"
 #include "apexd_private.h"
 #include "apexd_session.h"
 #include "apexd_test_utils.h"
@@ -5437,6 +5438,74 @@ TEST_F(MountBeforeDataTest, AbortChangesOnActivationFailure) {
   std::string content;
   ASSERT_TRUE(base::ReadFileToString(checkpoint_file_, &content));
   ASSERT_EQ(content, "0");
+}
+
+class ApexdErofsMountTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    // Backup original property state
+    orig_build_prop_ = GetProperty("apexd.config.erofs_file_backed_mount", "");
+    orig_runtime_prop_ =
+        GetProperty("apexd.config.runtime.erofs_file_backed_mount", "");
+
+    // Clear properties to ensure a clean test environment
+    SetProperty("apexd.config.erofs_file_backed_mount", "");
+    SetProperty("apexd.config.runtime.erofs_file_backed_mount", "");
+  }
+
+  void TearDown() override {
+    // Restore original property state
+    SetProperty("apexd.config.erofs_file_backed_mount", orig_build_prop_);
+    SetProperty("apexd.config.runtime.erofs_file_backed_mount",
+                orig_runtime_prop_);
+  }
+
+  std::string orig_build_prop_;
+  std::string orig_runtime_prop_;
+};
+
+// Verify apexd.config.erofs_file_backed_mount has the highest priority
+TEST_F(ApexdErofsMountTest, ConfigPropertyOverridesEverything) {
+  // Force enable
+  SetProperty("apexd.config.erofs_file_backed_mount", "true");
+  EXPECT_TRUE(GetFileBackedMountEnabled());
+
+  // Force disable
+  SetProperty("apexd.config.erofs_file_backed_mount", "false");
+  EXPECT_FALSE(GetFileBackedMountEnabled());
+}
+
+// Verify the runtime property (cached value) is used when the build config is
+// unset
+TEST_F(ApexdErofsMountTest, RuntimePropertyUsedIfBuildConfigUnset) {
+  // Ensure the build-time config is cleared (as expected from SetUp).
+  ASSERT_EQ(GetProperty("apexd.config.erofs_file_backed_mount", ""), "");
+
+  SetProperty("apexd.config.runtime.erofs_file_backed_mount", "true");
+  EXPECT_TRUE(GetFileBackedMountEnabled());
+
+  SetProperty("apexd.config.runtime.erofs_file_backed_mount", "false");
+  EXPECT_FALSE(GetFileBackedMountEnabled());
+}
+
+// Actual Mount Flow Test
+// Note: This test relies on the existence of /system/etc/apexd/empty_erofs.img.
+TEST_F(ApexdErofsMountTest, PerformActualMountTest) {
+  // Check if the test image exists
+  if (access("/system/etc/apexd/empty_erofs.img", F_OK) != 0) {
+    GTEST_SKIP() << "Test image /system/etc/apexd/empty_erofs.img not found. "
+                    "Skipping actual mount test.";
+  }
+
+  // Properties are clearer, "try mount"
+  bool result = GetFileBackedMountEnabled();
+
+  // Verify result is written correctly to the runtime property.
+  // We cannot predict if the result is true or false (depends on the device),
+  // but we must ensure the decision was persisted.
+  std::string runtime_prop =
+      GetProperty("apexd.config.runtime.erofs_file_backed_mount", "");
+  EXPECT_EQ(runtime_prop, result ? "true" : "false");
 }
 
 class LogTestToLogcat : public ::testing::EmptyTestEventListener {
