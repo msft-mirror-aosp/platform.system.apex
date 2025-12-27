@@ -383,6 +383,66 @@ TEST(ApexStoragePerImageCreator, CreateImage_Overwrite) {
               HasValue(ResultOf("length", &IntervalsGetLength, Eq(200))));
 }
 
+TEST(ApexImageManagerTest, UnmapImageIfExists) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(apex, Ok());
+  auto images = image_manager->PinApexFiles(std::vector{*apex});
+  ASSERT_THAT(images, HasValue(SizeIs(1)));
+  auto image = images->at(0);
+
+  // Map the image to create a dm device.
+  auto dev = image_manager->MapImage(image);
+  ASSERT_THAT(dev, Ok());
+  ASSERT_THAT(image_manager->GetMappedPath(image), Optional(dev.value()));
+
+  // Unmap the image. This should succeed.
+  ASSERT_THAT(image_manager->UnmapImageIfExists(image), Ok());
+
+  // Verify the device is no longer mapped.
+  ASSERT_THAT(image_manager->GetMappedPath(image), Eq(std::nullopt));
+}
+
+TEST(ApexImageManagerTest, UnmapImageIfExists_NotMapped) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  // Unmapping an image that is not mapped (or doesn't exist) should still
+  // succeed without error.
+  ASSERT_THAT(image_manager->UnmapImageIfExists("non-existent-image"), Ok());
+}
+
+TEST(ApexImageManagerTest, UnmapAndDeleteImage) {
+  TemporaryDir metadata_dir;
+  TemporaryDir data_dir;
+  auto image_manager =
+      ApexImageManager::Create(metadata_dir.path, data_dir.path);
+
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(apex, Ok());
+  auto images = image_manager->PinApexFiles(std::vector{*apex});
+  ASSERT_THAT(images, HasValue(SizeIs(1)));
+  auto image = images->at(0);
+
+  // Map the image.
+  auto dev = image_manager->MapImage(image);
+  ASSERT_THAT(dev, Ok());
+  ASSERT_THAT(image_manager->GetAllImages(), SizeIs(1));
+
+  // Unmap and delete the image.
+  ASSERT_THAT(image_manager->UnmapAndDeleteImage(image), Ok());
+
+  // Verify it's both unmapped and its metadata is deleted.
+  ASSERT_THAT(image_manager->GetMappedPath(image), Eq(std::nullopt));
+  ASSERT_THAT(image_manager->GetAllImages(), IsEmpty());
+}
+
 TEST(ApexStoragePerImageCreator, CleanUpOnExit) {
   TemporaryDir data_dir;
   {
