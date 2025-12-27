@@ -129,6 +129,38 @@ TEST(ApexFileRepositoryTest, InitializeSuccess) {
   test_fn("apex.apexd_test_different_app.apex");
 }
 
+TEST(ApexFileRepositoryTest, AddPreInstalledApexCorrectlyCountsApexes) {
+  // Prepare test data with two APEX files.
+  TemporaryDir built_in_dir;
+  fs::copy(GetTestFile("apex.apexd_test.apex"), built_in_dir.path);
+  fs::copy(GetTestFile("apex.apexd_test_different_app.apex"),
+           built_in_dir.path);
+  ApexPartition partition = ApexPartition::System;
+
+  // Call the function under test.
+  ApexFileRepository instance;
+  ASSERT_THAT(instance.AddPreInstalledApex({{partition, built_in_dir.path}}),
+              Ok());
+
+  // Verify that the correct number of APEXes were scanned and stored by
+  // checking the public API.
+  ASSERT_EQ(instance.GetPreInstalledApexFiles().size(), 2u);
+}
+
+TEST(ApexFileRepositoryTest, AddPreInstalledApexCorrectlyCountsZeroApex) {
+  // Prepare test data with zero APEX files.
+  TemporaryDir built_in_dir;
+  ApexPartition partition = ApexPartition::System;
+
+  // Call the function under test.
+  ApexFileRepository instance;
+  ASSERT_THAT(instance.AddPreInstalledApex({{partition, built_in_dir.path}}),
+              Ok());
+
+  // Verify that zero APEXes were scanned and stored by checking the public API.
+  ASSERT_TRUE(instance.GetPreInstalledApexFiles().empty());
+}
+
 TEST(ApexFileRepositoryTest, InitializeFailureCorruptApex) {
   // Prepare test data.
   TemporaryDir td;
