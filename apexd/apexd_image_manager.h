@@ -47,6 +47,7 @@ struct ApexListEntry {
 };
 
 struct ApexImageInfo {
+  std::string bdev;
   std::vector<Interval> extents;
   uint64_t mtime;
 };
@@ -97,7 +98,7 @@ class ApexImageManager {
   virtual base::Result<std::string> MapImage(const std::string& image);
   base::Result<void> UnmapImage(const std::string& image);
   base::Result<void> UnmapImageIfExists(const std::string& image);
-  base::Result<std::vector<Interval>> GetImageExtents(const std::string& image);
+  base::Result<ApexImageInfo> GetApexImageInfo(const std::string& image);
 
   // Creates a backup of the current ACTIVE apex list
   base::Result<void> BackupApexList();
@@ -116,8 +117,6 @@ class ApexImageManager {
  protected:
   ApexImageManager(const std::string& metadata_dir,
                    const std::string& data_dir);
-
-  base::Result<ApexImageInfo> GetApexImageInfo(const std::string& image);
 
   std::string GetApexListFile(ApexListType list_type) const;
   std::string GetApexStorageMetadataPath() const;

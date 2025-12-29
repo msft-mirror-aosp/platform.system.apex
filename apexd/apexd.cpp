@@ -404,12 +404,11 @@ Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex) {
     return std::move(existing.value());
   }
 
-  auto extents = OR_RETURN(image_manager->GetImageExtents(*image_name));
-  auto payload_extents =
-      ApplyOffsetLength(extents, *apex.GetImageOffset(), *apex.GetImageSize());
-  auto dev =
-      OR_RETURN(CreateDmLinear(device_name, kUserdataDevice, payload_extents,
-                               /*read_only=*/false));
+  auto info = OR_RETURN(image_manager->GetApexImageInfo(*image_name));
+  auto payload_extents = ApplyOffsetLength(info.extents, *apex.GetImageOffset(),
+                                           *apex.GetImageSize());
+  auto dev = OR_RETURN(CreateDmLinear(device_name, info.bdev, payload_extents,
+                                      /*read_only=*/false));
   OR_RETURN(loop::ConfigureReadAhead(dev.GetDevPath()));
   return std::move(dev);
 }
