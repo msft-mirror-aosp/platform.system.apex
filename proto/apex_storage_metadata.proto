@@ -57,4 +57,7 @@ message ApexStorageMetadata {
   // Keep the list of deleted image names during this boot to avoid name
   // conflicts. Will be cleared on next boot.
   repeated string deleted_images = 3;
+
+  // Block device path for /data
+  string data_bdev = 4;
 }

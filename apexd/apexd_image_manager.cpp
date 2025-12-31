@@ -87,17 +87,17 @@ Result<void> SendFile(const std::string& dest_path, const std::string& src_path,
   return SendFile(dest_fd, src_path, size);
 }
 
-Result<void> EnsureBlockDeviceIsUserdata(const std::string& bdev) {
+std::string GetDevicePathForFile(FiemapWriter* file) {
+  auto bdev_path = file->bdev_path();
+
   struct stat userdata, given;
-  if (!stat(bdev.c_str(), &given) && !stat(kUserdataDevice, &userdata)) {
+  if (!stat(bdev_path.c_str(), &given) && !stat(kUserdataDevice, &userdata)) {
     if (S_ISBLK(given.st_mode) && S_ISBLK(userdata.st_mode) &&
         given.st_rdev == userdata.st_rdev) {
-      return {};
+      return kUserdataDevice;
     }
-    return Error() << "Invalid device for the APEX storage, which should be "
-                   << kUserdataDevice << ", but is " << bdev;
   }
-  return ErrnoError() << "Failed to stat " << bdev;
+  return bdev_path;
 }
 
 // Find a unique "image" name for the apex name: e.g. com.android.foo_2.apex
@@ -263,18 +263,35 @@ std::vector<Interval> ExtentsToIntervals(const auto& extents) {
   return intervals;
 }
 
-uint64_t DeterminePinnedFileAlignment(const std::string& data_dir) {
+struct BlockDevInfo {
+  std::string data_bdev;
+  uint64_t pinned_file_alignment;
+};
+
+BlockDevInfo GetBlockDevInfo(const std::string& data_dir) {
   std::string tempfile = data_dir + "/tempfile";
   // Create the smallest file possible (one block).
   auto writer = FiemapWriter::Open(tempfile, 1);
   if (!writer) {
     // fallback to 1, which leads to allocating a pinned file per apex.
-    return 1;
+    return {kUserdataDevice, 1};
   }
+  auto guard = base::make_scope_guard([&]() { unlink(tempfile.c_str()); });
   auto intervals = ExtentsToIntervals(writer->extents());
   auto allocated_size = IntervalsGetLength(intervals);
-  unlink(tempfile.c_str());
-  return allocated_size;
+  return {GetDevicePathForFile(writer.get()), allocated_size};
+}
+
+Result<ApexImageInfo> ApexStorageMetadata_GetApexImageInfo(
+    const ApexStorageMetadata& metadata, const std::string& image) {
+  auto it = std::find_if(
+      metadata.images().begin(), metadata.images().end(),
+      [&](const auto& image_info) { return image_info.image_name() == image; });
+  if (it == metadata.images().end()) {
+    return Error() << "Failed to find image " << image;
+  }
+  return ApexImageInfo{metadata.data_bdev(), ExtentsToIntervals(it->extents()),
+                       it->mtime()};
 }
 
 std::vector<Interval> ApexStorageMetadata_GetUsedExtents(
@@ -338,9 +355,6 @@ Result<std::unique_ptr<SplitFiemap>> OpenOrCreateApexStorage(
       return Error() << "Failed to create APEX storage at " << storage_path;
     }
   }
-  // The SplitFiemap should be on top of "userdata" partition.
-  auto block_dev = storage->bdev_path();
-  OR_RETURN(EnsureBlockDeviceIsUserdata(block_dev));
   return storage;
 }
 
@@ -461,11 +475,14 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
   auto storage_metadata_path = GetApexStorageMetadataPath();
   auto metadata = OR_RETURN(ApexStorageMetadata_Load(storage_metadata_path));
 
-  // Determine the allocation alignment of pinned files first.
+  // Determine the allocation alignment of pinned files and the bdev path.
   if (metadata.allocation_alignment() == 0) {
-    auto alignment = DeterminePinnedFileAlignment(data_dir_);
-    metadata.set_allocation_alignment(alignment);
-    LOG(INFO) << "Allocation alignment is " << alignment;
+    auto block_dev_info = GetBlockDevInfo(data_dir_);
+    LOG(INFO) << data_dir_ << ": bdev=" << block_dev_info.data_bdev
+              << ", pinned_file_alignment="
+              << block_dev_info.pinned_file_alignment;
+    metadata.set_allocation_alignment(block_dev_info.pinned_file_alignment);
+    metadata.set_data_bdev(block_dev_info.data_bdev);
   }
 
   // If the alignment is small (e.g. 2 MiB), use the one backing/pinned file per
@@ -510,8 +527,9 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
     // Now, copy the apex file to the APEX storage thru the dm-linear block
     // device which bypasseses the filesystem (/data) and encyryption layer
     // (dm-default-key).
-    auto dev = OR_RETURN(CreateDmLinear(image_name, kUserdataDevice, extents,
-                                        /*read_only=*/false));
+    auto dev =
+        OR_RETURN(CreateDmLinear(image_name, metadata.data_bdev(), extents,
+                                 /*read_only=*/false));
     OR_RETURN(SendFile(dev.GetDevPath(), apex_path, file_size));
   }
 
@@ -646,25 +664,11 @@ std::optional<std::string> ApexImageManager::GetMappedPath(
   return std::nullopt;
 }
 
-Result<std::vector<Interval>> ApexImageManager::GetImageExtents(
-    const std::string& image) {
-  auto info = OR_RETURN(GetApexImageInfo(image));
-  return info.extents;
-}
-
 Result<ApexImageInfo> ApexImageManager::GetApexImageInfo(
     const std::string& image) {
   auto metadata_path = GetApexStorageMetadataPath();
   auto metadata = OR_RETURN(ApexStorageMetadata_Load(metadata_path));
-
-  // get extents of the image.
-  auto it = std::find_if(
-      metadata.images().begin(), metadata.images().end(),
-      [&](const auto& image_info) { return image_info.image_name() == image; });
-  if (it == metadata.images().end()) {
-    return Error() << "Failed to find image " << image;
-  }
-  return ApexImageInfo{ExtentsToIntervals(it->extents()), it->mtime()};
+  return ApexStorageMetadata_GetApexImageInfo(metadata, image);
 }
 
 Result<std::string> ApexImageManager::MapImage(const std::string& image) {
@@ -674,20 +678,13 @@ Result<std::string> ApexImageManager::MapImage(const std::string& image) {
     return *path;
   }
 
-  // Otherwise, map the image to a dm-linear device:
-  // 1. get the extents of the image
-  // 2. create a dm-linear device with the extent
-
-  // get extents of the image.
+  // Otherwise, map the image to a dm-linear device and then set mtime
   auto info = OR_RETURN(GetApexImageInfo(image));
-  auto extents = info.extents;
-  auto mtime = info.mtime;
 
-  // create a dm-linear device on the userdata partition
   auto dev = OR_RETURN(
-      CreateDmLinear(image, kUserdataDevice, extents, /*read_only=*/true));
+      CreateDmLinear(image, info.bdev, info.extents, /*read_only=*/true));
   auto dev_path = dev.GetDevPath();
-  OR_RETURN(SetLastModifiedTime(dev_path, mtime));
+  OR_RETURN(SetLastModifiedTime(dev_path, info.mtime));
   dev.Release();  // dm-linear device should not be deleted on exit
   return dev_path;
 }
