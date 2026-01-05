@@ -16,6 +16,8 @@
 
 #define LOG_TAG "apexd-dump"
 
+#include <libdm/dm.h>
+
 #include <format>
 #include <iostream>
 #include <print>
@@ -83,12 +85,36 @@ void DumpSessions(std::ostream& out) {
   }
 }
 
+void DumpMounts(std::ostream& out) {
+  auto& dm = dm::DeviceMapper::Instance();
+  auto dump_dm = [&](const std::string& type, const std::string& name) {
+    std::string path;
+    if (!dm.GetDmDevicePathByName(name, &path)) {
+      path = "(err)";
+    }
+    out << std::format(" {}={}({})", type, path, name);
+  };
+
+  MountedApexDatabase db;
+  db.PopulateFromMounts();
+  db.ForallMountedApexes([&](auto, const auto& data, auto) {
+    out << "mount:";
+    out << " mount_point=" << data.mount_point;
+    if (!data.verity_name.empty()) dump_dm("verity", data.verity_name);
+    if (!data.linear_name.empty()) dump_dm("linear", data.linear_name);
+    if (!data.loop_name.empty()) out << " loop=" << data.loop_name;
+    out << " apex=" << data.full_path;
+    out << "\n";
+  });
+}
+
 }  // namespace
 
 int OnDump(const std::vector<std::string>& args) {
   bool dump_all = args.empty();
   bool dump_config = std::ranges::contains(args, "config");
   bool dump_sessions = std::ranges::contains(args, "sessions");
+  bool dump_mounts = std::ranges::contains(args, "mounts");
 
   if (dump_all || dump_config) {
     DumpConfig(std::cout);
@@ -96,9 +122,11 @@ int OnDump(const std::vector<std::string>& args) {
   if (dump_all || dump_sessions) {
     DumpSessions(std::cout);
   }
+  if (dump_all || dump_mounts) {
+    DumpMounts(std::cout);
+  }
 
   // TODO(b/432328407)
-  // active mounts
   // repository
   // images
   // metadata
