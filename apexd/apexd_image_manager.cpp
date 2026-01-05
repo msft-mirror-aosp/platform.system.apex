@@ -476,13 +476,15 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
   auto metadata = OR_RETURN(ApexStorageMetadata_Load(storage_metadata_path));
 
   // Determine the allocation alignment of pinned files and the bdev path.
-  if (metadata.allocation_alignment() == 0) {
+  if (metadata.allocation_alignment() == 0 || metadata.data_bdev().empty()) {
     auto block_dev_info = GetBlockDevInfo(data_dir_);
-    LOG(INFO) << data_dir_ << ": bdev=" << block_dev_info.data_bdev
-              << ", pinned_file_alignment="
-              << block_dev_info.pinned_file_alignment;
     metadata.set_allocation_alignment(block_dev_info.pinned_file_alignment);
     metadata.set_data_bdev(block_dev_info.data_bdev);
+    LOG(INFO) << "Initializing APEX storage metadata: block_dev="
+              << metadata.data_bdev()
+              << ", alloc_unit=" << metadata.allocation_alignment()
+              << ", per_apex=" << HasApexStoragePerImage(metadata);
+    OR_RETURN(ApexStorageMetadata_Save(metadata, storage_metadata_path));
   }
 
   // If the alignment is small (e.g. 2 MiB), use the one backing/pinned file per
