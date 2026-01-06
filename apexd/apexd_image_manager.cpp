@@ -771,6 +771,15 @@ void InitializeImageManager(ApexImageManager* image_manager) {
   gImageManager = image_manager;
 }
 
+Result<void> ApexImageManager::WaitForDataBlockDevice() {
+  auto metadata_path = GetApexStorageMetadataPath();
+  auto metadata = OR_RETURN(ApexStorageMetadata_Load(metadata_path));
+  if (metadata.data_bdev().empty()) {
+    return {};
+  }
+  return WaitForFile(metadata.data_bdev(), 10s);
+}
+
 std::unique_ptr<ApexImageManager> ApexImageManager::Create(
     const std::string& metadata_images_dir,
     const std::string& data_images_dir) {

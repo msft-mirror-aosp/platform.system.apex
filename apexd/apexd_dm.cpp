@@ -18,7 +18,11 @@
 
 #include <ApexProperties.sysprop.h>
 #include <android-base/logging.h>
+#include <android-base/scopeguard.h>
 #include <utils/Trace.h>
+
+#include "apexd_private.h"
+#include "apexd_utils.h"
 
 using android::base::ErrnoError;
 using android::base::Error;
@@ -41,11 +45,28 @@ DmDevice::~DmDevice() {
 static Result<DmDevice> CreateDmDeviceInternal(
     DeviceMapper& dm, const std::string& name, const DmTable& table,
     const std::chrono::milliseconds& timeout) {
-  std::string dev_path;
-  if (!dm.CreateDevice(name, table, &dev_path, timeout)) {
+  if (!dm.CreateDevice(name, table)) {
     return Error() << "Couldn't create dm-device for name=" << name;
   }
-  return DmDevice(name, dev_path);
+  auto guard = base::make_scope_guard([&]() { dm.DeleteDevice(name); });
+  auto info = dm.GetDetailedInfo(name);
+  if (!info) {
+    return Error() << "Failed to create dm-device for name=" << name;
+  }
+  auto path = info->GetPath();
+
+  // Let's make the device node directly before falling back to waiting
+  if (access(path.c_str(), F_OK) != 0 && errno == ENOENT) {
+    dev_t dev = info->GetDev();
+    mode_t mode = 0644;
+    const char* context = "u:object_r:apex_dm_device:s0";
+    auto st = apexd_private::MakeBlockDeviceNode(path, mode, dev, context);
+    if (!st.ok()) LOG(ERROR) << st.error();
+  }
+  OR_RETURN(WaitForFile(path, timeout));
+
+  guard.Disable();
+  return DmDevice(name, path);
 }
 
 Result<DmDevice> CreateDmDevice(const std::string& name, const DmTable& table,

@@ -51,6 +51,9 @@ android::base::Result<void> BindMount(const std::string& target,
 void LogDirectoryStat(const std::string& path);
 void LogProcMounts();
 
+base::Result<void> MakeBlockDeviceNode(const std::string& device, mode_t mode,
+                                       dev_t dev, const std::string& context);
+
 }  // namespace apexd_private
 }  // namespace apex
 }  // namespace android
