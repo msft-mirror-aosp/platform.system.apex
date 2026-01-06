@@ -39,6 +39,7 @@
 #include <utils/Trace.h>
 
 #include <array>
+#include <atomic>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -86,6 +87,15 @@ void LoopbackDeviceUniqueFd::MaybeCloseBad() {
 // is a better choice than Kyber because it does not throttle I/O and because it
 // requires fewer CPU cycles.
 Result<void> ConfigureScheduler(const std::string& device_path) {
+  // If the system default is okay, then let's skip configuration for other loop
+  // devices.
+  static std::atomic<bool> skip_config{false};
+  if constexpr (flags::mount_before_data()) {
+    if (skip_config.load(std::memory_order_relaxed)) {
+      return {};
+    }
+  }
+
   ATRACE_NAME("ConfigureScheduler");
   if (!StartsWith(device_path, "/dev/")) {
     return Error() << "Invalid argument " << device_path;
@@ -109,6 +119,10 @@ Result<void> ConfigureScheduler(const std::string& device_path) {
   // overhead in kernel
   if (cur_sched_str.find("[none]") != std::string::npos ||
       cur_sched_str.find("[noop]") != std::string::npos) {
+    if constexpr (flags::mount_before_data()) {
+      // Remember this because other loop devices will be same
+      skip_config.store(true, std::memory_order_relaxed);
+    }
     return {};
   }
 
