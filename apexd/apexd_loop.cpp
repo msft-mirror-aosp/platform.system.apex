@@ -56,11 +56,13 @@ using android::base::ErrnoError;
 using android::base::Error;
 using android::base::GetBoolProperty;
 using android::base::ParseUint;
+using android::base::ReadFdToString;
 using android::base::ReadFileToString;
 using android::base::Result;
 using android::base::StartsWith;
 using android::base::StringPrintf;
 using android::base::unique_fd;
+using android::base::WriteStringToFd;
 using android::dm::DeviceMapper;
 
 namespace android {
@@ -79,6 +81,10 @@ void LoopbackDeviceUniqueFd::MaybeCloseBad() {
   }
 }
 
+// The optimal I/O scheduler for loop devices is 'none'. 'none' is a better
+// choice than BFQ or mq-deadline because it does not delay I/O requests. 'none'
+// is a better choice than Kyber because it does not throttle I/O and because it
+// requires fewer CPU cycles.
 Result<void> ConfigureScheduler(const std::string& device_path) {
   ATRACE_NAME("ConfigureScheduler");
   if (!StartsWith(device_path, "/dev/")) {
@@ -94,33 +100,28 @@ Result<void> ConfigureScheduler(const std::string& device_path) {
     return ErrnoError() << "Failed to open " << sysfs_path;
   }
 
+  std::string cur_sched_str;
+  if (!ReadFdToString(sysfs_fd, &cur_sched_str)) {
+    return ErrnoError() << "Failed to read " << sysfs_path;
+  }
+
+  // Don't try to write sysfs if it's none/noop to avoid unnecessary locking
+  // overhead in kernel
+  if (cur_sched_str.find("[none]") != std::string::npos ||
+      cur_sched_str.find("[noop]") != std::string::npos) {
+    return {};
+  }
+
   // Kernels before v4.1 only support 'noop'. Kernels [v4.1, v5.0) support
   // 'noop' and 'none'. Kernels v5.0 and later only support 'none'.
   static constexpr const std::array<std::string_view, 2> kNoScheduler = {
       "none", "noop"};
-
-  int ret = 0;
-  std::string cur_sched_str;
-  if (!ReadFileToString(sysfs_path, &cur_sched_str)) {
-    return ErrnoError() << "Failed to read " << sysfs_path;
-  }
-  cur_sched_str = android::base::Trim(cur_sched_str);
-  if (std::count(kNoScheduler.begin(), kNoScheduler.end(), cur_sched_str)) {
-    return {};
-  }
-
   for (const std::string_view& scheduler : kNoScheduler) {
-    ret = write(sysfs_fd.get(), scheduler.data(), scheduler.size());
-    if (ret > 0) {
-      break;
+    if (WriteStringToFd(scheduler, sysfs_fd)) {
+      return {};
     }
   }
-
-  if (ret <= 0) {
-    return ErrnoError() << "Failed to write to " << sysfs_path;
-  }
-
-  return {};
+  return ErrnoError() << "Failed to write to " << sysfs_path;
 }
 
 // Return the parent device of a partition. Converts e.g. "sda26" into "sda".
@@ -248,19 +249,19 @@ Result<void> ConfigureQueueDepth(const std::string& loop_device_path,
 
   const std::string sysfs_path =
       StringPrintf("/sys/block/%s/queue/nr_requests", loop_device_name.c_str());
+  unique_fd sysfs_fd(open(sysfs_path.c_str(), O_RDWR | O_CLOEXEC));
+  if (sysfs_fd.get() == -1) {
+    return ErrnoErrorf("Failed to open {}", sysfs_path);
+  }
+
   std::string cur_nr_requests_str;
-  if (!ReadFileToString(sysfs_path, &cur_nr_requests_str)) {
+  if (!ReadFdToString(sysfs_fd, &cur_nr_requests_str)) {
     return ErrnoError() << "Failed to read " << sysfs_path;
   }
   cur_nr_requests_str = android::base::Trim(cur_nr_requests_str);
   uint32_t cur_nr_requests = 0;
   if (!ParseUint(cur_nr_requests_str.c_str(), &cur_nr_requests)) {
     return Error() << "Failed to parse " << cur_nr_requests_str;
-  }
-
-  unique_fd sysfs_fd(open(sysfs_path.c_str(), O_RDWR | O_CLOEXEC));
-  if (sysfs_fd.get() == -1) {
-    return ErrnoErrorf("Failed to open {}", sysfs_path);
   }
 
   const auto qd = BlockDeviceQueueDepth(file_path);
