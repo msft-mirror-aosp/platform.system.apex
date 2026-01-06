@@ -383,6 +383,21 @@ bool IsFileBackedMountEnabled() { return gConfig->file_backed_mount; }
   return true;
 }
 
+#if COM_ANDROID_APEX_FLAGS_MICRODROID_NO_LOOP_DEVICE
+Result<DmDevice> CreateDmLinearForBlockApex(const ApexFile& apex,
+                                            const std::string& device_name) {
+  if (!apex.GetImageOffset() || !apex.GetImageSize()) {
+    return Error() << "Cannot create mount point without image offset and size";
+  }
+  Interval extent{*apex.GetImageOffset(), *apex.GetImageSize()};
+  auto dev = OR_RETURN(CreateDmLinear(device_name + kDmLinearPayloadSuffix,
+                                      apex.GetPath(), {extent},
+                                      /*read_only=*/false));
+  OR_RETURN(loop::ConfigureReadAhead(dev.GetDevPath()));
+  return std::move(dev);
+}
+#endif
+
 Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex) {
   if (!apex.GetImageOffset() || !apex.GetImageSize()) {
     return Error() << "Cannot create mount point without image offset and size";
@@ -496,6 +511,11 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
              !mount_on_verity) {
     mount_options = std::format("fsoffset={}", *apex.GetImageOffset());
     mount_device = apex.GetPath();
+#if COM_ANDROID_APEX_FLAGS_MICRODROID_NO_LOOP_DEVICE
+  } else if (instance.IsBlockApex(apex)) {
+    linear_dev = OR_RETURN(CreateDmLinearForBlockApex(apex, device_name));
+    mount_device = linear_dev.GetDevPath();
+#endif
   } else {
     loop = OR_RETURN(CreateLoopForApex(apex, loop_id));
     mount_device = loop.name;

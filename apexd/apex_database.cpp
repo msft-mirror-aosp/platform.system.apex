@@ -245,15 +245,21 @@ Result<MountedApexData> ResolveMountInfo(const MountInfo& mount_info) {
         } break;
         case DeviceMapperDevice: {
           result.linear_name = OR_RETURN(underlying.GetProperty("dm/name"));
-          auto dm_name_for_apex =
+          auto base_device_name =
               ReplaceSuffix(result.linear_name, kDmLinearPayloadSuffix, "");
-          DeviceMapper& dm = DeviceMapper::Instance();
-          std::string dev_path_for_apex;
-          if (!dm.GetDmDevicePathByName(dm_name_for_apex, &dev_path_for_apex)) {
-            return Error() << "Failed to get path of dm device "
-                           << dm_name_for_apex;
+          if (base_device_name == result.verity_name) {  // Block apex
+            auto block_apex = OR_RETURN(GetUnderlying(underlying));
+            result.full_path = block_apex.DevPath();
+          } else {  // Pinned apex
+            DeviceMapper& dm = DeviceMapper::Instance();
+            std::string dev_path_for_apex;
+            if (!dm.GetDmDevicePathByName(base_device_name,
+                                          &dev_path_for_apex)) {
+              return Error()
+                     << "Failed to get path of dm device " << base_device_name;
+            }
+            result.full_path = dev_path_for_apex;
           }
-          result.full_path = dev_path_for_apex;
         } break;
         default:
           return Error() << "Unknown underlying device type for dm-verity:"
