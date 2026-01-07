@@ -87,7 +87,7 @@ Result<void> SendFile(const std::string& dest_path, const std::string& src_path,
   return SendFile(dest_fd, src_path, size);
 }
 
-std::string GetDevicePathForFile(FiemapWriter* file) {
+std::string GetDevicePathForFile(SplitFiemap* file) {
   auto bdev_path = file->bdev_path();
 
   struct stat userdata, given;
@@ -263,25 +263,6 @@ std::vector<Interval> ExtentsToIntervals(const auto& extents) {
   return intervals;
 }
 
-struct BlockDevInfo {
-  std::string data_bdev;
-  uint64_t pinned_file_alignment;
-};
-
-BlockDevInfo GetBlockDevInfo(const std::string& data_dir) {
-  std::string tempfile = data_dir + "/tempfile";
-  // Create the smallest file possible (one block).
-  auto writer = FiemapWriter::Open(tempfile, 1);
-  if (!writer) {
-    // fallback to 1, which leads to allocating a pinned file per apex.
-    return {kUserdataDevice, 1};
-  }
-  auto guard = base::make_scope_guard([&]() { unlink(tempfile.c_str()); });
-  auto intervals = ExtentsToIntervals(writer->extents());
-  auto allocated_size = IntervalsGetLength(intervals);
-  return {GetDevicePathForFile(writer.get()), allocated_size};
-}
-
 Result<ApexImageInfo> ApexStorageMetadata_GetApexImageInfo(
     const ApexStorageMetadata& metadata, const std::string& image) {
   auto it = std::find_if(
@@ -347,7 +328,8 @@ Result<DmDevice> CreateDmLinear(const std::string& name,
 }
 
 Result<std::unique_ptr<SplitFiemap>> OpenOrCreateApexStorage(
-    const std::string& storage_path, uint64_t initial_size) {
+    const std::string& data_dir, uint64_t initial_size) {
+  auto storage_path = data_dir + "/apex.img";
   auto storage = SplitFiemap::Open(storage_path);
   if (!storage) {
     storage = SplitFiemap::Create(storage_path, initial_size, 0);
@@ -356,6 +338,14 @@ Result<std::unique_ptr<SplitFiemap>> OpenOrCreateApexStorage(
     }
   }
   return storage;
+}
+
+void DeleteApexStorage(const std::string& data_dir) {
+  auto storage_path = data_dir + "/apex.img";
+  std::string err;
+  if (!SplitFiemap::RemoveSplitFiles(storage_path, &err)) {
+    LOG(ERROR) << "Failed to delete apex.img: " << err;
+  }
 }
 
 // Heuristic: it's typical for f2fs to use 2 MiB alignment for pinned file
@@ -369,9 +359,9 @@ static bool HasApexStoragePerImage(const ApexStorageMetadata& metadata) {
 }
 
 Result<std::unique_ptr<FreeSpaceAllocator>> FreeSpaceAllocator::Create(
-    const std::string& storage_path, uint64_t initial_size,
+    const std::string& data_dir, uint64_t initial_size,
     const std::vector<Interval>& used_extents) {
-  auto storage = OR_RETURN(OpenOrCreateApexStorage(storage_path, initial_size));
+  auto storage = OR_RETURN(OpenOrCreateApexStorage(data_dir, initial_size));
   // Calculate free space by subtracting APEX allocation from the entire APEX
   // Storage.
   auto free_extents =
@@ -476,13 +466,23 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
   auto metadata = OR_RETURN(ApexStorageMetadata_Load(storage_metadata_path));
 
   // Determine the allocation alignment of pinned files and the bdev path.
-  if (metadata.allocation_alignment() == 0) {
-    auto block_dev_info = GetBlockDevInfo(data_dir_);
-    LOG(INFO) << data_dir_ << ": bdev=" << block_dev_info.data_bdev
-              << ", pinned_file_alignment="
-              << block_dev_info.pinned_file_alignment;
-    metadata.set_allocation_alignment(block_dev_info.pinned_file_alignment);
-    metadata.set_data_bdev(block_dev_info.data_bdev);
+  if (metadata.allocation_alignment() == 0 || metadata.data_bdev().empty()) {
+    // Create a single shared split-file (apex.img) with initial_size = 1. The
+    // file will be created as the minimum allocation size.
+    auto storage = OR_RETURN(OpenOrCreateApexStorage(data_dir_, 1));
+    metadata.set_allocation_alignment(storage->size());
+    metadata.set_data_bdev(GetDevicePathForFile(storage.get()));
+    LOG(INFO) << "Initializing APEX storage metadata: block_dev="
+              << metadata.data_bdev()
+              << ", alloc_unit=" << metadata.allocation_alignment()
+              << ", per_apex=" << HasApexStoragePerImage(metadata);
+    OR_RETURN(ApexStorageMetadata_Save(metadata, storage_metadata_path));
+
+    // If it's small (<= 2 MiB), then let's remove it and use "per-apex" storage
+    // instead.
+    if (HasApexStoragePerImage(metadata)) {
+      DeleteApexStorage(data_dir_);
+    }
   }
 
   // If the alignment is small (e.g. 2 MiB), use the one backing/pinned file per
@@ -498,10 +498,9 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
       new_apex_size += OR_RETURN(GetFileSize(apex_path));
     }
 
-    auto storage_path = data_dir_ + "/apex.img";
     auto used_extents = ApexStorageMetadata_GetUsedExtents(metadata);
     image_creator = OR_RETURN(
-        FreeSpaceAllocator::Create(storage_path, new_apex_size, used_extents));
+        FreeSpaceAllocator::Create(data_dir_, new_apex_size, used_extents));
   }
 
   // Now, okay to store incoming APEX files to the store.
@@ -608,10 +607,7 @@ Result<void> ApexImageManager::RemoveUnreferencedImages() const {
   // In case the device uses the single/shared pinned image file (apex.img),
   // remove it only when the list of pinned images is empty.
   if (all_images.empty()) {
-    std::string err;
-    if (!SplitFiemap::RemoveSplitFiles(data_dir_ + "/apex.img", &err)) {
-      return Error() << "Failed to delete apex.img: " << err;
-    }
+    DeleteApexStorage(data_dir_);
   }
   return {};
 }
@@ -773,6 +769,15 @@ ApexImageManager* GetImageManager() { return gImageManager; }
 
 void InitializeImageManager(ApexImageManager* image_manager) {
   gImageManager = image_manager;
+}
+
+Result<void> ApexImageManager::WaitForDataBlockDevice() {
+  auto metadata_path = GetApexStorageMetadataPath();
+  auto metadata = OR_RETURN(ApexStorageMetadata_Load(metadata_path));
+  if (metadata.data_bdev().empty()) {
+    return {};
+  }
+  return WaitForFile(metadata.data_bdev(), 10s);
 }
 
 std::unique_ptr<ApexImageManager> ApexImageManager::Create(

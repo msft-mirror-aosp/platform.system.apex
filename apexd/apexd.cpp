@@ -383,6 +383,21 @@ bool IsFileBackedMountEnabled() { return gConfig->file_backed_mount; }
   return true;
 }
 
+#if COM_ANDROID_APEX_FLAGS_MICRODROID_NO_LOOP_DEVICE
+Result<DmDevice> CreateDmLinearForBlockApex(const ApexFile& apex,
+                                            const std::string& device_name) {
+  if (!apex.GetImageOffset() || !apex.GetImageSize()) {
+    return Error() << "Cannot create mount point without image offset and size";
+  }
+  Interval extent{*apex.GetImageOffset(), *apex.GetImageSize()};
+  auto dev = OR_RETURN(CreateDmLinear(device_name + kDmLinearPayloadSuffix,
+                                      apex.GetPath(), {extent},
+                                      /*read_only=*/false));
+  OR_RETURN(loop::ConfigureReadAhead(dev.GetDevPath()));
+  return std::move(dev);
+}
+#endif
+
 Result<DmDevice> CreateDmLinearForPayload(const ApexFile& apex) {
   if (!apex.GetImageOffset() || !apex.GetImageSize()) {
     return Error() << "Cannot create mount point without image offset and size";
@@ -496,6 +511,11 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
              !mount_on_verity) {
     mount_options = std::format("fsoffset={}", *apex.GetImageOffset());
     mount_device = apex.GetPath();
+#if COM_ANDROID_APEX_FLAGS_MICRODROID_NO_LOOP_DEVICE
+  } else if (instance.IsBlockApex(apex)) {
+    linear_dev = OR_RETURN(CreateDmLinearForBlockApex(apex, device_name));
+    mount_device = linear_dev.GetDevPath();
+#endif
   } else {
     loop = OR_RETURN(CreateLoopForApex(apex, loop_id));
     mount_device = loop.name;
@@ -2407,16 +2427,13 @@ int OnBootstrap() {
   bool revert_on_error = false;
 
   if (IsMountBeforeDataEnabled()) {
-    // Wait until coldboot is done. This is to avoid unnecessary polling when
-    // using/creating loop or device-mapper devices. Note that apexd relies on
-    // devices created by init process for faster activation. Their nodes are
-    // created by ueventd's coldboot. Hence, accessing them before coldboot is
-    // done causes polling, which can be much slower than waiting for coldboot.
-    // Similarly, before coldboot is done, ueventd can't handle a device
-    // creation. This will also cause polling the userspace node creation.
-    // Instead of racing with ueventd, let's wait until it finishes coldboot.
-    base::WaitForProperty("ro.cold_boot_done", "true",
-                          std::chrono::seconds(10));
+    // Data APEX is mapped as a dm-linear device on top of the block device
+    // backing /data (e.g. /dev/block/by-name/userdata). Hence, we need to make
+    // sure the block device is ready.
+    if (auto st = GetImageManager()->WaitForDataBlockDevice(); !st.ok()) {
+      LOG(ERROR) << st.error();
+      return 1;
+    }
 
     // Process sessions before scanning "active" data apexes because sessions
     // can change the list of active data apexes:

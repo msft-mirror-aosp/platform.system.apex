@@ -19,7 +19,9 @@
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/macros.h>
+#include <android-base/scopeguard.h>
 #include <android-base/strings.h>
+#include <selinux/selinux.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 
@@ -117,6 +119,18 @@ Result<void> BindMount(const std::string& target, const std::string& source) {
     return {};
   }
   return ErrnoError() << "Could not bind-mount " << source << " to " << target;
+}
+
+base::Result<void> MakeBlockDeviceNode(const std::string& device, mode_t mode,
+                                       dev_t dev, const std::string& context) {
+  if (setfscreatecon(context.c_str()) != 0) {
+    return ErrnoError() << "Failed to setfscreatecon to " << context;
+  }
+  auto guard = base::make_scope_guard([]() { setfscreatecon(nullptr); });
+  if (mknod(device.c_str(), S_IFBLK | mode, dev) != 0 && errno != EEXIST) {
+    return ErrnoError() << "Failed to mknod " << device;
+  }
+  return {};
 }
 
 }  // namespace apexd_private

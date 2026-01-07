@@ -16,3 +16,11 @@ flag {
   bug: "441595040"
   is_fixed_read_only: true
 }
+
+flag {
+  name: "microdroid_no_loop_device"
+  namespace: "treble"
+  description: "This flag controls if apexd activates apexes without loop devices"
+  bug: "472590904"
+  is_fixed_read_only: true
+}

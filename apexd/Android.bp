@@ -140,7 +140,6 @@ cc_binary {
         "libapexd_metrics_stats-deps",
     ],
     srcs: [
-        "apexd_dump.cpp",
         "apexd_main.cpp",
     ],
     static_libs: [
@@ -209,6 +208,7 @@ cc_library_static {
         "apexd_brand_new_verifier.cpp",
         "apexd_checkpoint.cpp",
         "apexd_dm.cpp",
+        "apexd_dump.cpp",
         "apexd_image_manager.cpp",
         "apexd_lifecycle.cpp",
         "apexd_loop.cpp",

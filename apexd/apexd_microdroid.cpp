@@ -21,6 +21,7 @@
 #define LOG_TAG "apexd-vm"
 
 #include <android-base/logging.h>
+#include <android-base/properties.h>
 #include <sys/stat.h>
 
 #include "apexd.h"
@@ -46,7 +47,7 @@ static const android::apex::ApexdConfig kMicrodroidConfig = {
     nullptr, /* metadata_config_dir */
 };
 
-int main(int /*argc*/, char** argv) {
+int main(int argc, char** argv) {
   android::base::InitLogging(argv);
   android::base::SetMinimumLogSeverity(android::base::INFO);
 
@@ -56,5 +57,12 @@ int main(int /*argc*/, char** argv) {
   umask(022);
 
   android::apex::SetConfig(kMicrodroidConfig);
+
+  if (android::base::GetBoolProperty("ro.debuggable", false)) {
+    if (argc >= 2 && strcmp(argv[1], "--dump") == 0) {
+      return android::apex::OnDump(
+          std::vector<std::string>{argv + 2, argv + argc});
+    }
+  }
   return android::apex::OnStartInVmMode();
 }

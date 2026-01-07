@@ -110,6 +110,8 @@ class ApexImageManager {
   base::Result<std::vector<ApexListEntry>> GetApexList(
       ApexListType list_type) const;
 
+  base::Result<void> WaitForDataBlockDevice();
+
   static std::unique_ptr<ApexImageManager> Create(
       const std::string& metadata_images_dir,
       const std::string& data_images_dir);
