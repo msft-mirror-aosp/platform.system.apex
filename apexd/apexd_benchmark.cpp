@@ -20,6 +20,7 @@
 #include "apex_file.h"
 #include "apex_file_repository.h"
 #include "apexd.h"
+#include "apexd_loop.h"
 
 using android::apex::ApexFile;
 using android::apex::ApexFileRepository;
@@ -59,5 +60,27 @@ static void BM_EmitApexInfoList(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_EmitApexInfoList);
+
+static void BM_ConfigureReadAheadSysfs(benchmark::State& state) {
+  auto apex = ApexFile::Open("/system/apex/com.android.apex.cts.shim.apex");
+  auto loop = android::apex::loop::CreateAndConfigureLoopDevice(
+      apex->GetPath(), apex->GetImageOffset().value(),
+      apex->GetImageSize().value());
+  for (auto _ : state) {
+    android::apex::loop::ConfigureReadAheadSysfs(loop->name);
+  }
+}
+BENCHMARK(BM_ConfigureReadAheadSysfs);
+
+static void BM_ConfigureReadAheadIoctl(benchmark::State& state) {
+  auto apex = ApexFile::Open("/system/apex/com.android.apex.cts.shim.apex");
+  auto loop = android::apex::loop::CreateAndConfigureLoopDevice(
+      apex->GetPath(), apex->GetImageOffset().value(),
+      apex->GetImageSize().value());
+  for (auto _ : state) {
+    android::apex::loop::ConfigureReadAheadIoctl(loop->device_fd);
+  }
+}
+BENCHMARK(BM_ConfigureReadAheadIoctl);
 
 BENCHMARK_MAIN();

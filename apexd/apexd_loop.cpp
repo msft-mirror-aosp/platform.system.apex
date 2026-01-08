@@ -46,7 +46,9 @@
 
 #include "apexd_private.h"
 #include "apexd_utils.h"
+#include "com_android_apex_flags.h"
 
+namespace flags = com::android::apex::flags;
 using android::base::Basename;
 using android::base::borrowed_fd;
 using android::base::Dirname;
@@ -278,7 +280,7 @@ Result<void> ConfigureQueueDepth(const std::string& loop_device_path,
   return {};
 }
 
-Result<void> ConfigureReadAhead(const std::string& device_path) {
+Result<void> ConfigureReadAheadSysfs(const std::string& device_path) {
   ATRACE_NAME("ConfigureReadAhead");
   CHECK(StartsWith(device_path, "/dev/"));
   std::string device_name = Basename(device_path);
@@ -300,6 +302,29 @@ Result<void> ConfigureReadAhead(const std::string& device_path) {
   }
 
   return {};
+}
+
+Result<void> ConfigureReadAheadIoctl(base::borrowed_fd device_fd) {
+  static const unsigned long ra_in_sectors =
+      sysprop::ApexProperties::loopback_readahead().value_or(kReadAheadKb) * 2;
+
+  if (ioctl(device_fd.get(), BLKRASET, ra_in_sectors) == -1) {
+    return ErrnoError() << "Failed to set RA to " << ra_in_sectors
+                        << " (sectors)";
+  }
+  return {};
+}
+
+Result<void> ConfigureReadAhead(const std::string& device_path) {
+  if constexpr (flags::mount_before_data()) {
+    unique_fd fd(open(device_path.c_str(), O_RDONLY | O_CLOEXEC));
+    if (fd.get() == -1) {
+      return ErrnoError() << "Failed to open device for RA: " << device_path;
+    }
+    return ConfigureReadAheadIoctl(fd);
+  } else {
+    return ConfigureReadAheadSysfs(device_path);
+  }
 }
 
 Result<void> PreAllocateLoopDevices(size_t num) {
@@ -616,9 +641,10 @@ Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
     LOG(WARNING) << qd_status.error();
   }
 
-  Result<void> read_ahead_status = ConfigureReadAhead(loop_device->name);
-  if (!read_ahead_status.ok()) {
-    return read_ahead_status.error();
+  if constexpr (flags::mount_before_data()) {
+    OR_RETURN(ConfigureReadAheadIoctl(loop_device->device_fd));
+  } else {
+    OR_RETURN(ConfigureReadAheadSysfs(loop_device->name));
   }
 
   return loop_device;
