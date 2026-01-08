@@ -19,6 +19,8 @@ package com.android.tests.apex;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeFalse;
 import static org.junit.Assume.assumeTrue;
 
@@ -30,6 +32,7 @@ import com.android.tests.rollback.host.AbandonSessionsRule;
 import com.android.tradefed.device.ITestDevice;
 import com.android.tradefed.testtype.DeviceJUnit4ClassRunner;
 import com.android.tradefed.testtype.junit4.BaseHostJUnit4Test;
+import com.android.tradefed.util.FileUtil;
 
 import org.junit.After;
 import org.junit.Before;
@@ -40,6 +43,7 @@ import org.junit.runner.RunWith;
 import java.io.File;
 import java.io.FileInputStream;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -337,5 +341,52 @@ public class ApexdHostTest extends BaseHostJUnit4Test  {
         String error = mHostUtils.installRebootlessPackage(apexFile);
         assertThat(error).isNotNull();
         assertThat(error).contains("No device manifest");
+    }
+
+    /**
+     * Test to ensure that multiple APEXes can be installed. To simulate mainline updates,
+     * pulling "com.google.android.*" packages from /system and install them as a group.
+     */
+    @Test
+    public void testInstallMultiPackages() throws Exception {
+        assumeTrue("Device does not support updating APEX", mHostUtils.isApexUpdateSupported());
+        assumeTrue("Device requires root", getDevice().isAdbRoot());
+
+        var installedPackages = new ArrayList<String>();
+        var localApexFiles = new ArrayList<String>();
+        // pull active /system/apex/com.google.android.* APEXes into a temp dir
+        var tempDir = FileUtil.createTempDir("apex");
+        for (var ai : getDevice().getActiveApexes()) {
+            if (ai.sourceDir.startsWith("/system/") && ai.name.startsWith("com.google.android.")) {
+                var localFile = new File(tempDir, ai.name + ".apex");
+                assertTrue(getDevice().pullFile(ai.sourceDir, localFile));
+
+                localApexFiles.add(localFile.toString());
+                installedPackages.add(ai.name);
+            }
+        }
+        try {
+            // install pulled APEXes with `adb install-multi-package`
+            var args = new ArrayList<String>();
+            args.add("install-multi-package");
+            args.addAll(localApexFiles);
+            getDevice().executeAdbCommand(args.toArray(new String[0]));
+            getDevice().reboot();
+            assertWithMessage("Timed out waiting for device to boot").that(
+                        getDevice().waitForBootComplete(Duration.ofMinutes(2).toMillis())).isTrue();
+
+            // check if installed APEXes are activated
+            for (var ai : getDevice().getActiveApexes()) {
+                if (installedPackages.contains(ai.name)) {
+                    assertFalse(ai.isFactory);
+                }
+            }
+        } finally {
+            // uninstall them as cleanup
+            for (var packageName : installedPackages) {
+                getDevice().uninstallPackage(packageName);
+            }
+            getDevice().reboot();
+        }
     }
 }
