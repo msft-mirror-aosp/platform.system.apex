@@ -470,7 +470,8 @@ Result<std::vector<std::string>> ApexImageManager::PinApexFiles(
     // Create a single shared split-file (apex.img) with initial_size = 1. The
     // file will be created as the minimum allocation size.
     auto storage = OR_RETURN(OpenOrCreateApexStorage(data_dir_, 1));
-    metadata.set_allocation_alignment(storage->size());
+    auto allocated = IntervalsGetLength(ExtentsToIntervals(storage->extents()));
+    metadata.set_allocation_alignment(allocated);
     metadata.set_data_bdev(GetDevicePathForFile(storage.get()));
     LOG(INFO) << "Initializing APEX storage metadata: block_dev="
               << metadata.data_bdev()
