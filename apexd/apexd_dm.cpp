@@ -23,7 +23,9 @@
 
 #include "apexd_private.h"
 #include "apexd_utils.h"
+#include "com_android_apex_flags.h"
 
+namespace flags = com::android::apex::flags;
 using android::base::ErrnoError;
 using android::base::Error;
 using android::base::Result;
@@ -55,13 +57,15 @@ static Result<DmDevice> CreateDmDeviceInternal(
   }
   auto path = info->GetPath();
 
-  // Let's make the device node directly before falling back to waiting
-  if (access(path.c_str(), F_OK) != 0 && errno == ENOENT) {
-    dev_t dev = info->GetDev();
-    mode_t mode = 0644;
-    const char* context = "u:object_r:apex_dm_device:s0";
-    auto st = apexd_private::MakeBlockDeviceNode(path, mode, dev, context);
-    if (!st.ok()) LOG(ERROR) << st.error();
+  if constexpr (flags::mount_before_data()) {
+    // Let's make the device node directly before falling back to waiting
+    if (access(path.c_str(), F_OK) != 0 && errno == ENOENT) {
+      dev_t dev = info->GetDev();
+      mode_t mode = 0644;
+      const char* context = "u:object_r:apex_dm_device:s0";
+      auto st = apexd_private::MakeBlockDeviceNode(path, mode, dev, context);
+      if (!st.ok()) LOG(ERROR) << st.error();
+    }
   }
   OR_RETURN(WaitForFile(path, timeout));
 

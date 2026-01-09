@@ -488,7 +488,7 @@ static Result<LoopbackDeviceUniqueFd> ConfigureLoopDevice(
   }
 }
 
-static std::optional<dev_t> ReadLoopDevNum(int num) {
+[[maybe_unused]] static std::optional<dev_t> ReadLoopDevNum(int num) {
   std::string str;
   if (ReadFileToString(std::format("/sys/block/loop{}/dev", num), &str)) {
     unsigned int major, minor;
@@ -501,12 +501,14 @@ static std::optional<dev_t> ReadLoopDevNum(int num) {
 
 static Result<EmptyLoopDevice> WaitForLoopDevice(int num) {
   std::string device = std::format("/dev/block/loop{}", num);
-  // Let's make the node directly
-  if (access(device.c_str(), F_OK) != 0 && errno == ENOENT) {
-    if (auto dev = ReadLoopDevNum(num); dev) {
-      auto st = apexd_private::MakeBlockDeviceNode(device, 0600, *dev,
-                                                   "u:object_r:loop_device:s0");
-      if (!st.ok()) LOG(ERROR) << st.error();
+  if constexpr (flags::mount_before_data()) {
+    // Let's make the node directly
+    if (access(device.c_str(), F_OK) != 0 && errno == ENOENT) {
+      if (auto dev = ReadLoopDevNum(num); dev) {
+        auto st = apexd_private::MakeBlockDeviceNode(
+            device, 0600, *dev, "u:object_r:loop_device:s0");
+        if (!st.ok()) LOG(ERROR) << st.error();
+      }
     }
   }
 
