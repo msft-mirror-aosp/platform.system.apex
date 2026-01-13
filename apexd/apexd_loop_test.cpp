@@ -19,6 +19,7 @@
 #include <android-base/file.h>
 #include <android-base/result-gmock.h>
 #include <android-base/scopeguard.h>
+#include <android-base/stringprintf.h>
 #include <android-base/unique_fd.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -27,16 +28,21 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <string>
 
 #include "apex_file.h"
 #include "apexd_test_utils.h"
+#include "apexd_utils.h"
+#include "com_android_apex_flags.h"
 
+namespace flags = com::android::apex::flags;
 using android::base::unique_fd;
 using android::base::testing::Ok;
 using ::testing::Not;
 using ::testing::internal::CaptureStderr;
 using ::testing::internal::GetCapturedStderr;
+using namespace std::chrono_literals;
 
 namespace android::apex {
 
@@ -120,6 +126,54 @@ TEST(Loop, AliveWhileMounted) {
   // loop is cleaned up automatically after unmount.
   ASSERT_NE(access(manifest_path.c_str(), F_OK), 0);
   AssertLoopIsCleared(loop_name);
+}
+
+TEST(Loop, CreateDeviceNodeIfMissing) {
+  if constexpr (!flags::mount_before_data()) {
+    GTEST_SKIP() << "mount_before_data disabled";
+  }
+  // This test verifies that CreateAndConfigureLoopDevice can successfully
+  // create a loop device even if the corresponding /dev/block/loop[num] node
+  // is missing. This is the scenario the change is addressing (to avoid
+  // waiting for ueventd).
+
+  // 1. Find a free loop device number. This will cause the kernel to create
+  //    the sysfs entries for it.
+  unique_fd ctl_fd(open("/dev/loop-control", O_RDWR | O_CLOEXEC));
+  ASSERT_TRUE(ctl_fd.ok()) << strerror(errno);
+  int num = ioctl(ctl_fd.get(), LOOP_CTL_GET_FREE);
+  ASSERT_NE(num, -1) << strerror(errno);
+  auto free_loop = base::make_scope_guard(
+      [&]() { ioctl(ctl_fd.get(), LOOP_CTL_REMOVE, num); });
+
+  // 2. ueventd will create the device node. We wait for it and then delete it
+  //    to simulate a race condition where apexd runs before ueventd has
+  //    created the node.
+  std::string dev_path = base::StringPrintf("/dev/block/loop%d", num);
+  ASSERT_THAT(WaitForFile(dev_path, 5s), Ok());
+  ASSERT_EQ(unlink(dev_path.c_str()), 0) << strerror(errno);
+  ASSERT_NE(access(dev_path.c_str(), F_OK), 0);
+
+  // 3. The /sys entry should still exist, as it's managed by the kernel.
+  std::string sys_path = base::StringPrintf("/sys/block/loop%d/dev", num);
+  ASSERT_EQ(access(sys_path.c_str(), F_OK), 0) << strerror(errno);
+
+  // 4. Call CreateAndConfigureLoopDevice with the specific loop id. It should
+  //    detect the missing device node, read the major/minor from sysfs,
+  //    create the node itself, and then successfully configure the loop device.
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(apex, Ok());
+
+  auto loop = loop::CreateAndConfigureLoopDevice(
+      apex->GetPath(), apex->GetImageOffset().value(),
+      apex->GetImageSize().value(), num);
+  ASSERT_THAT(loop, Ok());
+  EXPECT_EQ(loop->name, dev_path);
+
+  // 5. Check that the device node was indeed created and is a block device.
+  struct stat st;
+  ASSERT_EQ(stat(dev_path.c_str(), &st), 0) << strerror(errno);
+  ASSERT_TRUE(S_ISBLK(st.st_mode));
 }
 
 TEST(Loop, NoSuchFile) {
