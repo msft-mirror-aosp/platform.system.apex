@@ -633,14 +633,36 @@ Result<void> RunTestHookCommands(const std::string& sysprop) {
       if (args[0] == "sleep_ms" && args.size() == 2 &&
           ParseUint(args[1], &num)) {
         usleep(num * 1000);
-      } else if (args[0] == "error" && args.size() == 2) {
-        return Error() << args[1];
+      } else if (args[0] == "error") {
+        return Error() << command.substr(6);
       } else {
         LOG(ERROR) << "Invalid command: " << command;
       }
     }
   }
   return {};
+}
+
+// Since apexd-bootstrap starts before persist.* props are loaded, apexd has its
+// own prop loader for test_hook properties.
+void LoadTestHookProps() {
+  constexpr const char* kTestHookPropFile = "/metadata/apex/test_hook.prop";
+  std::string props;
+  if (!base::ReadFileToString(kTestHookPropFile, &props)) {
+    return;
+  }
+  LOG(INFO) << "Loading " << kTestHookPropFile;
+  for (const std::string& line : base::Split(props, "\n")) {
+    auto trimmed = base::Trim(line);
+    if (trimmed.empty() || !trimmed.starts_with("apexd.test_hook.")) {
+      continue;
+    }
+    if (auto pos = trimmed.find('='); pos != std::string::npos) {
+      LOG(INFO) << "Set property: " << trimmed;
+      SetProperty(trimmed.substr(0, pos), trimmed.substr(pos + 1));
+    }
+  }
+  unlink(kTestHookPropFile);
 }
 
 }  // namespace
@@ -797,6 +819,11 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
 // This function should only verification checks that are necessary to run on
 // each boot. Try to avoid putting expensive checks inside this function.
 Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
+  // Run test commands only when validating Shim APEX on a debuggable device.
+  if (shim::IsShimApex(apex_file) && GetBoolProperty("ro.debuggable", false)) {
+    OR_RETURN(RunTestHookCommands("apexd.test_hook.verify_package_boot"));
+  }
+
   // Verify bundled key against preinstalled data
   OR_RETURN(apexd_private::CheckBundledPublicKeyMatchesPreinstalled(apex_file));
   // Verify bundled key against apex itself
@@ -2414,6 +2441,10 @@ Result<void> AddPreinstalledData(ApexFileRepository& instance) {
 int OnBootstrap() {
   ATRACE_NAME("OnBootstrap");
   auto time_started = boot_clock::now();
+
+  if (GetBoolProperty("ro.debuggable", false)) {
+    LoadTestHookProps();
+  }
 
   ApexFileRepository& instance = ApexFileRepository::GetInstance();
   if (auto st = AddPreinstalledData(instance); !st.ok()) {
