@@ -57,6 +57,11 @@ namespace android::apex {
 
 namespace {
 
+// Let's use 1 GiB as max-piece-size for SplitFiemap. This won't limit the max
+// APEX size, but avoid unnecessary file creation when creating SplitFiemap just
+// to identify the filesystem and determine its max-file-size.
+constexpr const uint64_t kMaxPieceSize = 1'073'741'824ull;  // 1GiB
+
 ApexImageManager* gImageManager;
 
 // Utility type for static_assert at the end of `if constexpr` branches.
@@ -332,7 +337,8 @@ Result<std::unique_ptr<SplitFiemap>> OpenOrCreateApexStorage(
   auto storage_path = data_dir + "/apex.img";
   auto storage = SplitFiemap::Open(storage_path);
   if (!storage) {
-    storage = SplitFiemap::Create(storage_path, initial_size, 0);
+    storage = SplitFiemap::Create(storage_path, initial_size,
+                                  /*max_piece_size=*/kMaxPieceSize);
     if (!storage) {
       return Error() << "Failed to create APEX storage at " << storage_path;
     }
@@ -376,7 +382,8 @@ Result<std::unique_ptr<FreeSpaceAllocator>> FreeSpaceAllocator::Create(
               << " bytes) is not enough for incoming APEXes (" << initial_size
               << " bytes). Growing it by " << (initial_size - free_space)
               << " bytes.";
-    if (!storage->Grow(initial_size - free_space)) {
+    if (!storage->Grow(initial_size - free_space,
+                       /*max_piece_size=*/kMaxPieceSize)) {
       return Error() << "Failed to grow apex.img";
     }
     // Update free extents after growing
