@@ -336,7 +336,13 @@ Result<void> ConfigureReadAhead(const std::string& device_path) {
     if (fd.get() == -1) {
       return ErrnoError() << "Failed to open device for RA: " << device_path;
     }
-    return ConfigureReadAheadIoctl(fd);
+    auto result = ConfigureReadAheadIoctl(fd);
+    if (!result.ok() && result.error().code() == EACCES) {
+      LOG(WARNING) << "ConfigureReadAheadIoctl failed with EACCES, falling "
+                      "back to sysfs";
+      return ConfigureReadAheadSysfs(device_path);
+    }
+    return result;
   } else {
     return ConfigureReadAheadSysfs(device_path);
   }
@@ -659,7 +665,14 @@ Result<LoopbackDeviceUniqueFd> CreateAndConfigureLoopDevice(
   }
 
   if constexpr (flags::mount_before_data()) {
-    OR_RETURN(ConfigureReadAheadIoctl(loop_device->device_fd));
+    auto result = ConfigureReadAheadIoctl(loop_device->device_fd);
+    if (!result.ok() && result.error().code() == EACCES) {
+      LOG(WARNING) << "ConfigureReadAheadIoctl failed with EACCES, falling "
+                      "back to sysfs";
+      OR_RETURN(ConfigureReadAheadSysfs(loop_device->name));
+    } else {
+      OR_RETURN(std::move(result));
+    }
   } else {
     OR_RETURN(ConfigureReadAheadSysfs(loop_device->name));
   }
