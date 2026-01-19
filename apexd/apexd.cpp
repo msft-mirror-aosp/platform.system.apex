@@ -494,7 +494,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     mount_device = linear_dev.GetDevPath();
   } else if (IsFileBackedMountEnabled() && fs_type == "erofs" &&
              !mount_on_verity) {
-    mount_options = std::format("fsoffset={}", *apex.GetImageOffset());
+    mount_options = std::format("directio,fsoffset={}", *apex.GetImageOffset());
     mount_device = apex.GetPath();
   } else {
     loop = OR_RETURN(CreateLoopForApex(apex, loop_id));
