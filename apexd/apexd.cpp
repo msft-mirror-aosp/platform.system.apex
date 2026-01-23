@@ -30,6 +30,7 @@
 #include <android-base/strings.h>
 #include <android-base/thread_annotations.h>
 #include <android-base/unique_fd.h>
+#include <com_android_libdm.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <google/protobuf/util/message_differencer.h>
@@ -232,6 +233,14 @@ std::unique_ptr<DmTable> CreateVerityTable(const ApexVerityData& verity_data,
   target->IgnoreZeroBlocks();
   if (restart_on_corruption) {
     target->SetVerityMode(kDmVerityRestartOnCorruption);
+  }
+
+  // Will turn on the try_verify_in_tasklet optimization only if the
+  // kernel supports the improved version of the optimization.
+
+  if (com::android::libdm::dm_verity_verify_in_tasklet()) {
+    LOG(INFO) << "Adding TryVerifyInTasklet to dm-verity for apexd";
+    target->TryVerifyInTasklet();
   }
   table->AddTarget(std::move(target));
 
