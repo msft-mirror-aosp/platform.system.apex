@@ -117,6 +117,18 @@ Result<DmDevice> CreateDmDevice(const std::string& name, const DmTable& table,
 // Synchronizes on the device actually being deleted from userspace.
 Result<void> DeleteDmDevice(const std::string& name, bool deferred) {
   DeviceMapper& dm = DeviceMapper::Instance();
+
+  // Since apexd does mknod() directly, ueventd might not have a chance to
+  // handle "add" event yet. Let's wait for "unique" path to be created by
+  // ueventd with "add" event before deletion to avoid race. Otherwise,
+  // ueventd or libdm may fail to handle deletion properly.
+  std::string unique_path;
+  if (DeviceMapper::Instance().GetDeviceUniquePath(name, &unique_path)) {
+    if (auto st = WaitForFile(unique_path, 5s); !st.ok()) {
+      LOG(ERROR) << "Failed to wait for " << unique_path << ": " << st.error();
+    }
+  }
+
   if (deferred) {
     if (!dm.DeleteDeviceDeferred(name)) {
       return ErrnoError() << "Failed to issue deferred delete of dm-device "
