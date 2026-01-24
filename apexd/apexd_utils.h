@@ -30,6 +30,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 
 #include <chrono>
@@ -348,6 +349,20 @@ inline void TouchFile(const std::string& dir, const std::string& filename) {
   if (!android::base::WriteStringToFile("", file)) {
     PLOG(ERROR) << "Failed to create " << file;
   }
+}
+
+inline bool IsKernelAtLeast(unsigned int target_major,
+                            unsigned int target_minor) {
+  struct utsname uts;
+  unsigned int major, minor;
+
+  if ((uname(&uts) != 0) ||
+      (sscanf(uts.release, "%u.%u", &major, &minor) != 2)) {
+    LOG(ERROR) << "Could not get kernel version";
+    return false;
+  }
+  return major > target_major ||
+         (major == target_major && minor >= target_minor);
 }
 
 // Adapter for a single-valued span

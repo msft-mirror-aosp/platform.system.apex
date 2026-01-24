@@ -900,7 +900,7 @@ class ApexdMountTest : public ApexdUnitTest {
     // goes wrong with the test.
     std::vector<DeviceMapper::DmBlockDevice> devices;
     EXPECT_TRUE(DeviceMapper::Instance().GetAvailableDevices(&devices));
-    ASSERT_THAT(dm_devices_, Eq(devices));
+    EXPECT_THAT(devices, Eq(dm_devices_));
   }
 
   void DeactivateAllPackages() {

@@ -199,6 +199,9 @@ cc_library_static {
         "apex_flags_defaults",
         "libapexd-deps",
     ],
+    static_libs: [
+        "libdm_flags_cc_lib",
+    ],
     srcs: [
         "apex_blocklist.cpp",
         "apex_classpath.cpp",

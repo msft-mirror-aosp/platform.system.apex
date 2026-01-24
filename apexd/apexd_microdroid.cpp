@@ -23,8 +23,16 @@
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <sys/stat.h>
+#include <unistd.h>  // For getpagesize()
 
 #include "apexd.h"
+#include "apexd_utils.h"
+#include "com_android_apex_flags.h"
+
+static bool IsFileBackedMountSupported() {
+  return com::android::apex::flags::erofs_file_backed_mount() &&
+         getpagesize() == 4096 && android::apex::IsKernelAtLeast(6, 12);
+}
 
 static const android::apex::ApexdConfig kMicrodroidConfig = {
     android::apex::kApexStatusSysprop,
@@ -38,13 +46,13 @@ static const android::apex::ApexdConfig kMicrodroidConfig = {
     nullptr, /* ota_reserved_dir */
     nullptr, /* staged_session_dir */
     android::apex::kVmPayloadMetadataPartitionProp,
-    nullptr, /* active_apex_selinux_ctx */
-    {},      /* brand_new_apex_config_dirs */
-    nullptr, /* checkpoint_file */
-    false,   /* mount_before_data */
-    false,   /* uses_pinned_apex */
-    false,   /* file_backed_mount */
-    nullptr, /* metadata_config_dir */
+    nullptr,                      /* active_apex_selinux_ctx */
+    {},                           /* brand_new_apex_config_dirs */
+    nullptr,                      /* checkpoint_file */
+    false,                        /* mount_before_data */
+    false,                        /* uses_pinned_apex */
+    IsFileBackedMountSupported(), /* file_backed_mount */
+    nullptr,                      /* metadata_config_dir */
 };
 
 int main(int argc, char** argv) {
