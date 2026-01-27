@@ -301,6 +301,41 @@ inline android::base::Result<uintmax_t> GetFileSize(
   return value;
 }
 
+inline android::base::Result<void> RestoreconPath(const std::string& path) {
+  unsigned int seflags = SELINUX_ANDROID_RESTORECON_RECURSE;
+  if (selinux_android_restorecon(path.c_str(), seflags) < 0) {
+    return android::base::ErrnoError() << "Failed to restorecon " << path;
+  }
+  return {};
+}
+
+inline android::base::Result<std::string> GetfileconPath(
+    const std::string& path) {
+  char* ctx;
+  if (getfilecon(path.c_str(), &ctx) < 0) {
+    return android::base::ErrnoError() << "Failed to getfilecon " << path;
+  }
+  std::string ret(ctx);
+  freecon(ctx);
+  return ret;
+}
+
+// Log information about DAC/MAC for a given path
+inline void LogPermissionInfo(const std::string& path) {
+  if (struct stat sb; stat(path.c_str(), &sb) == 0) {
+    LOG(ERROR) << path << ": stat="
+               << std::format("{:04o}/{}/{}", sb.st_mode & 0777, sb.st_uid,
+                              sb.st_gid);
+  } else {
+    PLOG(ERROR) << "Failed to stat " << path;
+  }
+  if (auto filecon = GetfileconPath(path); filecon.ok()) {
+    LOG(ERROR) << path << ": filecon=" << filecon.value();
+  } else {
+    LOG(ERROR) << filecon.error();
+  }
+}
+
 // Returns the number of seconds since the epoch.
 inline android::base::Result<int64_t> GetLastModifiedTime(
     const std::string& path) {
@@ -319,28 +354,13 @@ inline android::base::Result<void> SetLastModifiedTime(const std::string& path,
   times[1].tv_sec = mtime;
   times[1].tv_usec = 0;
   if (utimes(path.c_str(), times) != 0) {
-    return android::base::ErrnoError() << "Failed to set mtime for " << path;
+    int saved_errno = errno;
+    if (saved_errno == EACCES) {
+      LogPermissionInfo(path);
+    }
+    return base::Error(saved_errno) << "Failed to set mtime for " << path;
   }
   return {};
-}
-
-inline android::base::Result<void> RestoreconPath(const std::string& path) {
-  unsigned int seflags = SELINUX_ANDROID_RESTORECON_RECURSE;
-  if (selinux_android_restorecon(path.c_str(), seflags) < 0) {
-    return android::base::ErrnoError() << "Failed to restorecon " << path;
-  }
-  return {};
-}
-
-inline android::base::Result<std::string> GetfileconPath(
-    const std::string& path) {
-  char* ctx;
-  if (getfilecon(path.c_str(), &ctx) < 0) {
-    return android::base::ErrnoError() << "Failed to getfilecon " << path;
-  }
-  std::string ret(ctx);
-  freecon(ctx);
-  return ret;
 }
 
 inline void TouchFile(const std::string& dir, const std::string& filename) {
