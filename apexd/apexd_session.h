@@ -35,7 +35,6 @@ static constexpr const char* kApexSessionsDir = "/metadata/apex/sessions";
 // Returns top-level directory to store sessions metadata in.
 std::string GetSessionsDir();
 
-// TODO(b/288309411): remove static functions in this class.
 class ApexSession {
  public:
   ApexSession() = delete;
