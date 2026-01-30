@@ -72,8 +72,7 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     private void runPhase(String phase) throws Exception {
         var options = new DeviceTestRunOptions("com.android.tests.vendorapex.app")
                               .setTestClassName("com.android.tests.apex.app.VendorApexTests")
-                              .setTestMethodName(phase)
-                              .addInstrumentationArg("partition", mPartition);
+                              .setTestMethodName(phase);
         assertThat(runDeviceTests(options)).isTrue();
     }
 
@@ -135,6 +134,8 @@ public class VendorApexTests extends BaseHostJUnit4Test {
     @Test
     @LargeTest
     public void testVendorBootstrapApex() throws Exception {
+        assumeTrue("No bootstrap APEXes",
+                   getDevice().pullFile("/bootstrap-apex/apex-info-list.xml") != null);
         pushPreinstalledApex("com.android.apex.vendor.foo.bootstrap.apex");
 
         // Now there should be "com.android.apex.vendor.foo" activated as an
@@ -190,13 +191,24 @@ public class VendorApexTests extends BaseHostJUnit4Test {
         return result.getStdout().trim();
     }
 
+    private String getRealpath(String path) throws Exception {
+        CommandResult result =
+                getDevice().executeShellV2Command("realpath " + path);
+        if (result.getStatus() != CommandStatus.SUCCESS) {
+            throw new RuntimeException("failed to realpath for " + path);
+        }
+        return result.getStdout().trim();
+    }
+
     private void pushPreinstalledApex(String... fileNames) throws Exception {
         assertThat(fileNames).isNotEmpty();
         CompatibilityBuildHelper buildHelper = new CompatibilityBuildHelper(getBuild());
         for (String fileName : fileNames) {
-            final File apex = buildHelper.getTestFile(fileName);
-            Path path = Paths.get("/", mPartition, "apex", fileName);
-            assertTrue(getDevice().pushFile(apex, path.toString()));
+            final File localApexFile = buildHelper.getTestFile(fileName);
+            // Handle the case where /odm/apex is a symlink to /vendor/odm/path
+            final String apexDir = getRealpath("/" +  mPartition + "/apex");
+            final Path remoteApexFile = Paths.get(apexDir, fileName);
+            assertTrue(getDevice().pushFile(localApexFile, remoteApexFile.toString()));
         }
         getDevice().reboot();
     }
