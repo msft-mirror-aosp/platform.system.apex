@@ -106,6 +106,13 @@ void DumpMounts(std::ostream& out) {
     if (!data.linear_name.empty()) dump_dm("linear", data.linear_name);
     if (!data.loop_name.empty()) out << " loop=" << data.loop_name;
     out << " apex=" << data.full_path;
+    out << " fs=";
+    auto apex_file = ApexFile::Open(data.full_path);
+    if (apex_file.ok() && apex_file->GetFsType().has_value()) {
+      out << apex_file->GetFsType().value();
+    } else {
+      out << "(err)";
+    }
     out << "\n";
   });
 }
