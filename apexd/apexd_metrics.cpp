@@ -37,7 +37,7 @@ namespace android::apex {
 
 namespace {
 
-std::unique_ptr<Metrics> gMetrics;
+[[clang::no_destroy]] std::unique_ptr<Metrics> gMetrics;
 
 }  // namespace
 

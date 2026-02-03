@@ -225,7 +225,7 @@ Result<std::vector<ApexFileAndPartition>> ApexFileRepository::OpenApexFiles(
 }
 
 ApexFileRepository& ApexFileRepository::GetInstance() {
-  static ApexFileRepository instance;
+  [[clang::no_destroy]] static ApexFileRepository instance;
   return instance;
 }
 

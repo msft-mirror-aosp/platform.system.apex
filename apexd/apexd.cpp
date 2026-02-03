@@ -139,10 +139,10 @@ static constexpr const char* kBuildFingerprintSysprop = "ro.build.fingerprint";
 static constexpr const char* kDmVerityRestartOnCorruption =
     "restart_on_corruption";
 
-MountedApexDatabase gMountedApexes;
+[[clang::no_destroy]] static MountedApexDatabase gMountedApexes;
 
 // Can be set by SetConfig()
-std::optional<ApexdConfig> gConfig;
+[[clang::no_destroy]] std::optional<ApexdConfig> gConfig;
 
 // Set by InitializeSessionManager
 ApexSessionManager* gSessionManager;
@@ -160,37 +160,38 @@ bool gInFsCheckpointMode = false;
 // VERIFIED session, which is not yet fully staged.
 struct Mutex : std::mutex {
   const Mutex& operator!() const { return *this; }  // for negative capability
-} gInstallLock;
+} gInstallLock [[clang::no_destroy]];
 
 static constexpr size_t kLoopDeviceSetupAttempts = 3u;
 
 // Please DO NOT add new modules to this list without contacting
 // mainline-modularization@ first.
-static const std::vector<std::string> kBootstrapApexes = ([]() {
-  std::vector<std::string> ret = {
-      "com.android.i18n",
-      "com.android.runtime",
-      "com.android.tzdata",
+[[clang::no_destroy]] static const std::vector<std::string> kBootstrapApexes =
+    ([]() {
+      std::vector<std::string> ret = {
+          "com.android.i18n",
+          "com.android.runtime",
+          "com.android.tzdata",
 #ifdef RELEASE_AVF_ENABLE_EARLY_VM
-      "com.android.virt",
+          "com.android.virt",
 #endif
-  };
+      };
 
-  auto vendor_vndk_ver = GetProperty("ro.vndk.version", "");
-  if (vendor_vndk_ver != "") {
-    ret.push_back("com.android.vndk.v" + vendor_vndk_ver);
-  }
-  auto product_vndk_ver = GetProperty("ro.product.vndk.version", "");
-  if (product_vndk_ver != "" && product_vndk_ver != vendor_vndk_ver) {
-    ret.push_back("com.android.vndk.v" + product_vndk_ver);
-  }
-  return ret;
-})();
+      auto vendor_vndk_ver = GetProperty("ro.vndk.version", "");
+      if (vendor_vndk_ver != "") {
+        ret.push_back("com.android.vndk.v" + vendor_vndk_ver);
+      }
+      auto product_vndk_ver = GetProperty("ro.product.vndk.version", "");
+      if (product_vndk_ver != "" && product_vndk_ver != vendor_vndk_ver) {
+        ret.push_back("com.android.vndk.v" + product_vndk_ver);
+      }
+      return ret;
+    })();
 
 static constexpr const int kNumRetriesWhenCheckpointingEnabled = 1;
 
 bool IsBootstrapApex(const ApexFile& apex) {
-  static std::vector<std::string> additional = []() {
+  [[clang::no_destroy]] static std::vector<std::string> additional = []() {
     std::vector<std::string> ret;
     if (android::base::GetBoolProperty("ro.boot.apex.early_adbd", false)) {
       ret.push_back("com.android.adbd");
@@ -799,8 +800,9 @@ Result<void> VerifyVndkVersion(const ApexFile& apex_file) {
     return {};
   }
 
-  static std::string vendor_vndk_version = GetProperty("ro.vndk.version", "");
-  static std::string product_vndk_version =
+  [[clang::no_destroy]] static std::string vendor_vndk_version =
+      GetProperty("ro.vndk.version", "");
+  [[clang::no_destroy]] static std::string product_vndk_version =
       GetProperty("ro.product.vndk.version", "");
 
   const auto& instance = ApexFileRepository::GetInstance();
