@@ -5460,12 +5460,20 @@ class ApexdErofsMountTest : public ::testing::Test {
                 orig_runtime_prop_);
   }
 
+  bool IsVerityModeEnforcing() const {
+    return GetProperty("ro.boot.veritymode", "") == "enforcing";
+  }
+
   std::string orig_build_prop_;
   std::string orig_runtime_prop_;
 };
 
 // Verify apexd.config.erofs_file_backed_mount has the highest priority
 TEST_F(ApexdErofsMountTest, ConfigPropertyOverridesEverything) {
+  if (!IsVerityModeEnforcing()) {
+    GTEST_SKIP() << "Verity is not enforcing, cannot test enabled state";
+  }
+
   // Force enable
   SetProperty("apexd.config.erofs_file_backed_mount", "true");
   EXPECT_TRUE(GetFileBackedMountEnabled());
@@ -5478,6 +5486,10 @@ TEST_F(ApexdErofsMountTest, ConfigPropertyOverridesEverything) {
 // Verify the runtime property (cached value) is used when the build config is
 // unset
 TEST_F(ApexdErofsMountTest, RuntimePropertyUsedIfBuildConfigUnset) {
+  if (!IsVerityModeEnforcing()) {
+    GTEST_SKIP() << "Verity is not enforcing, cannot test enabled state";
+  }
+
   // Ensure the build-time config is cleared (as expected from SetUp).
   ASSERT_EQ(GetProperty("apexd.config.erofs_file_backed_mount", ""), "");
 
@@ -5491,6 +5503,10 @@ TEST_F(ApexdErofsMountTest, RuntimePropertyUsedIfBuildConfigUnset) {
 // Actual Mount Flow Test
 // Note: This test relies on the existence of /system/etc/apexd/empty_erofs.img.
 TEST_F(ApexdErofsMountTest, PerformActualMountTest) {
+  if (!IsVerityModeEnforcing()) {
+    GTEST_SKIP() << "Verity is not enforcing, cannot test enabled state";
+  }
+
   // Check if the test image exists
   if (access("/system/etc/apexd/empty_erofs.img", F_OK) != 0) {
     GTEST_SKIP() << "Test image /system/etc/apexd/empty_erofs.img not found. "
