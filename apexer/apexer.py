@@ -203,6 +203,13 @@ def ParseArgs(argv):
           'Add testOnly=true attribute to application element in '
           'AndroidManifest file.')
   )
+  parser.add_argument(
+      '--non_production',
+      action='store_true',
+      help=(
+          'Mark the apex as non-production. Google Play Store will prevent it from being '
+          'distributed to production channels.')
+  )
 
   return parser.parse_args(argv)
 
@@ -411,6 +418,11 @@ def ValidateArgs(args):
       if build_info.logging_parent:
         args.logging_parent = build_info.logging_parent
 
+  if not args.non_production:
+    if build_info is not None:
+      if build_info.non_production:
+        args.non_production = True
+
   if not args.payload_fs_type:
     if build_info and build_info.payload_fs_type:
       args.payload_fs_type = build_info.payload_fs_type
@@ -464,6 +476,9 @@ def GenerateBuildInfo(args):
   if args.logging_parent:
     build_info.logging_parent = args.logging_parent
 
+  if args.non_production:
+    build_info.non_production = True
+
   if args.payload_type == 'image':
     build_info.payload_fs_type = args.payload_fs_type
 
@@ -481,13 +496,13 @@ def GenerateBuildInfo(args):
   return build_info
 
 
-def AddLoggingParent(android_manifest, logging_parent_value):
-  """Add logging parent as an additional <meta-data> tag.
+def _AddMetadataTag(android_manifest, key, value):
+  """Add a <meta-data> tag to the application element.
 
   Args:
     android_manifest: A string representing AndroidManifest.xml
-    logging_parent_value: A string representing the logging
-      parent value.
+    key: A string for the name attribute of the meta-data tag.
+    value: A string for the value attribute of the meta-data tag.
   Raises:
     RuntimeError: Invalid manifest
   Returns:
@@ -495,7 +510,6 @@ def AddLoggingParent(android_manifest, logging_parent_value):
   """
   doc = minidom.parse(android_manifest)
   manifest = parse_manifest(doc)
-  logging_parent_key = 'android.content.pm.LOGGING_PARENT'
   elems = get_children_with_tag(manifest, 'application')
   application = elems[0] if len(elems) == 1 else None
   if len(elems) > 1:
@@ -513,10 +527,10 @@ def AddLoggingParent(android_manifest, logging_parent_value):
     last = None
 
   if not find_child_with_attribute(application, 'meta-data', android_ns,
-                                   'name', logging_parent_key):
+                                   'name', key):
     ul = doc.createElement('meta-data')
-    ul.setAttributeNS(android_ns, 'android:name', logging_parent_key)
-    ul.setAttributeNS(android_ns, 'android:value', logging_parent_value)
+    ul.setAttributeNS(android_ns, 'android:name', key)
+    ul.setAttributeNS(android_ns, 'android:value', value)
     application.insertBefore(doc.createTextNode(indent), last)
     application.insertBefore(ul, last)
     last = application.lastChild
@@ -528,6 +542,38 @@ def AddLoggingParent(android_manifest, logging_parent_value):
   with tempfile.NamedTemporaryFile(delete=False, mode='w') as temp:
     write_xml(temp, doc)
     return temp.name
+
+
+def AddLoggingParent(android_manifest, logging_parent_value):
+  """Add logging parent as an additional <meta-data> tag.
+
+  Args:
+    android_manifest: A string representing AndroidManifest.xml
+    logging_parent_value: A string representing the logging
+      parent value.
+  Raises:
+    RuntimeError: Invalid manifest
+  Returns:
+    A path to modified AndroidManifest.xml
+  """
+  logging_parent_key = 'android.content.pm.LOGGING_PARENT'
+  return _AddMetadataTag(android_manifest, logging_parent_key,
+                         logging_parent_value)
+
+
+def AddNonProduction(android_manifest):
+  """Add NONPRODUCTION tag as an additional <meta-data> tag.
+
+  Args:
+    android_manifest: A string representing AndroidManifest.xml
+  Raises:
+    RuntimeError: Invalid manifest
+  Returns:
+    A path to modified AndroidManifest.xml
+  """
+  key = 'com.google.android.play.largest_release_audience.NONPRODUCTION'
+  value = ''
+  return _AddMetadataTag(android_manifest, key, value)
 
 
 def ShaHashFiles(file_paths):
@@ -821,6 +867,8 @@ def CreateAndroidManifestXml(args, work_dir, manifest_apex):
   if args.logging_parent:
     android_manifest_file = AddLoggingParent(android_manifest_file,
                                              args.logging_parent)
+  if args.non_production:
+    android_manifest_file = AddNonProduction(android_manifest_file)
   return android_manifest_file
 
 
