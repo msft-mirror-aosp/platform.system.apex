@@ -54,6 +54,13 @@ static constexpr const char* kTestMountImage =
     "/system/etc/apexd/empty_erofs.img";
 
 bool GetFileBackedMountEnabled() {
+  auto verity_mode = android::base::GetProperty("ro.boot.veritymode", "");
+  if (verity_mode != "enforcing") {
+    LOG(INFO) << "File-backed mount is disabled: ro.boot.veritymode="
+              << verity_mode;
+    return false;
+  }
+
   auto enabled = android::base::GetProperty(kFileBackedMountProp, "");
   if (enabled != "") {
     bool result = android::base::ParseBool(enabled) ==
