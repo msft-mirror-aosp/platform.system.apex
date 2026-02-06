@@ -163,3 +163,61 @@ sh_binary {
     name: "apexd-lsof.sh",
     src: "apexd-lsof.sh",
 }
+
+genrule {
+    name: "static_apexer_tools",
+    tools: [
+        ":soong_zip",
+        "signapk",
+        ":aapt2",
+        ":apexer",
+        ":avbtool",
+        ":deapexer",
+        ":debugfs_static",
+        ":blkid_static",
+        ":e2fsdroid",
+        ":fsck.erofs",
+        ":mkfs.erofs",
+        ":merge_zips",
+        ":mke2fs",
+        ":resize2fs",
+        ":sefcontext_compile",
+        ":zipalign",
+    ],
+    out: [
+        "signapk.jar",
+        "libconscrypt_openjdk_jni.so",
+        "aapt2",
+        "apexer",
+        "avbtool",
+        "deapexer",
+        "debugfs_static",
+        "blkid_static",
+        "e2fsdroid",
+        "fsck.erofs",
+        "mkfs.erofs",
+        "merge_zips",
+        "mke2fs",
+        "resize2fs",
+        "sefcontext_compile",
+        "soong_zip",
+        "zipalign",
+    ],
+    cmd: select(soong_config_variable("ANDROID", "BUILD_HOST_static"), {
+        true: "HOST_OUT_BIN=$$(dirname $(location :soong_zip)) && " +
+            "HOST_SOONG_OUT=$$(dirname $$(dirname $$HOST_OUT_BIN)) && " +
+            "SIGNAPK_JAR=$$(find $$HOST_SOONG_OUT -name \"signapk*\") && " +
+            "LIBCONSCRYPT_OPENJDK_JNI=$$(find $$HOST_SOONG_OUT -name \"libconscrypt_openjdk_jni.*\") && " +
+            "cp $${SIGNAPK_JAR} $(genDir) && " +
+            "cp $${LIBCONSCRYPT_OPENJDK_JNI} $(genDir) && " +
+            "cp $${HOST_OUT_BIN}/* $(genDir)",
+        default: "echo \"You must export BUILD_HOST_static to build static_apexer_tools.\" >&2 && exit 1",
+    }),
+    dist: {
+        dir: "static_apexer_tools",
+        targets: ["static_apexer_tools"],
+    },
+    // The error message if BUILD_HOST_static is not set will cause checkbuilds to fail,
+    // so skip this module on checkbuild.
+    unchecked_module: true,
+}
