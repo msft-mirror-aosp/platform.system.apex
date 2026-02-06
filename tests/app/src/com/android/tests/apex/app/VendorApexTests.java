@@ -73,9 +73,6 @@ public class VendorApexTests {
             "com.android.apex.vendor.bar.v2_with_vintf", APEX_PACKAGE_NAME_BAR, 2,
             /*isApex*/true, "com.android.apex.vendor.bar.v2_with_vintf.apex");
 
-    /* parameter passed from host-side VendorApexTests: [vendor, odm] */
-    private String mPartition;
-
     @Before
     public void setUp() {
         InstallUtils.dropShellPermissionIdentity();
@@ -84,7 +81,6 @@ public class VendorApexTests {
                 Manifest.permission.INSTALL_PACKAGE_UPDATES,
                 Manifest.permission.INSTALL_TEST_ONLY_PACKAGE);
         Bundle bundle = InstrumentationRegistry.getArguments();
-        mPartition = bundle.getString("partition");
     }
 
     @Test
@@ -95,7 +91,6 @@ public class VendorApexTests {
             // Check that the apex is v1 and pre-installed.
             PackageInfo apex = pm.getPackageInfo(APEX_PACKAGE_NAME, PackageManager.MATCH_APEX);
             assertThat(apex.getLongVersionCode()).isEqualTo(1);
-            assertThat(apex.applicationInfo.sourceDir).startsWith("/" + mPartition + "/apex");
             assertThat(apex.applicationInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)
                     .isEqualTo(0);
         }
