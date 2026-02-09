@@ -183,10 +183,13 @@ genrule {
         ":resize2fs",
         ":sefcontext_compile",
         ":zipalign",
+        ":fec",
     ],
     out: [
         "signapk.jar",
         "libconscrypt_openjdk_jni.so",
+        "libfec_rs.so",
+        "fec",
         "aapt2",
         "apexer",
         "avbtool",
@@ -208,8 +211,10 @@ genrule {
             "HOST_SOONG_OUT=$$(dirname $$(dirname $$HOST_OUT_BIN)) && " +
             "SIGNAPK_JAR=$$(find $$HOST_SOONG_OUT -name \"signapk*\") && " +
             "LIBCONSCRYPT_OPENJDK_JNI=$$(find $$HOST_SOONG_OUT -name \"libconscrypt_openjdk_jni.*\") && " +
+            "LIBFEC_RS=$$(find $$HOST_SOONG_OUT -name \"libfec_rs.*\") && " +
             "cp $${SIGNAPK_JAR} $(genDir) && " +
             "cp $${LIBCONSCRYPT_OPENJDK_JNI} $(genDir) && " +
+            "cp $${LIBFEC_RS} $(genDir) && " +
             "cp $${HOST_OUT_BIN}/* $(genDir)",
         default: "echo \"You must export BUILD_HOST_static to build static_apexer_tools.\" >&2 && exit 1",
     }),
