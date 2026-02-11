@@ -22,12 +22,17 @@ cc_defaults {
     name: "libapexutil-deps",
     shared_libs: [
         "libbase",
-    ],
+    ] + select(release_flag("RELEASE_DEPRECATE_RUNTIME_APEX"), {
+        true: ["liblog"],
+        default: [],
+    }),
     static_libs: [
-        "liblog_for_runtime_apex",
         "libprotobuf-cpp-lite",
         "lib_apex_manifest_proto_lite",
-    ],
+    ] + select(release_flag("RELEASE_DEPRECATE_RUNTIME_APEX"), {
+        true: [],
+        default: ["liblog_for_runtime_apex"],
+    }),
 }
 
 cc_library_static {

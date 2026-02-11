@@ -170,7 +170,9 @@ static constexpr size_t kLoopDeviceSetupAttempts = 3u;
     ([]() {
       std::vector<std::string> ret = {
           "com.android.i18n",
+#ifndef RELEASE_DEPRECATE_RUNTIME_APEX
           "com.android.runtime",
+#endif
           "com.android.tzdata",
 #ifdef RELEASE_AVF_ENABLE_EARLY_VM
           "com.android.virt",
