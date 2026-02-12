@@ -41,17 +41,18 @@ static constexpr const char* kApexPackageSystemExtDir = "/system_ext/apex";
 static constexpr const char* kApexPackageProductDir = "/product/apex";
 static constexpr const char* kApexPackageVendorDir = "/vendor/apex";
 static constexpr const char* kApexPackageOdmDir = "/odm/apex";
-static const std::unordered_map<ApexPartition, std::string>
-    kBuiltinApexPackageDirs = {
-        {ApexPartition::System, kApexPackageSystemDir},
-        {ApexPartition::SystemExt, kApexPackageSystemExtDir},
-        {ApexPartition::Product, kApexPackageProductDir},
-        {ApexPartition::Vendor, kApexPackageVendorDir},
-        {ApexPartition::Odm, kApexPackageOdmDir},
+[[clang::no_destroy]] static const std::unordered_map<
+    ApexPartition, std::string> kBuiltinApexPackageDirs = {
+    {ApexPartition::System, kApexPackageSystemDir},
+    {ApexPartition::SystemExt, kApexPackageSystemExtDir},
+    {ApexPartition::Product, kApexPackageProductDir},
+    {ApexPartition::Vendor, kApexPackageVendorDir},
+    {ApexPartition::Odm, kApexPackageOdmDir},
 };
-static const std::vector<std::string> kApexPackageBuiltinDirs = {
-    kApexPackageSystemDir, kApexPackageSystemExtDir, kApexPackageProductDir,
-    kApexPackageVendorDir, kApexPackageOdmDir};
+[[clang::no_destroy]] static const std::vector<std::string>
+    kApexPackageBuiltinDirs = {kApexPackageSystemDir, kApexPackageSystemExtDir,
+                               kApexPackageProductDir, kApexPackageVendorDir,
+                               kApexPackageOdmDir};
 static constexpr const char* kApexRoot = "/apex";
 static constexpr const char* kStagedSessionsDir = "/data/app-staging";
 
@@ -88,10 +89,11 @@ static constexpr const char* kApexdChangedActiveApexesSysprop =
 static constexpr const char* kApexSelectPersistPrefix = "persist.vendor.apex.";
 static constexpr const char* kApexSelectBootconfigPrefix =
     "ro.boot.vendor.apex.";
-static const std::vector<std::string> kApexSelectPrefix = {
-    // Check persist props first, to allow users to override bootconfig.
-    kApexSelectPersistPrefix,
-    kApexSelectBootconfigPrefix,
+[[clang::no_destroy]] static const std::vector<std::string> kApexSelectPrefix =
+    {
+        // Check persist props first, to allow users to override bootconfig.
+        kApexSelectPersistPrefix,
+        kApexSelectBootconfigPrefix,
 };
 
 static constexpr const char* kVmPayloadMetadataPartitionProp =
@@ -115,13 +117,13 @@ static constexpr const char* kBrandNewApexConfigVendorDir =
     "/vendor/etc/brand_new_apex";
 static constexpr const char* kBrandNewApexConfigOdmDir =
     "/odm/etc/brand_new_apex";
-static const std::unordered_map<ApexPartition, std::string>
-    kBrandNewApexConfigDirs = {
-        {ApexPartition::System, kBrandNewApexConfigSystemDir},
-        {ApexPartition::SystemExt, kBrandNewApexConfigSystemExtDir},
-        {ApexPartition::Product, kBrandNewApexConfigProductDir},
-        {ApexPartition::Vendor, kBrandNewApexConfigVendorDir},
-        {ApexPartition::Odm, kBrandNewApexConfigOdmDir},
+[[clang::no_destroy]] static const std::unordered_map<
+    ApexPartition, std::string> kBrandNewApexConfigDirs = {
+    {ApexPartition::System, kBrandNewApexConfigSystemDir},
+    {ApexPartition::SystemExt, kBrandNewApexConfigSystemExtDir},
+    {ApexPartition::Product, kBrandNewApexConfigProductDir},
+    {ApexPartition::Vendor, kBrandNewApexConfigVendorDir},
+    {ApexPartition::Odm, kBrandNewApexConfigOdmDir},
 };
 
 static constexpr const char* kCheckpointFile = "/metadata/vold/checkpoint";

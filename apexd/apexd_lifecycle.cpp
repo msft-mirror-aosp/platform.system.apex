@@ -37,7 +37,7 @@ namespace android {
 namespace apex {
 
 ApexdLifecycle& ApexdLifecycle::GetInstance() {
-  static ApexdLifecycle instance;
+  [[clang::no_destroy]] static ApexdLifecycle instance;
   return instance;
 }
 
