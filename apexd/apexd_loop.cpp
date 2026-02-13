@@ -89,7 +89,7 @@ void LoopbackDeviceUniqueFd::MaybeCloseBad() {
 Result<void> ConfigureScheduler(const std::string& device_path) {
   // If the system default is okay, then let's skip configuration for other loop
   // devices.
-  static std::atomic<bool> skip_config{false};
+  [[clang::no_destroy]] static std::atomic<bool> skip_config{false};
   if constexpr (flags::mount_before_data()) {
     if (skip_config.load(std::memory_order_relaxed)) {
       return {};
@@ -186,8 +186,8 @@ static Result<std::string> BlockdevName(dev_t dev) {
 // -> /dev/block/dm-1 (system_b; dm-linear)
 // -> /dev/sda26
 static Result<uint32_t> BlockDeviceQueueDepth(const std::string& file_path) {
-  static std::unordered_map<std::string, uint32_t> cache;
-  static std::mutex cache_mutex;
+  [[clang::no_destroy]] static std::unordered_map<std::string, uint32_t> cache;
+  [[clang::no_destroy]] static std::mutex cache_mutex;
 
   struct stat statbuf;
   int res = stat(file_path.c_str(), &statbuf);
@@ -413,7 +413,7 @@ static Result<LoopbackDeviceUniqueFd> ConfigureLoopDevice(
     EmptyLoopDevice&& inner, borrowed_fd target_fd, bool use_buffered_io,
     const uint32_t image_offset, const size_t image_size) {
   static bool use_loop_configure;
-  static std::once_flag once_flag;
+  [[clang::no_destroy]] static std::once_flag once_flag;
   auto device_fd = inner.fd.get();
   std::call_once(once_flag, [&]() {
     // LOOP_CONFIGURE is a new ioctl in Linux 5.8 (and backported in Android
@@ -571,7 +571,7 @@ static Result<LoopbackDeviceUniqueFd> CreateLoopDevice(borrowed_fd target_fd,
     // processes will fail when it tries to configure it because it's already
     // being in use by the other process. This is handled in
     // CreateAndConfigureLoopDevice() by retrying for 1s.
-    static std::mutex mtx;
+    [[clang::no_destroy]] static std::mutex mtx;
     std::lock_guard lock(mtx);
     int num = ioctl(ctl_fd.get(), LOOP_CTL_GET_FREE);
     if (num == -1) {

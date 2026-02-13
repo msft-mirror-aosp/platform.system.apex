@@ -70,7 +70,7 @@ struct ApexdConfig {
   const char* metadata_config_dir;
 };
 
-static const ApexdConfig kDefaultConfig = {
+[[clang::no_destroy]] static const ApexdConfig kDefaultConfig = {
     kApexStatusSysprop,
     kApexdChangedActiveApexesSysprop,
     kBuiltinApexPackageDirs,

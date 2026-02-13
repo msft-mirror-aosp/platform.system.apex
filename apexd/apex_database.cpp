@@ -62,8 +62,8 @@ enum BlockDeviceType {
   DeviceMapperDevice,
 };
 
-const fs::path kDevBlock = "/dev/block";
-const fs::path kSysBlock = "/sys/block";
+[[clang::no_destroy]] const fs::path kDevBlock = "/dev/block";
+[[clang::no_destroy]] const fs::path kSysBlock = "/sys/block";
 
 class BlockDevice {
   std::string name;  // loopN, dm-N, ...
