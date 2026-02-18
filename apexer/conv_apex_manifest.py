@@ -64,7 +64,7 @@ def SetProp(args):
     pb = apex_manifest_pb2.ApexManifest()
     pb.ParseFromString(f.read())
 
-  if getattr(type(pb), args.property).DESCRIPTOR.label == FieldDescriptor.LABEL_REPEATED:
+  if getattr(type(pb), args.property).DESCRIPTOR.is_repeated:
     getattr(pb, args.property)[:] = args.value.split(",")
   else:
     setattr(pb, args.property, type(getattr(pb, args.property))(args.value))
