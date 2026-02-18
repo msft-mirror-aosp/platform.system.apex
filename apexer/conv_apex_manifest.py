@@ -30,16 +30,14 @@ import collections
 import json
 
 import apex_manifest_pb2
-from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.json_format import ParseDict
-from google.protobuf.json_format import ParseError
 from google.protobuf.text_format import MessageToString
 
 Q_compat_keys = ["name", "version", "preInstallHook", "postInstallHook", "versionName"]
 
 def Strip(args):
-  with open(args.input) as f:
-      obj = json.load(f, object_pairs_hook=collections.OrderedDict)
+  with open(args.input, encoding="utf-8") as f:
+    obj = json.load(f, object_pairs_hook=collections.OrderedDict)
 
   # remove unknown keys
   for key in list(obj):
@@ -47,13 +45,13 @@ def Strip(args):
       del obj[key]
 
   if args.out:
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
       json.dump(obj, f, indent=2)
   else:
     print(json.dumps(obj, indent=2))
 
 def Proto(args):
-  with open(args.input) as f:
+  with open(args.input, encoding="utf-8") as f:
     obj = json.load(f, object_pairs_hook=collections.OrderedDict)
   pb = ParseDict(obj, apex_manifest_pb2.ApexManifest())
   with open(args.out, "wb") as f:
@@ -81,28 +79,30 @@ def main():
   parser = argparse.ArgumentParser()
   subparsers = parser.add_subparsers(required=True)
 
-  parser_strip = subparsers.add_parser('strip', help='remove unknown keys from APEX manifest (JSON)')
-  parser_strip.add_argument('input', type=str, help='APEX manifest file (JSON)')
-  parser_strip.add_argument('-o', '--out', type=str, help='Output filename. If omitted, prints to stdout')
+  parser_strip = subparsers.add_parser("strip",
+                                       help="remove unknown keys from APEX manifest (JSON)")
+  parser_strip.add_argument("input", type=str, help="APEX manifest file (JSON)")
+  parser_strip.add_argument("-o", "--out", type=str,
+                            help="Output filename. If omitted, prints to stdout")
   parser_strip.set_defaults(func=Strip)
 
-  parser_proto = subparsers.add_parser('proto', help='write protobuf binary format')
-  parser_proto.add_argument('input', type=str, help='APEX manifest file (JSON)')
-  parser_proto.add_argument('-o', '--out', required=True, type=str, help='APEX manifest file (PB)')
+  parser_proto = subparsers.add_parser("proto", help="write protobuf binary format")
+  parser_proto.add_argument("input", type=str, help="APEX manifest file (JSON)")
+  parser_proto.add_argument("-o", "--out", required=True, type=str, help="APEX manifest file (PB)")
   parser_proto.set_defaults(func=Proto)
 
-  parser_setprop = subparsers.add_parser('setprop', help='change property value')
-  parser_setprop.add_argument('property', type=str, help='name of property')
-  parser_setprop.add_argument('value', type=str, help='new value of property')
-  parser_setprop.add_argument('input', type=str, help='APEX manifest file (PB)')
+  parser_setprop = subparsers.add_parser("setprop", help="change property value")
+  parser_setprop.add_argument("property", type=str, help="name of property")
+  parser_setprop.add_argument("value", type=str, help="new value of property")
+  parser_setprop.add_argument("input", type=str, help="APEX manifest file (PB)")
   parser_setprop.set_defaults(func=SetProp)
 
-  parser_print = subparsers.add_parser('print', help='print APEX manifest')
-  parser_print.add_argument('input', type=str, help='APEX manifest file (PB)')
+  parser_print = subparsers.add_parser("print", help="print APEX manifest")
+  parser_print.add_argument("input", type=str, help="APEX manifest file (PB)")
   parser_print.set_defaults(func=Print)
 
   args = parser.parse_args()
   args.func(args)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
   main()
