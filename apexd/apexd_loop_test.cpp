@@ -30,6 +30,8 @@
 
 #include <chrono>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "apex_file.h"
 #include "apexd_test_utils.h"
@@ -183,5 +185,38 @@ TEST(Loop, NoSuchFile) {
     ASSERT_THAT(loop, Not(Ok()));
   }
   ASSERT_EQ(GetCapturedStderr(), "");
+}
+
+TEST(Loop, CreateAndConfigureLoopDevice_MultiThreaded) {
+  auto apex = ApexFile::Open(GetTestFile("apex.apexd_test.apex"));
+  ASSERT_THAT(apex, Ok());
+
+  constexpr int kNumThreads = 5;
+  std::vector<std::thread> threads;
+  std::vector<android::base::Result<loop::LoopbackDeviceUniqueFd>> results(
+      kNumThreads);
+
+  // This test exercises the thread-safety of creating loop devices, which
+  // relies on a static mutex. It also indirectly tests other functions with
+  // static variables (for caching, one-time initialization) under concurrent
+  // access. This is relevant to the change that added [[clang::no_destroy]] to
+  // these static variables, ensuring their functionality is not broken.
+  for (int i = 0; i < kNumThreads; ++i) {
+    threads.emplace_back([&, i]() {
+      results[i] = loop::CreateAndConfigureLoopDevice(
+          apex->GetPath(), apex->GetImageOffset().value(),
+          apex->GetImageSize().value());
+    });
+  }
+
+  for (auto& t : threads) {
+    t.join();
+  }
+
+  for (int i = 0; i < kNumThreads; ++i) {
+    ASSERT_THAT(results[i], Ok()) << "Thread " << i << " failed";
+    // The LoopbackDeviceUniqueFd in results[i] will be destructed at the end
+    // of the test, automatically cleaning up the loop device.
+  }
 }
 }  // namespace android::apex
