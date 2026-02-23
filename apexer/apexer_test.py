@@ -37,6 +37,9 @@ TEST_APEX = "com.android.example.apex"
 TEST_APEX_LEGACY = "com.android.example-legacy.apex"
 TEST_APEX_WITH_LOGGING_PARENT = "com.android.example-logging_parent.apex"
 TEST_APEX_WITH_OVERRIDDEN_PACKAGE_NAME = "com.android.example-overridden_package_name.apex"
+TEST_APEX_NON_PRODUCTION = "com.android.example-nonproduction.apex"
+TEST_APEX_NON_PRODUCTION_LOGGING_PARENT = "com.android.example-nonproduction_logging_parent.apex"
+TEST_APEX_NON_PRODUCTION_VIA_OVERRIDE = "com.android.example-nonproduction_via_override.apex"
 
 TEST_PRIVATE_KEY = os.path.join("testdata", "com.android.example.apex.pem")
 TEST_X509_KEY = os.path.join("testdata", "com.android.example.apex.x509.pem")
@@ -79,6 +82,10 @@ def run_host_command(args, verbose=None, **kwargs):
         host_command_dir = os.path.join(host_build_top, "out/host/linux-x86/bin")
         args[0] = os.path.join(host_command_dir, args[0])
     return run_and_check_output(args, verbose, **kwargs)
+
+
+def run_aapt2_dump_xmltree(filename):
+    return run_host_command(["aapt2", "dump", "xmltree", filename, "--file", "AndroidManifest.xml"])
 
 
 def run_and_check_output(args, verbose=None, **kwargs):
@@ -463,6 +470,34 @@ class ApexerRebuildTest(unittest.TestCase):
 
         self.assertEqual(manifest_apex.version, next_version)
 
+    def test_apex_with_non_production_prebuilt(self):
+        self._run_build_test(TEST_APEX_NON_PRODUCTION)
+
+    def test_apex_with_non_production(self):
+        # Now check the manifest for the non-production meta-data.
+        output = run_aapt2_dump_xmltree(TEST_APEX_NON_PRODUCTION + ".apex")
+        self.assertIn("com.google.android.play.largest_release_audience.NONPRODUCTION", output)
+        self.assertNotIn("android.content.pm.LOGGING_PARENT", output)
+
+    def test_apex_with_non_production_and_logging_parent_prebuilt(self):
+        self._run_build_test(TEST_APEX_NON_PRODUCTION_LOGGING_PARENT)
+
+    def test_apex_with_non_production_and_logging_parent(self):
+        output = run_aapt2_dump_xmltree(TEST_APEX_NON_PRODUCTION_LOGGING_PARENT + ".apex")
+        self.assertIn("com.google.android.play.largest_release_audience.NONPRODUCTION", output)
+        self.assertIn("android.content.pm.LOGGING_PARENT", output)
+
+    def test_apex_with_non_production_via_override_prebuilt(self):
+        self._run_build_test(TEST_APEX_NON_PRODUCTION_VIA_OVERRIDE)
+
+    def test_apex_with_non_production_via_override(self):
+        output = run_aapt2_dump_xmltree(TEST_APEX_NON_PRODUCTION_VIA_OVERRIDE + ".apex")
+        self.assertIn("com.google.android.play.largest_release_audience.NONPRODUCTION", output)
+
+    def test_apex_without_non_production(self):
+        output = run_aapt2_dump_xmltree(TEST_APEX + ".apex")
+        self.assertNotIn("com.google.android.play.largest_release_audience.NONPRODUCTION", output)
+        self.assertNotIn("android.content.pm.LOGGING_PARENT", output)
 
 
 if __name__ == '__main__':
