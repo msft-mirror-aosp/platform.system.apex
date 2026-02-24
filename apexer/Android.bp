@@ -105,6 +105,9 @@ python_test_host {
         ":com.android.example-legacy.apex",
         ":com.android.example-logging_parent.apex",
         ":com.android.example-overridden_package_name.apex",
+        ":com.android.example-nonproduction.apex",
+        ":com.android.example-nonproduction_logging_parent.apex",
+        ":com.android.example-nonproduction_via_override.apex",
     ],
     test_suites: ["general-tests"],
     libs: [

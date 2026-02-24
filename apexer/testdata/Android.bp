@@ -74,3 +74,34 @@ apex {
     package_name: "com.android.overridden.example.apex",
     updatable: false,
 }
+
+apex {
+    name: "com.android.example-nonproduction.apex",
+    manifest: "manifest.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.example.apex.key",
+    certificate: ":com.android.example.apex.certificate",
+    installable: false,
+    updatable: false,
+    non_production: true,
+}
+
+apex {
+    name: "com.android.example-nonproduction_logging_parent.apex",
+    manifest: "manifest.json",
+    file_contexts: ":apex.test-file_contexts",
+    prebuilts: ["sample_prebuilt_file"],
+    key: "com.android.example.apex.key",
+    certificate: ":com.android.example.apex.certificate",
+    installable: false,
+    updatable: false,
+    non_production: true,
+    logging_parent: "foobar",
+}
+
+override_apex {
+    name: "com.android.example-nonproduction_via_override.apex",
+    base: "com.android.example.apex",
+    non_production: true,
+}

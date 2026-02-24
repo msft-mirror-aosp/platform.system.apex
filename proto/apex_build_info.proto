@@ -60,4 +60,7 @@ message ApexBuildInfo {
 
   // Value of --erofs_pcluster_size passed at build time.
   string erofs_pcluster_size = 13;
+
+  // Value of --non_production passed at build time.
+  bool non_production = 14;
 }
