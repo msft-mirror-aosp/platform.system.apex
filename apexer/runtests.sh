@@ -23,8 +23,7 @@ fi
 echo "Running test"
 set -e # fail early
 
-source ${ANDROID_BUILD_TOP}/build/envsetup.sh
-m -j apexer
+m -j apexer signapk
 export APEXER_TOOL_PATH="${ANDROID_BUILD_TOP}/out/host/linux-x86/bin:${ANDROID_BUILD_TOP}/prebuilts/sdk/tools/linux/bin"
 PATH+=":${ANDROID_BUILD_TOP}/prebuilts/sdk/tools/linux/bin"
 
@@ -79,7 +78,7 @@ echo '/ 1000 1000 0644
 output_file=${output_dir}/test.apex
 
 #############################################
-# run the tool
+# run the tool(apexer), followed by signapk
 #############################################
 ${ANDROID_HOST_OUT}/bin/apexer --verbose --manifest ${manifest_file} \
   --file_contexts ${file_contexts_file} \
@@ -87,7 +86,15 @@ ${ANDROID_HOST_OUT}/bin/apexer --verbose --manifest ${manifest_file} \
   --payload_fs_type ${fs_type} \
   --key ${ANDROID_BUILD_TOP}/system/apex/apexer/testdata/com.android.example.apex.pem \
   --android_jar_path ${ANDROID_BUILD_TOP}/prebuilts/sdk/current/public/android.jar \
-  ${input_dir} ${output_file}
+  ${input_dir} ${output_file}.unsigned
+
+${ANDROID_HOST_OUT}/bin/signapk \
+  -J-Djava.library.path=${ANDROID_HOST_OUT}/lib64 \
+  --disable-v1 -a 4096 --align-file-size \
+  ${ANDROID_BUILD_TOP}/build/make/target/product/security/testkey.x509.pem \
+  ${ANDROID_BUILD_TOP}/build/make/target/product/security/testkey.pk8 \
+  ${output_file}.unsigned \
+  ${output_file}
 
 #############################################
 # check the result
