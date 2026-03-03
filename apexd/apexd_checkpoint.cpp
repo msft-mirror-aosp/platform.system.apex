@@ -62,7 +62,15 @@ bool InCheckpointMode() {
   CHECK(GetConfig().mount_before_data);
   auto checkpoint_file = GetConfig().checkpoint_file;
   std::string content;
-  return base::ReadFileToString(checkpoint_file, &content) && content != "0";
+  if (!base::ReadFileToString(checkpoint_file, &content)) {
+    PLOG(ERROR) << "Checkpoint file: can't read file";
+    return false;
+  }
+  if (content == "0") {
+    LOG(ERROR) << "Checkpoint file: retry_count is 0";
+    return false;
+  }
+  return true;
 }
 
 }  // namespace android::apex
