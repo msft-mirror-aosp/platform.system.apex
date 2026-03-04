@@ -1017,7 +1017,11 @@ class TempDirectory(object):
 
 def CreateZip(content_dir, apex_zip):
   with zipfile.ZipFile(apex_zip, 'w', compression=zipfile.ZIP_DEFLATED) as out:
-    for root, _, files in os.walk(content_dir):
+    for root, dirs, files in os.walk(content_dir):
+      # sort dirs/files for stable order
+      dirs.sort()
+      files.sort()
+
       for file in files:
         path = os.path.join(root, file)
         rel_path = os.path.relpath(path, content_dir)
@@ -1040,10 +1044,6 @@ def MergeZips(zip_files, output_zip):
           # filemode. 0x81A4 corresponds to 0o100644(a regular file with
           # '-rw-r--r--' permission).
           info.external_attr = 0x81A40000
-          # "apex_payload.img" should be 4K aligned
-          if info.filename == 'apex_payload.img':
-            data_offset = out.fp.tell() + len(info.FileHeader())
-            info.extra = b'\0' * (BLOCK_SIZE - data_offset % BLOCK_SIZE)
           data = inzip.read(info)
           out.writestr(info, data)
 
