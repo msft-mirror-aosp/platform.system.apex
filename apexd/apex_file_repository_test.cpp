@@ -197,7 +197,7 @@ TEST(ApexFileRepositoryTest, InitializeSameNameDifferentPathAborts) {
         ApexFileRepository instance;
         instance.AddPreInstalledApex({{ApexPartition::System, td.path}});
       },
-      "");
+      "ro.boot.vendor.apex.com.android.apex.test_package");
 }
 
 TEST(ApexFileRepositoryTest, ApexSelectWithMultiApexSuccess) {

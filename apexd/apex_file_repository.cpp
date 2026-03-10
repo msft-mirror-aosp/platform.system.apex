@@ -130,8 +130,11 @@ void ApexFileRepository::StorePreInstalledApex(ApexFile&& apex_file,
     pre_installed_store_.emplace(apex_name, std::move(apex_file));
     partition_store_.emplace(apex_name, partition);
   } else if (it->second.GetPath() != apex_file.GetPath()) {
-    LOG(FATAL) << "Found two apex packages " << it->second.GetPath() << " and "
-               << apex_file.GetPath() << " with the same module name " << name;
+    LOG(FATAL) << "Found two APEX packages for module '" << name
+               << "': " << it->second.GetPath() << " and "
+               << apex_file.GetPath()
+               << ". To select one, specify the filename using the "
+               << "'ro.boot.vendor.apex." << name << "' property.";
   } else if (it->second.GetBundledPublicKey() !=
              apex_file.GetBundledPublicKey()) {
     LOG(FATAL) << "Public key of apex package " << it->second.GetPath() << " ("
