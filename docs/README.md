@@ -113,6 +113,68 @@ information about the installed APEX files. For example, the other system
 components can query the list of APEX files installed in the device or query the
 exact path where a specific APEX is mounted, so the files can be accessed.
 
+## Mount Namespaces
+
+To support APEX updates, Android uses separate mount
+namespaces to isolate processes started before and after `apexd` activates all
+APEXes.
+
+### The Two-Round Activation
+
+1. **Round 1 (Bootstrap):** `apexd-bootstrap` activates a minimal set of
+   essential APEXes in a separate **bootstrap mount namespace**.
+2. **Round 2 (Normal Boot):** `apexd` activates all APEXes (including those on
+   `/data`) in the **default mount namespace**.
+
+### Cross-namespace visibility via `/bootstrap-apex`
+
+In the bootstrap mount namespace, `init` bind-mounts `/apex` to
+`/bootstrap-apex`. Since `/bootstrap-apex` is a shared mount point,
+this makes the bootstrap APEXes visible in the default mount namespace as well.
+This is necessary for components like `servicemanager` which may need to access
+files from bootstrap APEXes.
+
+
+## Early Activation (mount_before_data)
+
+Starting from Android 17 (26Q2), APEXes can be activated earlier in the boot
+sequence, even before the `/data` partition is mounted. This feature is
+controlled by the `com.android.apex.flags.mount_before_data` flag.
+
+### Two Modes: Full vs Partial
+
+When the system is configured for **Full Mode**, `apexd-bootstrap` activates
+**all** APEXes (including updated APEXes in `/data` via pinned images) in a
+single round.
+
+* **Conditions for Full Mode:**
+  * System property `apexd.config.compressed_apex` must be `false`.
+  * No downloaded APEXes in `/data/apex/active`.
+  * The device is not running GSI/DSU.
+* **Behavior:**
+  * `init` starts with a single mount namespace
+    and sets `ro.init.mnt_ns.count` to `1`.
+  * The `/bootstrap-apex` mount point is **not** used.
+
+Otherwise, `apexd-bootstrap` and `apexd` work in **Partial Mode**. In Partial
+Mode, APEXes are activated in two rounds in separate mount namespaces.
+
+Even in Partial Mode, APEXes are installed as pinned images to improve
+IO performance unless `apexd.config.use_fiemap` is set to `false`.
+
+
+### Verification
+
+You can verify the current mode on your device by checking the following:
+
+1. **Mount Namespace Count:**
+    ```bash
+    adb shell getprop ro.init.mnt_ns.count
+    ```
+  * `1`: **Full Mode** (Single mount namespace)
+  * `2`: **Partial Mode** (Dual mount namespaces)
+
+
 ### APEX files are APK files
 
 APEX files are valid APK files because they are signed zip archives (using the
