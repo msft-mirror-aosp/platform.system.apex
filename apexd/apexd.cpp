@@ -1214,10 +1214,9 @@ Result<void> ActivatePackageImpl(const ApexFile& apex_file, int32_t loop_id,
       !ApexFileRepository::GetInstance().IsPreInstalledApex(apex_file)) {
     // This is not cheap for shim apex, but it is fine here since we have
     // upgraded shim apex only during CTS tests.
-    Result<void> result = VerifyPackageBoot(apex_file);
-    if (!result.ok()) {
-      LOG(ERROR) << "Failed to validate shim apex: " << apex_file.GetPath();
-      return result;
+    if (auto st = VerifyPackageBoot(apex_file); !st.ok()) {
+      return Error() << "Failed to validate shim apex: " << apex_file.GetPath()
+                     << ": " << st.error();
     }
   }
 
@@ -3599,24 +3598,26 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
 
   auto temp_apex = ApexFile::Open(package_path);
   if (!temp_apex.ok()) {
-    return temp_apex.error();
+    return Error() << "Failed to open new apex: " << package_path << ": "
+                   << temp_apex.error();
   }
 
   event.AddFiles(Single(*temp_apex));
 
-  const std::string& module_name = temp_apex->GetManifest().name();
+  const std::string& apex_name = temp_apex->GetManifest().name();
+
   // Don't allow non-staged update if there are no active versions of this
   // APEX.
-  auto cur_mounted_data = gMountedApexes.GetLatestMountedApex(module_name);
+  auto cur_mounted_data = gMountedApexes.GetLatestMountedApex(apex_name);
   if (!cur_mounted_data.has_value()) {
-    return Error() << "No active version found for package " << module_name;
+    return Error() << "No active version found for package " << apex_name;
   }
 
   auto cur_apex = ApexFile::Open(cur_mounted_data->full_path);
   if (!cur_apex.ok()) {
-    return cur_apex.error();
+    return Error() << "Failed to open current apex: "
+                   << cur_mounted_data->full_path << ": " << cur_apex.error();
   }
-  auto current_package = cur_apex->GetManifest().name();
 
   // Do a quick check if this APEX can be installed without a reboot.
   // Note that passing this check doesn't guarantee that APEX will be
@@ -3643,12 +3644,12 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   // Before unmounting the current apex, unload it from the init process:
   // terminates services started from the apex and init scripts read from the
   // apex.
-  OR_RETURN(UnloadApexFromInit(module_name));
+  OR_RETURN(UnloadApexFromInit(apex_name));
 
   // And then reload it from the init process whether it succeeds or not.
   auto reload_apex = android::base::make_scope_guard([&]() {
-    if (auto status = LoadApexFromInit(module_name); !status.ok()) {
-      LOG(ERROR) << "Failed to load apex " << module_name << " : "
+    if (auto status = LoadApexFromInit(apex_name); !status.ok()) {
+      LOG(ERROR) << "Failed to load apex " << apex_name << " : "
                  << status.error().message();
     }
   });
@@ -3685,10 +3686,10 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     auto image_manager = GetImageManager();
     // Pin the new file first.
     auto image = OR_RETURN(image_manager->PinApexFiles(Single(*temp_apex)))[0];
-    LOG(ERROR) << "New APEX of " << current_package << " is copied from "
-               << temp_apex->GetPath() << " to the image " << image;
+    LOG(INFO) << "Copied new apex " << apex_name << " from "
+              << temp_apex->GetPath() << " to the image " << image;
     guards.emplace_back(base::make_scope_guard([=]() {
-      LOG(ERROR) << "Deleting the image " << image << " of " << current_package;
+      LOG(ERROR) << "Deleting the image " << image << " of apex " << apex_name;
       if (auto st = image_manager->DeleteImage(image); !st.ok()) {
         LOG(ERROR) << "Failed to delete the image: " << st.error();
       }
@@ -3697,11 +3698,13 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
     // Update "active" list with the new image.
     auto active_list =
         OR_RETURN(image_manager->GetApexList(ApexListType::ACTIVE));
-    OR_RETURN(image_manager->UpdateApexList(
-        ApexListType::ACTIVE,
-        UpdateApexListWithNewEntries(
-            active_list, std::vector{ApexListEntry{image, module_name}})));
+    auto new_active_list = UpdateApexListWithNewEntries(
+        active_list, std::vector{ApexListEntry{image, apex_name}});
+    OR_RETURN(
+        image_manager->UpdateApexList(ApexListType::ACTIVE, new_active_list));
+    LOG(INFO) << "Updated ACTIVE apex list with the new image " << image;
     guards.emplace_back(base::make_scope_guard([=]() {
+      LOG(ERROR) << "Reverting ACTIVE apex list to the original";
       if (auto st =
               image_manager->UpdateApexList(ApexListType::ACTIVE, active_list);
           !st.ok()) {
@@ -3711,9 +3714,9 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
 
     // Map the image so that we can access the pinned APEX
     target_file = OR_RETURN(image_manager->MapImage(image));
-    LOG(INFO) << "The APEX image " << image << " is mapped as " << target_file;
+    LOG(INFO) << "Mapped the image " << image << " as " << target_file;
     guards.emplace_back(base::make_scope_guard([=]() {
-      LOG(ERROR) << "Unmapping " << image << "(" << target_file << ")";
+      LOG(ERROR) << "Unmapping the image " << image << " from " << target_file;
       if (auto st = image_manager->UnmapImage(image); !st.ok()) {
         LOG(ERROR) << "Failed to unmap " << image << ": " << st.error();
       }
@@ -3729,8 +3732,10 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
       return ErrnoError() << "Failed to link " << package_path << " to "
                           << target_file;
     }
+    LOG(INFO) << "Linked " << package_path << " to " << target_file;
     // Remove the target file on error
     guards.emplace_back(base::make_scope_guard([=]() {
+      LOG(ERROR) << "Unlinking " << target_file;
       if (unlink(target_file.c_str()) != 0 && errno != ENOENT) {
         PLOG(ERROR) << "Failed to unlink " << target_file;
       }
@@ -3740,17 +3745,17 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
   // Reopen ApexFile from the new location
   auto new_apex = ApexFile::Open(target_file);
   if (!new_apex.ok()) {
-    return new_apex.error();
+    return Error() << "Failed to open installed apex: " << target_file << ": "
+                   << new_apex.error();
   }
 
   // 5. And activate new one.
-  LOG(INFO) << "Activating the new APEX " << current_package << " from "
+  LOG(INFO) << "Activating the new APEX " << apex_name << " from "
             << new_apex->GetPath();
-  auto activate_status =
-      ActivatePackageImpl(*new_apex, loop::kFreeLoopId, new_id,
-                          /* reuse_device= */ false);
-  if (!activate_status.ok()) {
-    return activate_status.error();
+  if (auto st = ActivatePackageImpl(*new_apex, loop::kFreeLoopId, new_id,
+                                    /*reuse_device=*/false);
+      !st.ok()) {
+    return Error() << "Failed to activate new apex: " << st.error();
   }
 
   // Accept the install. Disable all ScopeGuards.
@@ -3761,6 +3766,7 @@ Result<ApexFile> InstallPackage(const std::string& package_path, bool force)
 
   // 6. Now we can unlink old APEX if it's not pre-installed.
   if (!ApexFileRepository::GetInstance().IsPreInstalledApex(*cur_apex)) {
+    LOG(INFO) << "Deleting old apex from " << cur_apex->GetPath();
     if (auto image = GetImageManager()->FindPinnedApex(*cur_apex); image) {
       if (auto st = GetImageManager()->UnmapAndDeleteImage(*image); !st.ok()) {
         LOG(ERROR) << st.error();
