@@ -265,7 +265,7 @@ Result<std::unique_ptr<uint8_t[]>> VerifyVbMeta(const ApexFile& apex,
                                                 const AvbFooter& footer,
                                                 const std::string& public_key) {
   if (footer.vbmeta_size > kVbMetaMaxSize) {
-    return Errorf("VbMeta size in footer exceeds kVbMetaMaxSize.");
+    return Error() << "VbMeta size in footer exceeds kVbMetaMaxSize.";
   }
 
   if (!apex.GetImageOffset()) {
@@ -351,7 +351,8 @@ Result<ApexVerityData> ApexFile::VerifyApexVerity(
 
   unique_fd fd(open(GetPath().c_str(), O_RDONLY | O_CLOEXEC));
   if (fd.get() == -1) {
-    return ErrnoError() << "Failed to open " << GetPath();
+    return ErrnoError() << "Failed to open " << GetPath()
+                        << " for verity check";
   }
 
   Result<std::unique_ptr<AvbFooter>> footer = GetAvbFooter(*this, fd);
