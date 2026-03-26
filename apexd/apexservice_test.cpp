@@ -1536,7 +1536,9 @@ TEST(ApexdTest, ApexIsAPrivateMountPoint) {
 }
 
 static const std::vector<std::string> kEarlyApexes = {
+#ifndef RELEASE_DEPRECATE_RUNTIME_APEX
     "/apex/com.android.runtime",
+#endif
     "/apex/com.android.tzdata",
 };
 

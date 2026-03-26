@@ -170,7 +170,9 @@ static constexpr size_t kLoopDeviceSetupAttempts = 3u;
     ([]() {
       std::vector<std::string> ret = {
           "com.android.i18n",
+#ifndef RELEASE_DEPRECATE_RUNTIME_APEX
           "com.android.runtime",
+#endif
           "com.android.tzdata",
 #ifdef RELEASE_AVF_ENABLE_EARLY_VM
           "com.android.virt",
@@ -519,7 +521,7 @@ Result<MountedApexData> MountPackageImpl(const ApexFile& apex,
     mount_device = linear_dev.GetDevPath();
   } else if (IsFileBackedMountEnabled() && fs_type == "erofs" &&
              !mount_on_verity) {
-    mount_options = std::format("directio,fsoffset={}", *apex.GetImageOffset());
+    mount_options = std::format("fsoffset={}", *apex.GetImageOffset());
     mount_device = apex.GetPath();
 #if COM_ANDROID_APEX_FLAGS_MICRODROID_NO_LOOP_DEVICE
   } else if (instance.IsBlockApex(apex)) {
